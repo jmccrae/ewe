@@ -2,6 +2,7 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::slice::Iter;
+use xml::reader::XmlEvent;
 
 /// A list which can be rapidly accessed by key
 pub struct KeyList<K,V> {
@@ -168,6 +169,7 @@ impl std::fmt::Display for Lexicon {
     }
 }
 
+#[derive(Clone,PartialEq,Debug)]
 pub struct LexicalEntry { 
     pub id : String,
     pub lemma : Lemma,
@@ -205,10 +207,10 @@ impl LexicalEntry {
       <Lemma writtenForm=\"{}\" partOfSpeech=\"{}\"/>
 ", self.id, escape_xml_lit(&self.lemma.written_form), self.lemma.part_of_speech.value())?;
         for form in self.forms.iter() {
-            //form.to_xml(xml_file, part)?;
+            form.to_xml(xml_file)?;
         }
         for sense in self.senses.iter() {
-            //sense.to_xml(xml_file, comments)?;
+            sense.to_xml(xml_file, comments)?;
         }
         for synbeh in self.syntactic_behaviours.iter() {
             //synbeh.to_xml(xml_file)?;
@@ -217,75 +219,87 @@ impl LexicalEntry {
 ")
     }
 }
-//
-//
+
+#[derive(Clone,PartialEq,Debug)]
 pub struct Lemma {
     pub written_form : String,
     pub part_of_speech: PartOfSpeech
 }
 
-//class Lemma:
-//    """The lemma gives the written form and part of speech of an entry"""
-//    def __init__(self, written_form, part_of_speech):
-//        self.written_form = written_form
-//        self.part_of_speech = part_of_speech
-//
+impl Lemma {
+    fn new(written_form : String, part_of_speech : PartOfSpeech) -> Lemma {
+        Lemma { written_form, part_of_speech }
+    }
+}
+
+#[derive(Clone,PartialEq,Debug)]
 pub struct Form {
     pub written_form : String
 }
-//class Form:
-//    """The form gives an inflected form of the entry"""
-//    def __init__(self, written_form):
-//        self.written_form = written_form
-//
-//    def to_xml(self, xml_file):
-//        xml_file.write("""      <Form writtenForm="%s"/>
-//""" % escape_xml_lit(self.written_form))
-//
-//
+
+impl Form {
+    fn new(written_form : String) -> Form {
+        Form { written_form }
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W) -> std::io::Result<()> {
+        write!(xml_file, "      <Form writtenForm=\"{}\"/>
+", self.written_form)
+    }
+}
+
+#[derive(Clone,PartialEq,Debug)]
 pub struct Sense {
     pub id : String,
     pub synset : String,
     pub n : usize,
-    pub sense_key : Option<String>
+    pub sense_key : Option<String>,
+    pub sense_relations : Vec<SenseRelation>,
+    pub adjposition : Option<String>
     
 }
-//class Sense:
-//    """The sense links an entry to a synset"""
-//    def __init__(self, id, synset, sense_key, n=-1, adjposition=None):
-//        self.id = id
-//        self.synset = synset
-//        self.n = n
-//        self.sense_key = sense_key
-//        self.sense_relations = []
-//        self.adjposition = adjposition
-//
-//    def add_sense_relation(self, relation):
-//        self.sense_relations.append(relation)
-//
-//    def to_xml(self, xml_file, comments):
-//        if self.adjposition:
-//            n_str = " adjposition=\"%s\"" % self.adjposition
-//        else:
-//            n_str = ""
-//        if self.n >= 0:
-//            n_str = "%s n=\"%d\"" % (n_str, self.n)
-//        if self.sense_key:
-//            sk_str = " dc:identifier=\"%s\"" % escape_xml_lit(self.sense_key)
-//        else:
-//            sk_str = ""
-//        if len(self.sense_relations) > 0:
-//            xml_file.write("""      <Sense id="%s"%s synset="%s"%s>
-//""" % (self.id, n_str, self.synset, sk_str))
-//            for rel in self.sense_relations:
-//                rel.to_xml(xml_file, comments)
-//            xml_file.write("""        </Sense>
-//""")
-//        else:
-//            xml_file.write("""      <Sense id="%s"%s synset="%s"%s/>
-//""" % (self.id, n_str, self.synset, sk_str))
-//
-//
+
+impl Sense {
+    fn new(id : String, synset : String, sense_key : Option<String>,
+        n : usize, adjposition : Option<String>) -> Sense {
+        Sense { id, synset, sense_key, n, sense_relations: Vec::new(), adjposition }
+    }
+
+    fn add_sense_relation(&mut self, relation : SenseRelation) {
+        self.sense_relations.push(relation);
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, comments : 
+        &HashMap<String, String>) -> std::io::Result<()> {
+        let n_str = match self.adjposition {
+            Some(ref ap) => format!(" adjposition=\"{}\"", ap),
+            None => "".to_owned()
+        };
+        let n_str = if self.n >= 0 {
+            format!("{} n=\"{}\"", n_str, self.n)
+        } else {
+            n_str
+        };
+        let sk_str = match self.sense_key {
+            Some(ref sk) => format!(" dc:identifier=\"{}\"", escape_xml_lit(sk)),
+            None => "".to_owned()
+        };
+        if self.sense_relations.len() > 0 {
+            write!(xml_file, "      <Sense id=\"{}\"{} synset=\"{}\"{}>
+", self.id, n_str, self.synset, sk_str)?;
+            for rel in self.sense_relations.iter() {
+                //rel.to_xml(xml_file, comments)?;
+            }
+            write!(xml_file, "        </Sense>
+")
+        } else {
+            write!(xml_file, "      <Sense id=\"{}\"{} synset=\"{}\"{}/>
+", self.id, n_str, self.synset, sk_str)
+        }
+    }
+}
+
+#[derive(Clone,PartialEq,Debug)]
 pub struct Synset {
     pub id : String,
     pub ili : String,
@@ -297,137 +311,183 @@ pub struct Synset {
     pub examples : Vec<Example>,
     pub source : Option<String>
 }
-//class Synset:
-//    """The synset is a collection of synonyms"""
-//    def __init__(self, id, ili, part_of_speech, lex_name, source=None):
-//        self.id = id
-//        self.ili = ili
-//        self.part_of_speech = part_of_speech
-//        self.lex_name = lex_name
-//        self.definitions = []
-//        self.ili_definition = None
-//        self.synset_relations = []
-//        self.examples = []
-//        self.source = source
-//
-//    def add_definition(self, definition, is_ili=False):
-//        if is_ili:
-//            if not definition in self.definitions:
-//                self.definitions.append(definition)
-//            self.ili_definition = definition
-//        else:
-//            self.definitions.append(definition)
-//
-//    def add_synset_relation(self, relation):
-//        self.synset_relations.append(relation)
-//
-//    def add_example(self, example):
-//        self.examples.append(example)
-//
-//    def to_xml(self, xml_file, comments):
-//        if self.id in comments:
-//            xml_file.write("""    <!-- %s -->
-//""" % comments[self.id])
-//        source_tag = ""
-//        if self.source:
-//            source_tag = " dc:source=\"%s\"" % (self.source)
-//        xml_file.write("""    <Synset id="%s" ili="%s" partOfSpeech="%s" dc:subject="%s"%s>
-//""" % (self.id, self.ili, self.part_of_speech.value, self.lex_name, source_tag))
-//        for defn in self.definitions:
-//            defn.to_xml(xml_file)
-//        if self.ili_definition:
-//            self.ili_definition.to_xml(xml_file, True)
-//        for rel in self.synset_relations:
-//            rel.to_xml(xml_file, comments)
-//        for ex in self.examples:
-//            ex.to_xml(xml_file)
-//        xml_file.write("""    </Synset>
-//""")
-//
-//
-pub struct Definition {}
-//class Definition:
-//    def __init__(self, text):
-//        self.text = text
-//
-//    def to_xml(self, xml_file, is_ili=False):
-//        if is_ili:
-//            xml_file.write("""      <ILIDefinition>%s</ILIDefinition>
-//""" % escape_xml_lit(self.text))
-//        else:
-//            xml_file.write("""      <Definition>%s</Definition>
-//""" % escape_xml_lit(self.text))
-//
-//    def __eq__(self, other):
-//        return self.text == other.text
-//
-//
-pub struct Example {}
-//class Example:
-//    def __init__(self, text, source=None):
-//        self.text = text
-//        self.source = source
-//
-//    def to_xml(self, xml_file):
-//        if self.source:
-//            xml_file.write("""      <Example dc:source=\"%s\">%s</Example>
-//""" % (self.source, escape_xml_lit(self.text)))
-//
-//        else:
-//            xml_file.write("""      <Example>%s</Example>
-//""" % escape_xml_lit(self.text))
-//
-//
-pub struct SynsetRelation {}
-//class SynsetRelation:
-//    def __init__(self, target, rel_type):
-//        self.target = target
-//        self.rel_type = rel_type
-//
-//    def to_xml(self, xml_file, comments):
-//        xml_file.write("""      <SynsetRelation relType="%s" target="%s"/>""" % 
-//                (self.rel_type.value, self.target))
-//        if self.target in comments:
-//            xml_file.write(""" <!-- %s -->
-//""" % comments[self.target])
-//        else:
-//            xml_file.write("\n")
-//
-pub struct SenseRelation {}
-//class SenseRelation:
-//    def __init__(self, target, rel_type):
-//        self.target = target
-//        self.rel_type = rel_type
-//
-//    def to_xml(self, xml_file, comments):
-//        xml_file.write("""        <SenseRelation relType="%s" target="%s"/>""" % 
-//                (self.rel_type.value, self.target))
-//        if self.target in comments:
-//            xml_file.write(""" <!-- %s -->
-//""" % comments[self.target])
-//        else:
-//            xml_file.write("\n")
-//
-//
+
+impl Synset {
+    pub fn new(id : String, ili : String, part_of_speech : PartOfSpeech, 
+        lex_name : Option<String>, source : Option<String>) -> Synset {
+        Synset {
+            id, ili, part_of_speech, lex_name,
+            definitions: Vec::new(),
+            ili_definition: None,
+            synset_relations: Vec::new(),
+            examples: Vec::new(),
+            source
+        }
+    }
+
+    pub fn add_definition(&mut self, definition : Definition) {
+        self.definitions.push(definition);
+    }
+
+    pub fn add_ili_definition(&mut self, definition : Definition) {
+        if !self.definitions.contains(&definition) {
+            self.definitions.push(definition.clone());
+        }
+        self.ili_definition = Some(definition);
+    }
+
+    pub fn add_synset_relation(&mut self, relation : SynsetRelation) {
+        self.synset_relations.push(relation);
+    }
+
+    pub fn add_example(&mut self, example : Example) {
+        self.examples.push(example);
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, comments : 
+        &HashMap<String, String>) -> std::io::Result<()> {
+        if comments.contains_key(&self.id) {
+            write!(xml_file, "    <!-- {} -->
+", comments[&self.id])?;
+        }
+        let source_tag = match self.source {
+            Some(ref s) => format!(" dc:source=\"{}\"", s),
+            None => "".to_owned()
+        };
+        let lex_name = match self.lex_name {
+            Some(ref s) => s,
+            None => ""
+        };
+        write!(xml_file, "    <Synset id=\"{}\" ili=\"{}\" partOfSpeech=\"{}\" dc:subject=\"{}\"{}>
+", self.id, self.ili, self.part_of_speech.value(), 
+            lex_name, source_tag)?;
+        for defn in self.definitions.iter() {
+            defn.to_xml(xml_file, false)?;
+        }
+        match self.ili_definition {
+            Some(ref d) => d.to_xml(xml_file, true)?,
+            None => {}
+        }
+        for rel in self.synset_relations.iter() {
+            //rel.to_xml(xml_file, comments)?;
+        }
+        for ex in self.examples.iter() {
+            //ex.to_xml(xml_file)?;
+        }
+        write!(xml_file, "    </Synset>
+")
+    }
+}
+
+#[derive(Clone,PartialEq,Debug)]
+pub struct Definition {
+    pub text : String
+}
+
+impl Definition {
+    pub fn new(text : String) -> Definition {
+        Definition { text } 
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, is_ili : bool) -> std::io::Result<()> {
+        if is_ili {
+            write!(xml_file, "      <ILIDefinition>{}</ILIDefinition>
+", escape_xml_lit(&self.text))
+        } else {
+            write!(xml_file, "      <Definition>{}</Definition>
+", escape_xml_lit(&self.text))
+        }
+    }
+}
+
+
+#[derive(Clone,PartialEq,Debug)]
+pub struct Example {
+    pub text : String,
+    pub source : Option<String>
+}
+
+impl Example {
+    pub fn new(text : String, source : Option<String>) -> Example {
+        Example { text, source }
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W) -> std::io::Result<()> {
+        match self.source {
+            Some(ref src) => write!(xml_file, "      <Example dc:source=\"{}\">{}</Example>
+", src, escape_xml_lit(&self.text)),
+            None => write!(xml_file, "      <Example>{}</Example>
+", escape_xml_lit(&self.text))
+        }
+    }
+}
+
+
+#[derive(Clone,PartialEq,Debug)]
+pub struct SynsetRelation {
+    target : String,
+    rel_type : SynsetRelType
+}
+
+impl SynsetRelation {
+    pub fn new(target : String, rel_type : SynsetRelType) -> SynsetRelation {
+        SynsetRelation { target, rel_type }
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, comments : &HashMap<String, String>) -> std::io::Result<()> {
+        write!(xml_file, "      <SynsetRelation relType=\"{}\" target=\"{}\"/>",
+                self.rel_type.value(), self.target)?;
+        if comments.contains_key(&self.target) {
+            write!(xml_file, " <!-- {} -->
+", comments[&self.target])
+        } else {
+            write!(xml_file, "\n")
+        }
+    }
+}
+
+
+#[derive(Clone,PartialEq,Debug)]
+pub struct SenseRelation {
+    target : String,
+    rel_type : SenseRelType
+}
+
+impl SenseRelation {
+    pub fn new(target : String, rel_type : SenseRelType) -> SenseRelation {
+        SenseRelation { target, rel_type }
+    }
+
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, comments : &HashMap<String, String>) -> std::io::Result<()> {
+        write!(xml_file, "        <SenseRelation relType=\"{}\" target=\"{}\"/>",
+                self.rel_type.value(), self.target)?;
+        match comments.get(&self.target) {
+            Some(c) => write!(xml_file, " <!-- {} -->
+", c),
+            None => write!(xml_file, "\n")
+        }
+    }
+}
+
+
+#[derive(Clone,PartialEq,Debug)]
 pub struct SyntacticBehaviour {
     pub subcategorization_frame : String,
     pub senses : Vec<String>
 }
-//class SyntacticBehaviour:
-//    def __init__(self, subcategorization_frame, senses):
-//        if not isinstance(subcategorization_frame, str):
-//            raise "Syntactic Behaviour is not string" + str(subcategorization_frame)
-//        self.subcategorization_frame = subcategorization_frame
-//        self.senses = senses
-//
-//    def to_xml(self, xml_file):
-//        xml_file.write("""      <SyntacticBehaviour subcategorizationFrame="%s" senses="%s"/>
-//""" % (escape_xml_lit(self.subcategorization_frame), " ".join(self.senses)))
-//
-//    def __repr__(self):
-//        return "SyntacticBehaviour(%s, %s)" % (self.subcategorization_frame, " ".join(self.senses))
-//
-//
+
+impl SyntacticBehaviour {
+    pub fn new(subcategorization_frame : String, senses : Vec<String>) -> SyntacticBehaviour {
+        SyntacticBehaviour { subcategorization_frame, senses }
+    }
+    
+    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W) -> std::io::Result<()> {
+        write!(xml_file, "      <SyntacticBehaviour subcategorizationFrame=\"{}\" senses=\"{}\"/>
+", escape_xml_lit(&self.subcategorization_frame), self.senses.join(" "))
+    }
+}
+
+#[derive(Clone,PartialEq,Debug)]
 pub enum PartOfSpeech {
     Noun,
     Verb,
@@ -457,199 +517,318 @@ impl PartOfSpeech {
         }
     }
 }
-//
-//def equal_pos(pos1, pos2):
-//    return (pos1 == pos2 
-//            or pos1 == PartOfSpeech.ADJECTIVE and pos2 == PartOfSpeech.ADJECTIVE_SATELLITE
-//            or pos2 == PartOfSpeech.ADJECTIVE and pos1 == PartOfSpeech.ADJECTIVE_SATELLITE)
-//
-pub enum SynsetRelType { }
-//class SynsetRelType(Enum):
-//    AGENT = 'agent'
-//    ALSO = 'also'
-//    ATTRIBUTE = 'attribute'
-//    BE_IN_STATE = 'be_in_state'
-//    CAUSES = 'causes'
-//    CLASSIFIED_BY = 'classified_by'
-//    CLASSIFIES = 'classifies'
-//    CO_AGENT_INSTRUMENT = 'co_agent_instrument'
-//    CO_AGENT_PATIENT = 'co_agent_patient'
-//    CO_AGENT_RESULT = 'co_agent_result'
-//    CO_INSTRUMENT_AGENT = 'co_instrument_agent'
-//    CO_INSTRUMENT_PATIENT = 'co_instrument_patient'
-//    CO_INSTRUMENT_RESULT = 'co_instrument_result'
-//    CO_PATIENT_AGENT = 'co_patient_agent'
-//    CO_PATIENT_INSTRUMENT = 'co_patient_instrument'
-//    CO_RESULT_AGENT = 'co_result_agent'
-//    CO_RESULT_INSTRUMENT = 'co_result_instrument'
-//    CO_ROLE = 'co_role'
-//    DIRECTION = 'direction'
-//    DOMAIN_REGION = 'domain_region'
-//    DOMAIN_TOPIC = 'domain_topic'
-//    EXEMPLIFIES = 'exemplifies'
-//    ENTAILS = 'entails'
-//    EQ_SYNONYM = 'eq_synonym'
-//    HAS_DOMAIN_REGION = 'has_domain_region'
-//    HAS_DOMAIN_TOPIC = 'has_domain_topic'
-//    IS_EXEMPLIFIED_BY = 'is_exemplified_by'
-//    HOLO_LOCATION = 'holo_location'
-//    HOLO_MEMBER = 'holo_member'
-//    HOLO_PART = 'holo_part'
-//    HOLO_PORTION = 'holo_portion'
-//    HOLO_SUBSTANCE = 'holo_substance'
-//    HOLONYM = 'holonym'
-//    HYPERNYM = 'hypernym'
-//    HYPONYM = 'hyponym'
-//    IN_MANNER = 'in_manner'
-//    INSTANCE_HYPERNYM = 'instance_hypernym'
-//    INSTANCE_HYPONYM = 'instance_hyponym'
-//    INSTRUMENT = 'instrument'
-//    INVOLVED = 'involved'
-//    INVOLVED_AGENT = 'involved_agent'
-//    INVOLVED_DIRECTION = 'involved_direction'
-//    INVOLVED_INSTRUMENT = 'involved_instrument'
-//    INVOLVED_LOCATION = 'involved_location'
-//    INVOLVED_PATIENT = 'involved_patient'
-//    INVOLVED_RESULT = 'involved_result'
-//    INVOLVED_SOURCE_DIRECTION = 'involved_source_direction'
-//    INVOLVED_TARGET_DIRECTION = 'involved_target_direction'
-//    IS_CAUSED_BY = 'is_caused_by'
-//    IS_ENTAILED_BY = 'is_entailed_by'
-//    LOCATION = 'location'
-//    MANNER_OF = 'manner_of'
-//    MERO_LOCATION = 'mero_location'
-//    MERO_MEMBER = 'mero_member'
-//    MERO_PART = 'mero_part'
-//    MERO_PORTION = 'mero_portion'
-//    MERO_SUBSTANCE = 'mero_substance'
-//    MERONYM = 'meronym'
-//    SIMILAR = 'similar'
-//    OTHER = 'other'
-//    PATIENT = 'patient'
-//    RESTRICTED_BY = 'restricted_by'
-//    RESTRICTS = 'restricts'
-//    RESULT = 'result'
-//    ROLE = 'role'
-//    SOURCE_DIRECTION = 'source_direction'
-//    STATE_OF = 'state_of'
-//    TARGET_DIRECTION = 'target_direction'
-//    SUBEVENT = 'subevent'
-//    IS_SUBEVENT_OF = 'is_subevent_of'
-//    ANTONYM = 'antonym'
-//
-//inverse_synset_rels = {
-//        SynsetRelType.HYPERNYM: SynsetRelType.HYPONYM,
-//        SynsetRelType.HYPONYM: SynsetRelType.HYPERNYM,
-//        SynsetRelType.INSTANCE_HYPERNYM: SynsetRelType.INSTANCE_HYPONYM,
-//        SynsetRelType.INSTANCE_HYPONYM: SynsetRelType.INSTANCE_HYPERNYM,
-//        SynsetRelType.MERONYM: SynsetRelType.HOLONYM,
-//        SynsetRelType.HOLONYM: SynsetRelType.MERONYM,
-//        SynsetRelType.MERO_LOCATION: SynsetRelType.HOLO_LOCATION,
-//        SynsetRelType.HOLO_LOCATION: SynsetRelType.MERO_LOCATION,
-//        SynsetRelType.MERO_MEMBER: SynsetRelType.HOLO_MEMBER,
-//        SynsetRelType.HOLO_MEMBER: SynsetRelType.MERO_MEMBER,
-//        SynsetRelType.MERO_PART: SynsetRelType.HOLO_PART,
-//        SynsetRelType.HOLO_PART: SynsetRelType.MERO_PART,
-//        SynsetRelType.MERO_PORTION: SynsetRelType.HOLO_PORTION,
-//        SynsetRelType.HOLO_PORTION: SynsetRelType.MERO_PORTION,
-//        SynsetRelType.MERO_SUBSTANCE: SynsetRelType.HOLO_SUBSTANCE,
-//        SynsetRelType.HOLO_SUBSTANCE: SynsetRelType.MERO_SUBSTANCE,
-//        SynsetRelType.BE_IN_STATE: SynsetRelType.STATE_OF,
-//        SynsetRelType.STATE_OF: SynsetRelType.BE_IN_STATE,
-//        SynsetRelType.CAUSES: SynsetRelType.IS_CAUSED_BY,
-//        SynsetRelType.IS_CAUSED_BY: SynsetRelType.CAUSES,
-//        SynsetRelType.SUBEVENT: SynsetRelType.IS_SUBEVENT_OF,
-//        SynsetRelType.IS_SUBEVENT_OF: SynsetRelType.SUBEVENT,
-//        SynsetRelType.MANNER_OF: SynsetRelType.IN_MANNER,
-//        SynsetRelType.IN_MANNER: SynsetRelType.MANNER_OF,
-//        SynsetRelType.RESTRICTS: SynsetRelType.RESTRICTED_BY,
-//        SynsetRelType.RESTRICTED_BY: SynsetRelType.RESTRICTS,
-//        SynsetRelType.CLASSIFIES: SynsetRelType.CLASSIFIED_BY,
-//        SynsetRelType.CLASSIFIED_BY: SynsetRelType.CLASSIFIES,
-//        SynsetRelType.ENTAILS: SynsetRelType.IS_ENTAILED_BY,
-//        SynsetRelType.IS_ENTAILED_BY: SynsetRelType.ENTAILS,
-//        SynsetRelType.DOMAIN_REGION: SynsetRelType.HAS_DOMAIN_REGION,
-//        SynsetRelType.HAS_DOMAIN_REGION: SynsetRelType.DOMAIN_REGION,
-//        SynsetRelType.DOMAIN_TOPIC: SynsetRelType.HAS_DOMAIN_TOPIC,
-//        SynsetRelType.HAS_DOMAIN_TOPIC: SynsetRelType.DOMAIN_TOPIC,
-//        SynsetRelType.EXEMPLIFIES: SynsetRelType.IS_EXEMPLIFIED_BY,
-//        SynsetRelType.IS_EXEMPLIFIED_BY: SynsetRelType.EXEMPLIFIES,
-//        SynsetRelType.ROLE: SynsetRelType.INVOLVED,
-//        SynsetRelType.INVOLVED: SynsetRelType.ROLE,
-//        SynsetRelType.AGENT: SynsetRelType.INVOLVED_AGENT,
-//        SynsetRelType.INVOLVED_AGENT: SynsetRelType.AGENT,
-//        SynsetRelType.PATIENT: SynsetRelType.INVOLVED_PATIENT,
-//        SynsetRelType.INVOLVED_PATIENT: SynsetRelType.PATIENT,
-//        SynsetRelType.RESULT: SynsetRelType.INVOLVED_RESULT,
-//        SynsetRelType.INVOLVED_RESULT: SynsetRelType.RESULT,
-//        SynsetRelType.INSTRUMENT: SynsetRelType.INVOLVED_INSTRUMENT,
-//        SynsetRelType.INVOLVED_INSTRUMENT: SynsetRelType.INSTRUMENT,
-//        SynsetRelType.LOCATION: SynsetRelType.INVOLVED_LOCATION,
-//        SynsetRelType.INVOLVED_LOCATION: SynsetRelType.LOCATION,
-//        SynsetRelType.DIRECTION: SynsetRelType.INVOLVED_DIRECTION,
-//        SynsetRelType.INVOLVED_DIRECTION: SynsetRelType.DIRECTION,
-//        SynsetRelType.TARGET_DIRECTION: SynsetRelType.INVOLVED_TARGET_DIRECTION,
-//        SynsetRelType.INVOLVED_TARGET_DIRECTION: SynsetRelType.TARGET_DIRECTION,
-//        SynsetRelType.SOURCE_DIRECTION: SynsetRelType.INVOLVED_SOURCE_DIRECTION,
-//        SynsetRelType.INVOLVED_SOURCE_DIRECTION: SynsetRelType.SOURCE_DIRECTION,
-//        SynsetRelType.CO_AGENT_PATIENT: SynsetRelType.CO_PATIENT_AGENT,
-//        SynsetRelType.CO_PATIENT_AGENT: SynsetRelType.CO_AGENT_PATIENT,
-//        SynsetRelType.CO_AGENT_INSTRUMENT: SynsetRelType.CO_INSTRUMENT_AGENT,
-//        SynsetRelType.CO_INSTRUMENT_AGENT: SynsetRelType.CO_AGENT_INSTRUMENT,
-//        SynsetRelType.CO_AGENT_RESULT: SynsetRelType.CO_RESULT_AGENT,
-//        SynsetRelType.CO_RESULT_AGENT: SynsetRelType.CO_AGENT_RESULT,
-//        SynsetRelType.CO_PATIENT_INSTRUMENT: SynsetRelType.CO_INSTRUMENT_PATIENT,
-//        SynsetRelType.CO_INSTRUMENT_PATIENT: SynsetRelType.CO_PATIENT_INSTRUMENT,
-//        SynsetRelType.CO_RESULT_INSTRUMENT: SynsetRelType.CO_INSTRUMENT_RESULT,
-//        SynsetRelType.CO_INSTRUMENT_RESULT: SynsetRelType.CO_RESULT_INSTRUMENT,
-//        SynsetRelType.ANTONYM: SynsetRelType.ANTONYM,
-//        SynsetRelType.EQ_SYNONYM: SynsetRelType.EQ_SYNONYM,
-//        SynsetRelType.SIMILAR: SynsetRelType.SIMILAR,
-//#        SynsetRelType.ALSO: SynsetRelType.ALSO,
-//        SynsetRelType.ATTRIBUTE: SynsetRelType.ATTRIBUTE,
-//        SynsetRelType.CO_ROLE: SynsetRelType.CO_ROLE
-//        }
-//
-//class SenseRelType(Enum):
-//    ANTONYM = 'antonym'
-//    ALSO = 'also'
-//    PARTICIPLE = 'participle'
-//    PERTAINYM = 'pertainym'
-//    DERIVATION = 'derivation'
-//    DOMAIN_TOPIC = 'domain_topic'
-//    HAS_DOMAIN_TOPIC = 'has_domain_topic'
-//    DOMAIN_REGION = 'domain_region'
-//    HAS_DOMAIN_REGION = 'has_domain_region'
-//    EXEMPLIFIES = 'exemplifies'
-//    IS_EXEMPLIFIED_BY = 'is_exemplified_by'
-//    SIMILAR = 'similar'
-//    OTHER = 'other'
-//    
-//inverse_sense_rels = {
-//        SenseRelType.DOMAIN_REGION: SenseRelType.HAS_DOMAIN_REGION,
-//        SenseRelType.HAS_DOMAIN_REGION: SenseRelType.DOMAIN_REGION,
-//        SenseRelType.DOMAIN_TOPIC: SenseRelType.HAS_DOMAIN_TOPIC,
-//        SenseRelType.HAS_DOMAIN_TOPIC: SenseRelType.DOMAIN_TOPIC,
-//        SenseRelType.EXEMPLIFIES: SenseRelType.IS_EXEMPLIFIED_BY,
-//        SenseRelType.IS_EXEMPLIFIED_BY: SenseRelType.EXEMPLIFIES,
-//        SenseRelType.ANTONYM: SenseRelType.ANTONYM,
-//        SenseRelType.SIMILAR: SenseRelType.SIMILAR,
-//        SenseRelType.ALSO: SenseRelType.ALSO,
-//        SenseRelType.DERIVATION: SenseRelType.DERIVATION,
-//        }
-//
-//class WordNetContentHandler(ContentHandler):
-//    def __init__(self):
-//        ContentHandler.__init__(self)
-//        self.lexicon = None
-//        self.entry = None
-//        self.sense = None
-//        self.defn = None
-//        self.ili_defn = None
-//        self.example = None
-//        self.example_source = None
-//        self.synset = None
-//
+
+pub fn equal_pos(pos1 : PartOfSpeech, pos2 : PartOfSpeech) -> bool {
+    return pos1 == pos2 
+            || pos1 == PartOfSpeech::Adjective && pos2 == PartOfSpeech::AdjectiveSatellite
+            || pos2 == PartOfSpeech::Adjective && pos1 == PartOfSpeech::AdjectiveSatellite;
+}
+
+#[derive(Clone,PartialEq,Debug,Eq,Hash)]
+pub enum SynsetRelType { 
+    Agent,
+    Also,
+    Attribute,
+    BeInState,
+    Causes,
+    ClassifiedBy,
+    Classifies,
+    CoAgentInstrument,
+    CoAgentPatient,
+    CoAgentResult,
+    CoInstrumentAgent,
+    CoInstrumentPatient,
+    CoInstrumentResult,
+    CoPatientAgent,
+    CoPatientInstrument,
+    CoResultAgent,
+    CoResultInstrument,
+    CoRole,
+    Direction,
+    DomainRegion,
+    DomainTopic,
+    Exemplifies,
+    Entails,
+    EqSynonym,
+    HasDomainRegion,
+    HasDomainTopic,
+    IsExemplifiedBy,
+    HoloLocation,
+    HoloMember,
+    HoloPart,
+    HoloPortion,
+    HoloSubstance,
+    Holonym,
+    Hypernym,
+    Hyponym,
+    InManner,
+    InstanceHypernym,
+    InstanceHyponym,
+    Instrument,
+    Involved,
+    InvolvedAgent,
+    InvolvedDirection,
+    InvolvedInstrument,
+    InvolvedLocation,
+    InvolvedPatient,
+    InvolvedResult,
+    InvolvedSourceDirection,
+    InvolvedTargetDirection,
+    IsCausedBy,
+    IsEntailedBy,
+    Location,
+    MannerOf,
+    MeroLocation,
+    MeroMember,
+    MeroPart,
+    MeroPortion,
+    MeroSubstance,
+    Meronym,
+    Similar,
+    Other,
+    Patient,
+    RestrictedBy,
+    Restricts,
+    Result,
+    Role,
+    SourceDirection,
+    StateOf,
+    TargetDirection,
+    Subevent,
+    IsSubeventOf,
+    Antonym
+}
+
+impl SynsetRelType {
+    pub fn value(&self) -> &'static str {
+        match self {
+            Agent => "agent",
+            Also => "also",
+            Attribute => "attribute",
+            BeInState => "be_in_state",
+            Causes => "causes",
+            ClassifiedBy => "classified_by",
+            Classifies => "classifies",
+            CoAgentInstrument => "co_agent_instrument",
+            CoAgentPatient => "co_agent_patient",
+            CoAgentResult => "co_agent_result",
+            CoInstrumentAgent => "co_instrument_agent",
+            CoInstrumentPatient => "co_instrument_patient",
+            CoInstrumentResult => "co_instrument_result",
+            CoPatientAgent => "co_patient_agent",
+            CoPatientInstrument => "co_patient_instrument",
+            CoResultAgent => "co_result_agent",
+            CoResultInstrument => "co_result_instrument",
+            CoRole => "co_role",
+            Direction => "direction",
+            DomainRegion => "domain_region",
+            DomainTopic => "domain_topic",
+            Exemplifies => "exemplifies",
+            Entails => "entails",
+            EqSynonym => "eq_synonym",
+            HasDomainRegion => "has_domain_region",
+            HasDomainTopic => "has_domain_topic",
+            IsExemplifiedBy => "is_exemplified_by",
+            HoloLocation => "holo_location",
+            HoloMember => "holo_member",
+            HoloPart => "holo_part",
+            HoloPortion => "holo_portion",
+            HoloSubstance => "holo_substance",
+            Holonym => "holonym",
+            Hypernym => "hypernym",
+            Hyponym => "hyponym",
+            InManner => "in_manner",
+            InstanceHypernym => "instance_hypernym",
+            InstanceHyponym => "instance_hyponym",
+            Instrument => "instrument",
+            Involved => "involved",
+            InvolvedAgent => "involved_agent",
+            InvolvedDirection => "involved_direction",
+            InvolvedInstrument => "involved_instrument",
+            InvolvedLocation => "involved_location",
+            InvolvedPatient => "involved_patient",
+            InvolvedResult => "involved_result",
+            InvolvedSourceDirection => "involved_source_direction",
+            InvolvedTargetDirection => "involved_target_direction",
+            IsCausedBy => "is_caused_by",
+            IsEntailedBy => "is_entailed_by",
+            Location => "location",
+            MannerOf => "manner_of",
+            MeroLocation => "mero_location",
+            MeroMember => "mero_member",
+            MeroPart => "mero_part",
+            MeroPortion => "mero_portion",
+            MeroSubstance => "mero_substance",
+            Meronym => "meronym",
+            Similar => "similar",
+            Other => "other",
+            Patient => "patient",
+            RestrictedBy => "restricted_by",
+            Restricts => "restricts",
+            Result => "result",
+            Role => "role",
+            SourceDirection => "source_direction",
+            StateOf => "state_of",
+            TargetDirection => "target_direction",
+            Subevent => "subevent",
+            IsSubeventOf => "is_subevent_of",
+            Antonym => "antonym"
+        }
+    }
+}
+
+lazy_static! {
+    static ref INVERSE_SYNSET_RELS : HashMap<SynsetRelType, SynsetRelType> = {
+        let mut map = HashMap::new();
+        map.insert(SynsetRelType::Hypernym, SynsetRelType::Hyponym);
+        map.insert(SynsetRelType::Hyponym, SynsetRelType::Hypernym);
+        map.insert(SynsetRelType::InstanceHypernym, SynsetRelType::InstanceHyponym);
+        map.insert(SynsetRelType::InstanceHyponym, SynsetRelType::InstanceHypernym);
+        map.insert(SynsetRelType::Meronym, SynsetRelType::Holonym);
+        map.insert(SynsetRelType::Holonym, SynsetRelType::Meronym);
+        map.insert(SynsetRelType::MeroLocation, SynsetRelType::HoloLocation);
+        map.insert(SynsetRelType::HoloLocation, SynsetRelType::MeroLocation);
+        map.insert(SynsetRelType::MeroMember, SynsetRelType::HoloMember);
+        map.insert(SynsetRelType::HoloMember, SynsetRelType::MeroMember);
+        map.insert(SynsetRelType::MeroPart, SynsetRelType::HoloPart);
+        map.insert(SynsetRelType::HoloPart, SynsetRelType::MeroPart);
+        map.insert(SynsetRelType::MeroPortion, SynsetRelType::HoloPortion);
+        map.insert(SynsetRelType::HoloPortion, SynsetRelType::MeroPortion);
+        map.insert(SynsetRelType::MeroSubstance, SynsetRelType::HoloSubstance);
+        map.insert(SynsetRelType::HoloSubstance, SynsetRelType::MeroSubstance);
+        map.insert(SynsetRelType::BeInState, SynsetRelType::StateOf);
+        map.insert(SynsetRelType::StateOf, SynsetRelType::BeInState);
+        map.insert(SynsetRelType::Causes, SynsetRelType::IsCausedBy);
+        map.insert(SynsetRelType::IsCausedBy, SynsetRelType::Causes);
+        map.insert(SynsetRelType::Subevent, SynsetRelType::IsSubeventOf);
+        map.insert(SynsetRelType::IsSubeventOf, SynsetRelType::Subevent);
+        map.insert(SynsetRelType::MannerOf, SynsetRelType::InManner);
+        map.insert(SynsetRelType::InManner, SynsetRelType::MannerOf);
+        map.insert(SynsetRelType::Restricts, SynsetRelType::RestrictedBy);
+        map.insert(SynsetRelType::RestrictedBy, SynsetRelType::Restricts);
+        map.insert(SynsetRelType::Classifies, SynsetRelType::ClassifiedBy);
+        map.insert(SynsetRelType::ClassifiedBy, SynsetRelType::Classifies);
+        map.insert(SynsetRelType::Entails, SynsetRelType::IsEntailedBy);
+        map.insert(SynsetRelType::IsEntailedBy, SynsetRelType::Entails);
+        map.insert(SynsetRelType::DomainRegion, SynsetRelType::HasDomainRegion);
+        map.insert(SynsetRelType::HasDomainRegion, SynsetRelType::DomainRegion);
+        map.insert(SynsetRelType::DomainTopic, SynsetRelType::HasDomainTopic);
+        map.insert(SynsetRelType::HasDomainTopic, SynsetRelType::DomainTopic);
+        map.insert(SynsetRelType::Exemplifies, SynsetRelType::IsExemplifiedBy);
+        map.insert(SynsetRelType::IsExemplifiedBy, SynsetRelType::Exemplifies);
+        map.insert(SynsetRelType::Role, SynsetRelType::Involved);
+        map.insert(SynsetRelType::Involved, SynsetRelType::Role);
+        map.insert(SynsetRelType::Agent, SynsetRelType::InvolvedAgent);
+        map.insert(SynsetRelType::InvolvedAgent, SynsetRelType::Agent);
+        map.insert(SynsetRelType::Patient, SynsetRelType::InvolvedPatient);
+        map.insert(SynsetRelType::InvolvedPatient, SynsetRelType::Patient);
+        map.insert(SynsetRelType::Result, SynsetRelType::InvolvedResult);
+        map.insert(SynsetRelType::InvolvedResult, SynsetRelType::Result);
+        map.insert(SynsetRelType::Instrument, SynsetRelType::InvolvedInstrument);
+        map.insert(SynsetRelType::InvolvedInstrument, SynsetRelType::Instrument);
+        map.insert(SynsetRelType::Location, SynsetRelType::InvolvedLocation);
+        map.insert(SynsetRelType::InvolvedLocation, SynsetRelType::Location);
+        map.insert(SynsetRelType::Direction, SynsetRelType::InvolvedDirection);
+        map.insert(SynsetRelType::InvolvedDirection, SynsetRelType::Direction);
+        map.insert(SynsetRelType::TargetDirection, SynsetRelType::InvolvedTargetDirection);
+        map.insert(SynsetRelType::InvolvedTargetDirection, SynsetRelType::TargetDirection);
+        map.insert(SynsetRelType::SourceDirection, SynsetRelType::InvolvedSourceDirection);
+        map.insert(SynsetRelType::InvolvedSourceDirection, SynsetRelType::SourceDirection);
+        map.insert(SynsetRelType::CoAgentPatient, SynsetRelType::CoPatientAgent);
+        map.insert(SynsetRelType::CoPatientAgent, SynsetRelType::CoAgentPatient);
+        map.insert(SynsetRelType::CoAgentInstrument, SynsetRelType::CoInstrumentAgent);
+        map.insert(SynsetRelType::CoInstrumentAgent, SynsetRelType::CoAgentInstrument);
+        map.insert(SynsetRelType::CoAgentResult, SynsetRelType::CoResultAgent);
+        map.insert(SynsetRelType::CoResultAgent, SynsetRelType::CoAgentResult);
+        map.insert(SynsetRelType::CoPatientInstrument, SynsetRelType::CoInstrumentPatient);
+        map.insert(SynsetRelType::CoInstrumentPatient, SynsetRelType::CoPatientInstrument);
+        map.insert(SynsetRelType::CoResultInstrument, SynsetRelType::CoInstrumentResult);
+        map.insert(SynsetRelType::CoInstrumentResult, SynsetRelType::CoResultInstrument);
+        map.insert(SynsetRelType::Antonym, SynsetRelType::Antonym);
+        map.insert(SynsetRelType::EqSynonym, SynsetRelType::EqSynonym);
+        map.insert(SynsetRelType::Similar, SynsetRelType::Similar);
+        map.insert(SynsetRelType::Also, SynsetRelType::Also);
+        map.insert(SynsetRelType::Attribute, SynsetRelType::Attribute);
+        map.insert(SynsetRelType::CoRole, SynsetRelType::CoRole);
+        map
+    };
+}
+
+#[derive(Clone,PartialEq,Debug,Eq,Hash)]
+pub enum SenseRelType {
+    Antonym,
+    Also,
+    Participle,
+    Pertainym,
+    Derivation,
+    DomainTopic,
+    HasDomainTopic,
+    DomainRegion,
+    HasDomainRegion,
+    Exemplifies,
+    IsExemplifiedBy,
+    Similar,
+    Other
+}
+
+impl SenseRelType {
+    pub fn value(&self) -> &'static str {
+        match self { 
+            Antonym => "antonym",
+            Also => "also",
+            Participle => "participle",
+            Pertainym => "pertainym",
+            Derivation => "derivation",
+            Domain_topic => "domain_topic",
+            Has_domain_topic => "has_domain_topic",
+            Domain_region => "domain_region",
+            Has_domain_region => "has_domain_region",
+            Exemplifies => "exemplifies",
+            Is_exemplified_by => "is_exemplified_by",
+            Similar => "similar",
+            Other => "other"
+        }
+    }
+}
+
+lazy_static! {
+    static ref INVERSE_SENSE_RELS : HashMap<SenseRelType, SenseRelType> = {
+        let mut map = HashMap::new();
+        map.insert(SenseRelType::DomainRegion, SenseRelType::HasDomainRegion);
+        map.insert(SenseRelType::HasDomainRegion, SenseRelType::DomainRegion);
+        map.insert(SenseRelType::DomainTopic, SenseRelType::HasDomainTopic);
+        map.insert(SenseRelType::HasDomainTopic, SenseRelType::DomainTopic);
+        map.insert(SenseRelType::Exemplifies, SenseRelType::IsExemplifiedBy);
+        map.insert(SenseRelType::IsExemplifiedBy, SenseRelType::Exemplifies);
+        map.insert(SenseRelType::Antonym, SenseRelType::Antonym);
+        map.insert(SenseRelType::Similar, SenseRelType::Similar);
+        map.insert(SenseRelType::Also, SenseRelType::Also);
+        map.insert(SenseRelType::Derivation, SenseRelType::Derivation);
+        map
+    };
+}
+
+
+struct WordNetContentHandler {
+    lexicon : Option<Lexicon>,
+    entry : Option<LexicalEntry>,
+    sense : Option<Sense>,
+    defn : Option<Definition>,
+    ili_defn : Option<Definition>,
+    example : Option<Example>,
+    example_source : Option<String>,
+    synset : Option<Synset>
+}
+
+impl WordNetContentHandler {
+
+    pub fn wordnet_content_handler(&mut self, event : XmlEvent) {
+        match event {
+            XmlEvent::StartElement { name, attributes: attrs, namespace:_ } => {},
+            _ => {}
+        }
+    }
+}
 //    def startElement(self, name, attrs):
 //        if name == "Lexicon":
 //            self.lexicon = Lexicon(attrs["id"], attrs["label"], attrs["language"],
