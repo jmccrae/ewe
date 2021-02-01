@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::slice::Iter;
 use xml::reader::XmlEvent;
+use xml::name::OwnedName;
+use xml::attribute::OwnedAttribute;
 
 /// A list which can be rapidly accessed by key
 pub struct KeyList<K,V> {
@@ -154,7 +156,7 @@ impl Lexicon {
             entry.to_xml(xml_file, &self.comments)?;
         }
         for synset in self.synsets.iter() {
-            //synset.to_xml(xml_file, self.comments)
+            synset.to_xml(xml_file, &self.comments)?;
         }
         write!(xml_file, "  </Lexicon>
 </LexicalResource>\n")?;
@@ -213,7 +215,7 @@ impl LexicalEntry {
             sense.to_xml(xml_file, comments)?;
         }
         for synbeh in self.syntactic_behaviours.iter() {
-            //synbeh.to_xml(xml_file)?;
+            synbeh.to_xml(xml_file)?;
         }
         write!(xml_file, "    </LexicalEntry>
 ")
@@ -252,7 +254,7 @@ impl Form {
 pub struct Sense {
     pub id : String,
     pub synset : String,
-    pub n : usize,
+    pub n : i32,
     pub sense_key : Option<String>,
     pub sense_relations : Vec<SenseRelation>,
     pub adjposition : Option<String>
@@ -261,7 +263,7 @@ pub struct Sense {
 
 impl Sense {
     fn new(id : String, synset : String, sense_key : Option<String>,
-        n : usize, adjposition : Option<String>) -> Sense {
+        n : i32, adjposition : Option<String>) -> Sense {
         Sense { id, synset, sense_key, n, sense_relations: Vec::new(), adjposition }
     }
 
@@ -369,10 +371,10 @@ impl Synset {
             None => {}
         }
         for rel in self.synset_relations.iter() {
-            //rel.to_xml(xml_file, comments)?;
+            rel.to_xml(xml_file, comments)?;
         }
         for ex in self.examples.iter() {
-            //ex.to_xml(xml_file)?;
+            ex.to_xml(xml_file)?;
         }
         write!(xml_file, "    </Synset>
 ")
@@ -516,6 +518,22 @@ impl PartOfSpeech {
             PartOfSpeech::Unknown => "u"
         }
     }
+
+    fn from(v : &str) -> Result<PartOfSpeech,WordNetXMLParseError> {
+        match v {
+            "n" => Ok(PartOfSpeech::Noun),
+            "v" => Ok(PartOfSpeech::Verb),
+            "a" => Ok(PartOfSpeech::Adjective),
+            "r" => Ok(PartOfSpeech::Adverb),
+            "s" => Ok(PartOfSpeech::AdjectiveSatellite),
+            "t" => Ok(PartOfSpeech::NamedEntity),
+            "c" => Ok(PartOfSpeech::Conjunction),
+            "p" => Ok(PartOfSpeech::Adposition),
+            "x" => Ok(PartOfSpeech::Other),
+            "u" => Ok(PartOfSpeech::Unknown),
+             _ => Err(WordNetXMLParseError::BadPartOfSpeech(v.to_string()))
+        }
+    }
 }
 
 pub fn equal_pos(pos1 : PartOfSpeech, pos2 : PartOfSpeech) -> bool {
@@ -602,77 +620,154 @@ pub enum SynsetRelType {
 impl SynsetRelType {
     pub fn value(&self) -> &'static str {
         match self {
-            Agent => "agent",
-            Also => "also",
-            Attribute => "attribute",
-            BeInState => "be_in_state",
-            Causes => "causes",
-            ClassifiedBy => "classified_by",
-            Classifies => "classifies",
-            CoAgentInstrument => "co_agent_instrument",
-            CoAgentPatient => "co_agent_patient",
-            CoAgentResult => "co_agent_result",
-            CoInstrumentAgent => "co_instrument_agent",
-            CoInstrumentPatient => "co_instrument_patient",
-            CoInstrumentResult => "co_instrument_result",
-            CoPatientAgent => "co_patient_agent",
-            CoPatientInstrument => "co_patient_instrument",
-            CoResultAgent => "co_result_agent",
-            CoResultInstrument => "co_result_instrument",
-            CoRole => "co_role",
-            Direction => "direction",
-            DomainRegion => "domain_region",
-            DomainTopic => "domain_topic",
-            Exemplifies => "exemplifies",
-            Entails => "entails",
-            EqSynonym => "eq_synonym",
-            HasDomainRegion => "has_domain_region",
-            HasDomainTopic => "has_domain_topic",
-            IsExemplifiedBy => "is_exemplified_by",
-            HoloLocation => "holo_location",
-            HoloMember => "holo_member",
-            HoloPart => "holo_part",
-            HoloPortion => "holo_portion",
-            HoloSubstance => "holo_substance",
-            Holonym => "holonym",
-            Hypernym => "hypernym",
-            Hyponym => "hyponym",
-            InManner => "in_manner",
-            InstanceHypernym => "instance_hypernym",
-            InstanceHyponym => "instance_hyponym",
-            Instrument => "instrument",
-            Involved => "involved",
-            InvolvedAgent => "involved_agent",
-            InvolvedDirection => "involved_direction",
-            InvolvedInstrument => "involved_instrument",
-            InvolvedLocation => "involved_location",
-            InvolvedPatient => "involved_patient",
-            InvolvedResult => "involved_result",
-            InvolvedSourceDirection => "involved_source_direction",
-            InvolvedTargetDirection => "involved_target_direction",
-            IsCausedBy => "is_caused_by",
-            IsEntailedBy => "is_entailed_by",
-            Location => "location",
-            MannerOf => "manner_of",
-            MeroLocation => "mero_location",
-            MeroMember => "mero_member",
-            MeroPart => "mero_part",
-            MeroPortion => "mero_portion",
-            MeroSubstance => "mero_substance",
-            Meronym => "meronym",
-            Similar => "similar",
-            Other => "other",
-            Patient => "patient",
-            RestrictedBy => "restricted_by",
-            Restricts => "restricts",
-            Result => "result",
-            Role => "role",
-            SourceDirection => "source_direction",
-            StateOf => "state_of",
-            TargetDirection => "target_direction",
-            Subevent => "subevent",
-            IsSubeventOf => "is_subevent_of",
-            Antonym => "antonym"
+            SynsetRelType::Agent => "agent",
+            SynsetRelType::Also => "also",
+            SynsetRelType::Attribute => "attribute",
+            SynsetRelType::BeInState => "be_in_state",
+            SynsetRelType::Causes => "causes",
+            SynsetRelType::ClassifiedBy => "classified_by",
+            SynsetRelType::Classifies => "classifies",
+            SynsetRelType::CoAgentInstrument => "co_agent_instrument",
+            SynsetRelType::CoAgentPatient => "co_agent_patient",
+            SynsetRelType::CoAgentResult => "co_agent_result",
+            SynsetRelType::CoInstrumentAgent => "co_instrument_agent",
+            SynsetRelType::CoInstrumentPatient => "co_instrument_patient",
+            SynsetRelType::CoInstrumentResult => "co_instrument_result",
+            SynsetRelType::CoPatientAgent => "co_patient_agent",
+            SynsetRelType::CoPatientInstrument => "co_patient_instrument",
+            SynsetRelType::CoResultAgent => "co_result_agent",
+            SynsetRelType::CoResultInstrument => "co_result_instrument",
+            SynsetRelType::CoRole => "co_role",
+            SynsetRelType::Direction => "direction",
+            SynsetRelType::DomainRegion => "domain_region",
+            SynsetRelType::DomainTopic => "domain_topic",
+            SynsetRelType::Exemplifies => "exemplifies",
+            SynsetRelType::Entails => "entails",
+            SynsetRelType::EqSynonym => "eq_synonym",
+            SynsetRelType::HasDomainRegion => "has_domain_region",
+            SynsetRelType::HasDomainTopic => "has_domain_topic",
+            SynsetRelType::IsExemplifiedBy => "is_exemplified_by",
+            SynsetRelType::HoloLocation => "holo_location",
+            SynsetRelType::HoloMember => "holo_member",
+            SynsetRelType::HoloPart => "holo_part",
+            SynsetRelType::HoloPortion => "holo_portion",
+            SynsetRelType::HoloSubstance => "holo_substance",
+            SynsetRelType::Holonym => "holonym",
+            SynsetRelType::Hypernym => "hypernym",
+            SynsetRelType::Hyponym => "hyponym",
+            SynsetRelType::InManner => "in_manner",
+            SynsetRelType::InstanceHypernym => "instance_hypernym",
+            SynsetRelType::InstanceHyponym => "instance_hyponym",
+            SynsetRelType::Instrument => "instrument",
+            SynsetRelType::Involved => "involved",
+            SynsetRelType::InvolvedAgent => "involved_agent",
+            SynsetRelType::InvolvedDirection => "involved_direction",
+            SynsetRelType::InvolvedInstrument => "involved_instrument",
+            SynsetRelType::InvolvedLocation => "involved_location",
+            SynsetRelType::InvolvedPatient => "involved_patient",
+            SynsetRelType::InvolvedResult => "involved_result",
+            SynsetRelType::InvolvedSourceDirection => "involved_source_direction",
+            SynsetRelType::InvolvedTargetDirection => "involved_target_direction",
+            SynsetRelType::IsCausedBy => "is_caused_by",
+            SynsetRelType::IsEntailedBy => "is_entailed_by",
+            SynsetRelType::Location => "location",
+            SynsetRelType::MannerOf => "manner_of",
+            SynsetRelType::MeroLocation => "mero_location",
+            SynsetRelType::MeroMember => "mero_member",
+            SynsetRelType::MeroPart => "mero_part",
+            SynsetRelType::MeroPortion => "mero_portion",
+            SynsetRelType::MeroSubstance => "mero_substance",
+            SynsetRelType::Meronym => "meronym",
+            SynsetRelType::Similar => "similar",
+            SynsetRelType::Other => "other",
+            SynsetRelType::Patient => "patient",
+            SynsetRelType::RestrictedBy => "restricted_by",
+            SynsetRelType::Restricts => "restricts",
+            SynsetRelType::Result => "result",
+            SynsetRelType::Role => "role",
+            SynsetRelType::SourceDirection => "source_direction",
+            SynsetRelType::StateOf => "state_of",
+            SynsetRelType::TargetDirection => "target_direction",
+            SynsetRelType::Subevent => "subevent",
+            SynsetRelType::IsSubeventOf => "is_subevent_of",
+            SynsetRelType::Antonym => "antonym"
+        }
+    }
+
+    pub fn from(v : &str) -> Result<SynsetRelType, WordNetXMLParseError> {
+        match v {
+            "agent" => Ok(SynsetRelType::Agent),
+            "also" => Ok(SynsetRelType::Also),
+            "attribute" => Ok(SynsetRelType::Attribute),
+            "be_in_state" => Ok(SynsetRelType::BeInState),
+            "causes" => Ok(SynsetRelType::Causes),
+            "classified_by" => Ok(SynsetRelType::ClassifiedBy),
+            "classifies" => Ok(SynsetRelType::Classifies),
+            "co_agent_instrument" => Ok(SynsetRelType::CoAgentInstrument),
+            "co_agent_patient" => Ok(SynsetRelType::CoAgentPatient),
+            "co_agent_result" => Ok(SynsetRelType::CoAgentResult),
+            "co_instrument_agent" => Ok(SynsetRelType::CoInstrumentAgent),
+            "co_instrument_patient" => Ok(SynsetRelType::CoInstrumentPatient),
+            "co_instrument_result" => Ok(SynsetRelType::CoInstrumentResult),
+            "co_patient_agent" => Ok(SynsetRelType::CoPatientAgent),
+            "co_patient_instrument" => Ok(SynsetRelType::CoPatientInstrument),
+            "co_result_agent" => Ok(SynsetRelType::CoResultAgent),
+            "co_result_instrument" => Ok(SynsetRelType::CoResultInstrument),
+            "co_role" => Ok(SynsetRelType::CoRole),
+            "direction" => Ok(SynsetRelType::Direction),
+            "domain_region" => Ok(SynsetRelType::DomainRegion),
+            "domain_topic" => Ok(SynsetRelType::DomainTopic),
+            "exemplifies" => Ok(SynsetRelType::Exemplifies),
+            "entails" => Ok(SynsetRelType::Entails),
+            "eq_synonym" => Ok(SynsetRelType::EqSynonym),
+            "has_domain_region" => Ok(SynsetRelType::HasDomainRegion),
+            "has_domain_topic" => Ok(SynsetRelType::HasDomainTopic),
+            "is_exemplified_by" => Ok(SynsetRelType::IsExemplifiedBy),
+            "holo_location" => Ok(SynsetRelType::HoloLocation),
+            "holo_member" => Ok(SynsetRelType::HoloMember),
+            "holo_part" => Ok(SynsetRelType::HoloPart),
+            "holo_portion" => Ok(SynsetRelType::HoloPortion),
+            "holo_substance" => Ok(SynsetRelType::HoloSubstance),
+            "holonym" => Ok(SynsetRelType::Holonym),
+            "hypernym" => Ok(SynsetRelType::Hypernym),
+            "hyponym" => Ok(SynsetRelType::Hyponym),
+            "in_manner" => Ok(SynsetRelType::InManner),
+            "instance_hypernym" => Ok(SynsetRelType::InstanceHypernym),
+            "instance_hyponym" => Ok(SynsetRelType::InstanceHyponym),
+            "instrument" => Ok(SynsetRelType::Instrument),
+            "involved" => Ok(SynsetRelType::Involved),
+            "involved_agent" => Ok(SynsetRelType::InvolvedAgent),
+            "involved_direction" => Ok(SynsetRelType::InvolvedDirection),
+            "involved_instrument" => Ok(SynsetRelType::InvolvedInstrument),
+            "involved_location" => Ok(SynsetRelType::InvolvedLocation),
+            "involved_patient" => Ok(SynsetRelType::InvolvedPatient),
+            "involved_result" => Ok(SynsetRelType::InvolvedResult),
+            "involved_source_direction" => Ok(SynsetRelType::InvolvedSourceDirection),
+            "involved_target_direction" => Ok(SynsetRelType::InvolvedTargetDirection),
+            "is_caused_by" => Ok(SynsetRelType::IsCausedBy),
+            "is_entailed_by" => Ok(SynsetRelType::IsEntailedBy),
+            "location" => Ok(SynsetRelType::Location),
+            "manner_of" => Ok(SynsetRelType::MannerOf),
+            "mero_location" => Ok(SynsetRelType::MeroLocation),
+            "mero_member" => Ok(SynsetRelType::MeroMember),
+            "mero_part" => Ok(SynsetRelType::MeroPart),
+            "mero_portion" => Ok(SynsetRelType::MeroPortion),
+            "mero_substance" => Ok(SynsetRelType::MeroSubstance),
+            "meronym" => Ok(SynsetRelType::Meronym),
+            "similar" => Ok(SynsetRelType::Similar),
+            "other" => Ok(SynsetRelType::Other),
+            "patient" => Ok(SynsetRelType::Patient),
+            "restricted_by" => Ok(SynsetRelType::RestrictedBy),
+            "restricts" => Ok(SynsetRelType::Restricts),
+            "result" => Ok(SynsetRelType::Result),
+            "role" => Ok(SynsetRelType::Role),
+            "source_direction" => Ok(SynsetRelType::SourceDirection),
+            "state_of" => Ok(SynsetRelType::StateOf),
+            "target_direction" => Ok(SynsetRelType::TargetDirection),
+            "subevent" => Ok(SynsetRelType::Subevent),
+            "is_subevent_of" => Ok(SynsetRelType::IsSubeventOf),
+            "antonym" => Ok(SynsetRelType::Antonym),
+            _ => Err(WordNetXMLParseError::BadRelType(v.to_string()))
         }
     }
 }
@@ -774,19 +869,38 @@ pub enum SenseRelType {
 impl SenseRelType {
     pub fn value(&self) -> &'static str {
         match self { 
-            Antonym => "antonym",
-            Also => "also",
-            Participle => "participle",
-            Pertainym => "pertainym",
-            Derivation => "derivation",
-            Domain_topic => "domain_topic",
-            Has_domain_topic => "has_domain_topic",
-            Domain_region => "domain_region",
-            Has_domain_region => "has_domain_region",
-            Exemplifies => "exemplifies",
-            Is_exemplified_by => "is_exemplified_by",
-            Similar => "similar",
-            Other => "other"
+            SenseRelType::Antonym => "antonym",
+            SenseRelType::Also => "also",
+            SenseRelType::Participle => "participle",
+            SenseRelType::Pertainym => "pertainym",
+            SenseRelType::Derivation => "derivation",
+            SenseRelType::DomainTopic => "domain_topic",
+            SenseRelType::HasDomainTopic => "has_domain_topic",
+            SenseRelType::DomainRegion => "domain_region",
+            SenseRelType::HasDomainRegion => "has_domain_region",
+            SenseRelType::Exemplifies => "exemplifies",
+            SenseRelType::IsExemplifiedBy => "is_exemplified_by",
+            SenseRelType::Similar => "similar",
+            SenseRelType::Other => "other"
+        }
+    }
+
+    pub fn from(v : &str) -> Result<SenseRelType,WordNetXMLParseError> {
+        match v {
+            "antonym" => Ok(SenseRelType::Antonym),
+            "also" => Ok(SenseRelType::Also),
+            "participle" => Ok(SenseRelType::Participle),
+            "pertainym" => Ok(SenseRelType::Pertainym),
+            "derivation" => Ok(SenseRelType::Derivation),
+            "domain_topic" => Ok(SenseRelType::DomainTopic),
+            "has_domain_topic" => Ok(SenseRelType::HasDomainTopic),
+            "domain_region" => Ok(SenseRelType::DomainRegion),
+            "has_domain_region" => Ok(SenseRelType::HasDomainRegion),
+            "exemplifies" => Ok(SenseRelType::Exemplifies),
+            "is_exemplified_by" => Ok(SenseRelType::IsExemplifiedBy),
+            "similar" => Ok(SenseRelType::Similar),
+            "other" => Ok(SenseRelType::Other),
+            _ => Err(WordNetXMLParseError::BadRelType(v.to_string())) 
         }
     }
 }
@@ -811,6 +925,7 @@ lazy_static! {
 
 struct WordNetContentHandler {
     lexicon : Option<Lexicon>,
+    entry_id : Result<String,WordNetXMLParseError>,
     entry : Option<LexicalEntry>,
     sense : Option<Sense>,
     defn : Option<Definition>,
@@ -820,32 +935,55 @@ struct WordNetContentHandler {
     synset : Option<Synset>
 }
 
+fn attr<'a>(attrs : &'a Vec<OwnedAttribute>, name : &str) -> Result<String,WordNetXMLParseError> {
+    attrs.iter().find(|x| x.name.local_name == name).ok_or_else(|| WordNetXMLParseError::AttributeNotFound(name.to_string())).map(|x| x.value.clone())
+}
+
 impl WordNetContentHandler {
 
-    pub fn wordnet_content_handler(&mut self, event : XmlEvent) {
+    pub fn wordnet_content_handler(&mut self, event : XmlEvent) -> Result<(),WordNetXMLParseError> {
         match event {
-            XmlEvent::StartElement { name, attributes: attrs, namespace:_ } => {},
-            _ => {}
+            XmlEvent::StartElement { name, attributes: attrs, namespace:_ } => {
+                self.start_element(name, attrs)
+            },
+            _ => {
+                Ok(())
+            }
         }
     }
+
+    fn start_element(&mut self, name : OwnedName, attrs : Vec<OwnedAttribute>) -> Result<(), WordNetXMLParseError> {
+        if name.local_name == "Lexicon" {
+            self.lexicon = Some(Lexicon::new(attr(&attrs, "id")?,
+                attr(&attrs, "label")?, attr(&attrs, "language")?,
+                attr(&attrs, "email")?, attr(&attrs, "license")?,
+                attr(&attrs, "version")?, attr(&attrs, "url")?));
+        } else if name.local_name == "LexicalEntry" {
+            self.entry_id = attr(&attrs, "id");
+        } else if name.local_name == "Lemma" {
+            let lemma = Lemma::new(attr(&attrs, "writtenForm")?,
+                    PartOfSpeech::from(&attr(&attrs, "partOfSpeech")?)?);
+            self.entry = Some(LexicalEntry::new(
+                self.entry_id.clone()?,
+                lemma));
+        } else if name.local_name == "Form" {
+            self.entry.as_mut().
+                ok_or(WordNetXMLParseError::InvalidChild("Form","LexicalEntry"))?.
+                    add_form(Form::new(attr(&attrs, "writtenForm")?));
+        } else if name.local_name == "Sense" {
+            let n = match attr(&attrs, "n") {
+                Ok(s) => s.parse::<i32>().map_err(|_| WordNetXMLParseError::NonNumericN(s.to_string()))?,
+                Err(_) => -1
+            };
+            self.sense = Some(Sense::new(
+                    attr(&attrs, "id")?,
+                    attr(&attrs, "synset")?,
+                    attr(&attrs, "identifier").ok(),
+                    n, attr(&attrs, "adjposition").ok()));
+        }
+        Ok(())
+    }
 }
-//    def startElement(self, name, attrs):
-//        if name == "Lexicon":
-//            self.lexicon = Lexicon(attrs["id"], attrs["label"], attrs["language"],
-//                    attrs["email"], attrs["license"], attrs["version"], attrs["url"])
-//        elif name == "LexicalEntry":
-//            self.entry = LexicalEntry(attrs["id"])
-//        elif name == "Lemma":
-//            self.entry.set_lemma(Lemma(attrs["writtenForm"], PartOfSpeech(attrs["partOfSpeech"])))
-//        elif name == "Form":
-//            self.entry.add_form(Form(attrs["writtenForm"]))
-//        elif name == "Sense":
-//            if "n" in attrs:
-//                n = int(attrs["n"])
-//            else:
-//                n = -1
-//            self.sense = Sense(attrs["id"], attrs["synset"], 
-//                    attrs.get("dc:identifier") or "", n, attrs.get("adjposition"))
 //        elif name == "Synset":
 //            self.synset = Synset(attrs["id"], attrs["ili"], 
 //                PartOfSpeech(attrs["partOfSpeech"]),
@@ -985,4 +1123,18 @@ pub enum WordNetError {
     DuplicateEntryKey(String),
     #[error("sense key not found ${0}")]
     SenseKeyNotFound(String)
+}
+
+#[derive(Error,Debug,Clone)]
+pub enum WordNetXMLParseError {
+    #[error("expected an attribute ${0}")]
+    AttributeNotFound(String),
+    #[error("invalid value for partOfSpeech: ${0}")]
+    BadPartOfSpeech(String),
+    #[error("invalid value for relType: ${0}")]
+    BadRelType(String),
+    #[error("encountered ${0} but not as a child of ${1}")]
+    InvalidChild(&'static str,&'static str),
+    #[error("the value of n must be numeric but was ${0}")]
+    NonNumericN(String)
 }
