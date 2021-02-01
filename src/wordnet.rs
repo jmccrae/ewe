@@ -2,9 +2,10 @@ use thiserror::Error;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::slice::Iter;
-use xml::reader::XmlEvent;
+use xml::reader::{XmlEvent,EventReader};
 use xml::name::OwnedName;
 use xml::attribute::OwnedAttribute;
+use std::mem::replace;
 
 /// A list which can be rapidly accessed by key
 pub struct KeyList<K,V> {
@@ -134,7 +135,7 @@ impl Lexicon {
         Ok(())
     }
 
-    fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, part : bool) -> std::io::Result<()> {
+    pub fn to_xml<W : std::io::Write>(&self, xml_file : &mut W, part : bool) -> std::io::Result<()> {
         write!(xml_file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")?;
         if part {
             write!(xml_file, "<!DOCTYPE LexicalResource SYSTEM \"http://globalwordnet.github.io/schemas/WN-LMF-relaxed-1.0.dtd\">\n")?;
@@ -290,7 +291,7 @@ impl Sense {
             write!(xml_file, "      <Sense id=\"{}\"{} synset=\"{}\"{}>
 ", self.id, n_str, self.synset, sk_str)?;
             for rel in self.sense_relations.iter() {
-                //rel.to_xml(xml_file, comments)?;
+                rel.to_xml(xml_file, comments)?;
             }
             write!(xml_file, "        </Sense>
 ")
@@ -924,13 +925,13 @@ lazy_static! {
 
 
 struct WordNetContentHandler {
-    lexicon : Option<Lexicon>,
+    pub lexicon : Vec<Lexicon>,
     entry_id : Result<String,WordNetXMLParseError>,
     entry : Option<LexicalEntry>,
     sense : Option<Sense>,
-    defn : Option<Definition>,
-    ili_defn : Option<Definition>,
-    example : Option<Example>,
+    defn : Option<String>,
+    ili_defn : Option<String>,
+    example : Option<String>,
     example_source : Option<String>,
     synset : Option<Synset>
 }
@@ -940,21 +941,23 @@ fn attr<'a>(attrs : &'a Vec<OwnedAttribute>, name : &str) -> Result<String,WordN
 }
 
 impl WordNetContentHandler {
-
-    pub fn wordnet_content_handler(&mut self, event : XmlEvent) -> Result<(),WordNetXMLParseError> {
-        match event {
-            XmlEvent::StartElement { name, attributes: attrs, namespace:_ } => {
-                self.start_element(name, attrs)
-            },
-            _ => {
-                Ok(())
-            }
+    pub fn new() -> WordNetContentHandler {
+        WordNetContentHandler {
+            lexicon: Vec::new(),
+            entry_id: Ok("".to_owned()),
+            entry: None,
+            sense: None,
+            defn: None,
+            ili_defn: None,
+            example: None,
+            example_source: None,
+            synset: None 
         }
     }
 
     fn start_element(&mut self, name : OwnedName, attrs : Vec<OwnedAttribute>) -> Result<(), WordNetXMLParseError> {
         if name.local_name == "Lexicon" {
-            self.lexicon = Some(Lexicon::new(attr(&attrs, "id")?,
+            self.lexicon.push(Lexicon::new(attr(&attrs, "id")?,
                 attr(&attrs, "label")?, attr(&attrs, "language")?,
                 attr(&attrs, "email")?, attr(&attrs, "license")?,
                 attr(&attrs, "version")?, attr(&attrs, "url")?));
@@ -980,74 +983,97 @@ impl WordNetContentHandler {
                     attr(&attrs, "synset")?,
                     attr(&attrs, "identifier").ok(),
                     n, attr(&attrs, "adjposition").ok()));
+        } else if name.local_name == "Synset" {
+            self.synset = Some(Synset::new(
+                    attr(&attrs, "id")?,
+                    attr(&attrs, "ili")?,
+                    PartOfSpeech::from(&attr(&attrs, "partOfSpeech")?)?,
+                    attr(&attrs, "subject").ok(),
+                    attr(&attrs, "source").ok()));
+        } else if name.local_name == "Definition" {
+            self.defn = Some(String::new());
+        } else if name.local_name == "ILIDefinition" {
+            self.ili_defn = Some(String::new());
+        } else if name.local_name == "Example" {
+            self.example = Some(String::new());
+            self.example_source = attr(&attrs, "source").ok();
+        } else if name.local_name == "SynsetRelation" {
+            self.synset.as_mut().
+                ok_or(WordNetXMLParseError::InvalidChild("SynsetRelation","Synset"))?.
+                add_synset_relation(SynsetRelation::new(
+                        attr(&attrs, "target")?,
+                        SynsetRelType::from(&attr(&attrs, "relType")?)?));
+        } else if name.local_name == "SenseRelation" {
+            self.sense.as_mut().
+                ok_or(WordNetXMLParseError::InvalidChild("SenseRelation","Sense"))?.
+                add_sense_relation(SenseRelation::new(
+                        attr(&attrs, "target")?,
+                        SenseRelType::from(&attr(&attrs, "relType")?)?));
+        } else if name.local_name == "SyntacticBehaviour" {
+            self.entry.as_mut().
+                ok_or(WordNetXMLParseError::InvalidChild("SyntacticBehaviour","Entry"))?.
+                add_syntactic_behaviour(SyntacticBehaviour::new(
+                        attr(&attrs, "subcategorizationFrame")?,
+                        attr(&attrs, "senses")?.split(" ").map(|x| x.to_string()).collect()));
+        } else if name.local_name == "LexicalResource" {
+            // pass
+        } else {
+            return Err(WordNetXMLParseError::BadTag(name.local_name.to_string()));
+        }
+        Ok(())
+    }
+
+    fn end_element(&mut self, name : OwnedName) -> Result<(),WordNetXMLParseError> {
+        if name.local_name == "LexicalEntry" {
+            let entry = replace(&mut self.entry, None).expect("Tag mismatch");
+            let n = self.lexicon.len() - 1;
+            self.lexicon.get_mut(n)
+                .ok_or(WordNetXMLParseError::InvalidChild("LexicalEntry", "Lexicon"))?
+                .add_entry(entry)
+                .map_err(|e| WordNetXMLParseError::WNError(e))?;
+        } else if name.local_name == "Sense" {
+            let sense = replace(&mut self.sense, None).expect("Tag mismatch");
+            self.entry.as_mut()
+                .ok_or(WordNetXMLParseError::InvalidChild("Sense", "LexicalEntry"))?
+                .add_sense(sense);
+        } else if name.local_name == "Synset" {
+            let synset = replace(&mut self.synset, None).expect("Tag mismatch");
+            let n = self.lexicon.len() - 1;
+            self.lexicon.get_mut(n)
+                .ok_or(WordNetXMLParseError::InvalidChild("Synset", "Lexicon"))?
+                .add_synset(synset);
+        } else if name.local_name == "Definition" {
+            let defn = replace(&mut self.defn, None).expect("Tag mismatch");
+            self.synset.as_mut()
+                .ok_or(WordNetXMLParseError::InvalidChild("Definition", "Synset"))?
+                .add_definition(Definition::new(defn));
+        } else if name.local_name == "ILIDefinition" {
+            let defn = replace(&mut self.ili_defn, None).expect("Tag mismatch");
+            self.synset.as_mut()
+                .ok_or(WordNetXMLParseError::InvalidChild("ILIDefinition", "Synset"))?
+                .add_ili_definition(Definition::new(defn));
+        } else if name.local_name == "Example" {
+            let example = replace(&mut self.example, None).expect("Tag mismatch");
+            let example_src = replace(&mut self.example_source, None);
+            self.synset.as_mut()
+                .ok_or(WordNetXMLParseError::InvalidChild("Example", "Synset"))?
+                .add_example(Example::new(example, example_src));
+        }
+        Ok(())
+    }
+
+    fn characters(&mut self, content : String) -> Result<(), WordNetXMLParseError> {
+        if let Some(ref mut defn) = self.defn {
+            defn.push_str(&content);
+        } else if let Some(ref mut ili_defn) = self.ili_defn {
+            ili_defn.push_str(&content);
+        } else if let Some(ref mut example) = self.example {
+            example.push_str(&content);
         }
         Ok(())
     }
 }
-//        elif name == "Synset":
-//            self.synset = Synset(attrs["id"], attrs["ili"], 
-//                PartOfSpeech(attrs["partOfSpeech"]),
-//                attrs.get("dc:subject",""),
-//                attrs.get("dc:source",""))
-//        elif name == "Definition":
-//            self.defn = ""
-//        elif name == "ILIDefinition":
-//            self.ili_defn = ""
-//        elif name == "Example":
-//            self.example = ""
-//            self.example_source = attrs.get("dc:source")
-//        elif name == "SynsetRelation":
-//            self.synset.add_synset_relation(
-//                    SynsetRelation(attrs["target"],
-//                    SynsetRelType(attrs["relType"])))
-//        elif name == "SenseRelation":
-//            self.sense.add_sense_relation(
-//                    SenseRelation(attrs["target"],
-//                    SenseRelType(attrs["relType"])))
-//        elif name == "SyntacticBehaviour":
-//            self.entry.add_syntactic_behaviour(
-//                    SyntacticBehaviour(
-//                        attrs["subcategorizationFrame"],
-//                        attrs["senses"].split(" ")))
-//        elif name == "LexicalResource":
-//            pass
-//        else:
-//            raise ValueError("Unexpected Tag: " + name)
-//
-//    def endElement(self, name):
-//        if name == "LexicalEntry":
-//            self.lexicon.add_entry(self.entry)
-//            self.entry = None
-//        elif name == "Sense":
-//            self.entry.add_sense(self.sense)
-//            self.sense = None
-//        elif name == "Synset":
-//            self.lexicon.add_synset(self.synset)
-//            self.synset = None
-//        elif name == "Definition":
-//            self.synset.add_definition(Definition(self.defn))
-//            self.defn = None
-//        elif name == "ILIDefinition":
-//            self.synset.add_definition(Definition(self.ili_defn), True)
-//            self.ili_defn = None
-//        elif name == "Example":
-//            self.synset.add_example(Example(self.example, self.example_source))
-//            self.example = None
-//
-//
-//    def characters(self, content):
-//        if self.defn != None:
-//            self.defn += content
-//        elif self.ili_defn != None:
-//            self.ili_defn += content
-//        elif self.example != None:
-//            self.example += content
-//        elif content.strip() == '':
-//            pass
-//        else:
-//            print(content)
-//            raise ValueError("Text content not expected")
-//
+
 fn escape_xml_lit(lit : &str) -> String {
     lit.replace("&", "&amp;").replace("'", "&apos;").
         replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1105,6 +1131,35 @@ fn escape_xml_lit(lit : &str) -> String {
 //
 //    return "".join(elc(c) for c in lemma)
 //
+pub fn parse_wordnet<R : std::io::Read>(wordnet_file : R) -> Result<Vec<Lexicon>, WordNetXMLParseError> {
+    let mut handler = WordNetContentHandler::new();
+    let mut reader = EventReader::new(wordnet_file);
+    loop {
+        if let Ok(event) = reader.next() {
+            match event {
+                XmlEvent::StartElement { name, attributes, namespace:_ } => {
+                    handler.start_element(name, attributes)?;
+                },
+                XmlEvent::EndElement { name } => {
+                    handler.end_element(name)?;
+                },
+                XmlEvent::Characters(chars) => {
+                    handler.characters(chars)?;
+                }
+                XmlEvent::EndDocument => {
+                    break;
+                }
+                _ => {}
+            }
+        } else {
+            if let Err(err) = reader.next() {
+                return Err(WordNetXMLParseError::Xml(err));
+            }
+        }
+    }
+
+    Ok(handler.lexicon)
+}
 //def parse_wordnet(wordnet_file):
 //    with codecs.open(wordnet_file,"r",encoding="utf-8") as source:
 //        handler = WordNetContentHandler()
@@ -1117,7 +1172,7 @@ fn escape_xml_lit(lit : &str) -> String {
 //    xml_file = open("wn31-test.xml","w")
 //    wordnet.to_xml(xml_file, True)
 
-#[derive(Error,Debug)]
+#[derive(Error,Debug,Clone)]
 pub enum WordNetError {
     #[error("duplicate entry key ${0}")]
     DuplicateEntryKey(String),
@@ -1136,5 +1191,11 @@ pub enum WordNetXMLParseError {
     #[error("encountered ${0} but not as a child of ${1}")]
     InvalidChild(&'static str,&'static str),
     #[error("the value of n must be numeric but was ${0}")]
-    NonNumericN(String)
+    NonNumericN(String),
+    #[error("unsupported tag ${0}")]
+    BadTag(String),
+    #[error("structure error: ${0}")]
+    WNError(WordNetError),
+    #[error("XML error: ${0}")]
+    Xml(xml::reader::Error)
 }
