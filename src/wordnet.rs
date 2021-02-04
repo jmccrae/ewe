@@ -25,6 +25,12 @@ impl<K: Eq+Hash+std::fmt::Debug,V> KeyList<K,V> {
     pub fn get(&self, k: &K) -> Option<&V> {
         return self.map.get(k).map(|idx| &self.vec[*idx])
     }
+    pub fn get_mut(&mut self, k : &K) -> Option<&mut V> {
+        match self.map.get(k) {
+            Some(idx) => Some(&mut self.vec[*idx]),
+            None => None
+        }
+    }
     pub fn iter(&self) -> Iter<'_, V> {
         return self.vec.iter()
     }
@@ -91,8 +97,27 @@ impl Lexicon {
         self.synsets.push(synset.id.clone(), synset);
     }
 
+    pub fn add_entry_sense(&mut self, entry_id : &String, sense : Sense) -> Result<(),WordNetError> {
+        let synset = sense.synset.clone();
+        let written_form = {
+            let e = self.entry_by_id_mut(entry_id)
+            .ok_or(WordNetError::EntryNotFound(entry_id.clone()))?;
+            let wf = e.lemma.written_form.clone();
+            e.add_sense(sense);
+            wf
+        };
+        self.members.entry(synset)
+            .or_insert_with(|| Vec::new())
+            .push(written_form);        
+        Ok(())
+    }
+
     pub fn entry_by_id(&self, id : &String) -> Option<&LexicalEntry> {
         self.entries.get(id)
+    }
+
+    pub fn entry_by_id_mut(&mut self, id : &String) -> Option<&mut LexicalEntry> {
+        self.entries.get_mut(id)
     }
 
     pub fn synset_by_id(&self, id : &String) -> Option<&Synset> {
@@ -123,15 +148,27 @@ impl Lexicon {
         return self.sense2synset.get(sense_id)
     }
 
-    pub fn change_sense_id(&mut self, sense : &mut Sense, new_id : String) 
+    pub fn change_sense_id(&mut self, sense_id : &String, new_id : String) 
         -> Result<(), WordNetError>  {
-        self.sense2synset.remove(&sense.id).ok_or(
-            WordNetError::SenseKeyNotFound(sense.id.to_string()))?;
-        let entry_id = self.sense2entry.remove(&sense.id)
+        let (sense_id, sense_synset) = {
+            let entry_id = self.sense2entry.get(sense_id)
+                .ok_or(WordNetError::SenseNotFound(sense_id.to_owned()))?.clone();
+            let mut entry = self.entry_by_id_mut(&entry_id)
+                .ok_or(WordNetError::SenseNotFound(sense_id.to_owned()))?;
+            let sense = entry
+                .senses
+                .iter_mut()
+                .find(|sense| sense.id == *sense_id)
+                .ok_or(WordNetError::SenseNotFound(sense_id.to_owned()))?;
+            sense.id = new_id.clone();
+            (sense.id.clone(), sense.synset.clone())
+        };
+        self.sense2synset.remove(&sense_id).ok_or(
+            WordNetError::SenseKeyNotFound(sense_id.to_string()))?;
+        let entry_id = self.sense2entry.remove(&sense_id)
             .expect("Inconsistent state");
-        sense.id = new_id.clone();
-        self.sense2synset.insert(sense.id.clone(), sense.synset.clone());
-        self.sense2entry.insert(sense.id.clone(), entry_id);
+        self.sense2synset.insert(sense_id.clone(), sense_synset.clone());
+        self.sense2entry.insert(sense_id.clone(), entry_id);
         Ok(())
     }
 
@@ -182,7 +219,7 @@ pub struct LexicalEntry {
 }
 
 impl LexicalEntry {
-    fn new(id : String, lemma : Lemma) -> LexicalEntry {
+    pub fn new(id : String, lemma : Lemma) -> LexicalEntry {
         LexicalEntry {
             id, lemma, forms: Vec::new(),
             senses: Vec::new(), syntactic_behaviours: Vec::new()
@@ -197,7 +234,7 @@ impl LexicalEntry {
         self.forms.push(form)
     }
 
-    fn add_sense(&mut self, sense : Sense) {
+    pub fn add_sense(&mut self, sense : Sense) {
         self.senses.push(sense)
     }
 
@@ -230,7 +267,7 @@ pub struct Lemma {
 }
 
 impl Lemma {
-    fn new(written_form : String, part_of_speech : PartOfSpeech) -> Lemma {
+    pub fn new(written_form : String, part_of_speech : PartOfSpeech) -> Lemma {
         Lemma { written_form, part_of_speech }
     }
 }
@@ -263,7 +300,7 @@ pub struct Sense {
 }
 
 impl Sense {
-    fn new(id : String, synset : String, sense_key : Option<String>,
+    pub fn new(id : String, synset : String, sense_key : Option<String>,
         n : i32, adjposition : Option<String>) -> Sense {
         Sense { id, synset, sense_key, n, sense_relations: Vec::new(), adjposition }
     }
@@ -428,8 +465,8 @@ impl Example {
 
 #[derive(Clone,PartialEq,Debug)]
 pub struct SynsetRelation {
-    target : String,
-    rel_type : SynsetRelType
+    pub target : String,
+    pub rel_type : SynsetRelType
 }
 
 impl SynsetRelation {
@@ -452,8 +489,8 @@ impl SynsetRelation {
 
 #[derive(Clone,PartialEq,Debug)]
 pub struct SenseRelation {
-    target : String,
-    rel_type : SenseRelType
+    pub target : String,
+    pub rel_type : SenseRelType
 }
 
 impl SenseRelation {
@@ -505,7 +542,7 @@ pub enum PartOfSpeech {
 }
 
 impl PartOfSpeech {
-    fn value(&self) -> &'static str {
+    pub fn value(&self) -> &'static str {
         match self {
             PartOfSpeech::Noun => "n",
             PartOfSpeech::Verb => "v",
@@ -1105,29 +1142,32 @@ fn escape_xml_lit(lit : &str) -> String {
 //                            c = None
 //
 //
-//def escape_lemma(lemma):
-//    """Format the lemma so it is valid XML id"""
-//    def elc(c):
-//        if (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '.':
-//            return c
-//        elif c == ' ':
-//            return '_'
-//        elif c == '(':
-//            return '-lb-'
-//        elif c == ')':
-//            return '-rb-'
-//        elif c == '\'':
-//            return '-ap-'
-//        elif c == '/':
-//            return '-sl-'
-//        elif c == '-':
-//            return '-'
-//        elif c == ',':
-//            return '-cm-'
-//        elif c == '!':
-//            return '-ex-'
-//        else:
-//            return '-%04x-' % ord(c)
+/// Format the lemma so it is valid XML id
+pub fn escape_lemma(lemma : &str) -> String {
+    lemma.chars().map(|c| {
+        if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' {
+            format!("{}", c)
+        } else if c == ' ' {
+            "_".to_owned()
+        } else if c == '(' {
+            "-lb-".to_owned()
+        } else if c == ')' {
+            "-rb-".to_owned()
+        } else if c == '\'' {
+            "-ap-".to_owned()
+        } else if c == '/' {
+            "-sl-".to_owned()
+        } else if c == '-' {
+            "-".to_owned()
+        } else if c == ',' {
+            "-cm-".to_owned()
+        } else if c == '!' {
+            "-ex-".to_owned()
+        } else {
+            format!("-{:04}-", c)
+        }
+    }).collect::<Vec<String>>().join("")
+}
 //
 //    return "".join(elc(c) for c in lemma)
 //
@@ -1177,7 +1217,19 @@ pub enum WordNetError {
     #[error("duplicate entry key ${0}")]
     DuplicateEntryKey(String),
     #[error("sense key not found ${0}")]
-    SenseKeyNotFound(String)
+    SenseKeyNotFound(String),
+    #[error("sense key not valid ${0}")]
+    BadSenseKey(String),
+    #[error("sense not found ${0}")]
+    SenseNotFound(String),
+    #[error("synset not found ${0}")]
+    SynsetNotFound(String),
+    #[error("entry not found ${0}")]
+    EntryNotFound(String),
+    #[error("setting a sense index of ${1} for ${0} but maximum expected was ${2}")]
+    SenseIDXNotValid(String, i32, i32),
+    #[error("n value exceeds number of senses for lemma for ${0}")]
+    SenseNTooHigh(String)
 }
 
 #[derive(Error,Debug,Clone)]

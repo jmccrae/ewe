@@ -2,6 +2,7 @@
 extern crate lazy_static;
 
 mod wordnet;
+mod change_manager;
 
 use std::io::BufReader;
 use std::fs::File;
