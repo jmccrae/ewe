@@ -162,9 +162,6 @@ fn decompose_sense_id(sense_id : &str) -> Result<(String, String), WordNetError>
 fn delete_sense_rel(wn : &mut Lexicon, source : &str, target : &str) -> Result<(),WordNetError> {
     println!("Delete {} =*=> {}", source, target);
     let (source_synset, source_entry) = decompose_sense_id(source)?;
-    let lex_name = wn.synset_by_id(&source_synset).
-        ok_or(WordNetError::SynsetNotFound(source_synset))?.
-        lex_name.clone();
     let entry = wn.entry_by_id_mut(&source_entry)
         .ok_or(WordNetError::EntryNotFound(source_entry))?;
     let mut sense = entry.senses.iter_mut().filter(|sense| sense.id == source)
