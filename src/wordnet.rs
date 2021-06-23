@@ -92,6 +92,14 @@ impl Lexicon {
         self.entries.push(entry.id.clone(), entry);
         Ok(())
     }
+    
+    pub fn del_entry(&mut self, entry : &mut LexicalEntry, sense : &Sense) -> Result<(),WordNetError> {
+        panic!("TODO")
+    }
+
+    pub fn del_sense(&mut self, sense : &Sense) -> Result<(), WordNetError> {
+        panic!("TODO")
+    }
 
     pub fn add_synset(&mut self, synset : Synset) {
         self.synsets.push(synset.id.clone(), synset);
