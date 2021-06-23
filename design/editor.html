@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EWE - English WordNet Editor</title>
+
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+  </head>
+  <body>
+      <div class="container">
+          <div class="row">
+              <h1>EWE - English WordNet Editor</h1>
+          </div>
+          <div class="row">
+              <div class="col col-md-2">
+                  <input type="input" class="form-control" placeholder="Search synsets">
+                  <div class="panel panel-default">
+                      <ul class="list-group">
+                          <li class="list-group-item">0001740-n: ability</li>
+                      </ul>
+                  </div>
+                  <button type="button" class="btn btn-success">Add new synset</button>
+              </div>
+              <div class="col col-md-10">
+                  <h3>ability 
+                              <button type="button" class="btn btn-warning float-end">Split</button>
+                              <button type="button" class="btn btn-danger float-end">Deprecate</button>
+                  </h3>
+                  <form>
+                      <div class="mb-3">
+                          <label class="form-label">Identifier</label>
+                          <tt>00001740-n</tt>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label">Interlingual Identifier:</label> 
+                          <tt>i123</tt>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label">Members</label>
+                          <ul class="list-group">
+                              <li class="list-group-item">ability <button class="btn btn-primary float-end">Move</button> <button class="btn btn-danger float-end">Remove</button></li>
+                              <li class="list-group-item">ability <button class="btn btn-primary float-end">Move</button> <button class="btn btn-danger float-end">Remove</button></li>
+                          </ul>
+                          <button class="btn btn-success">Add</button>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label">Definition:</label> 
+                          <input type="input" class="form-control" value="This is a definition"><br/>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label">Example:</label> 
+                          <input type="input" class="form-control" value="This is an example"><br/>
+                      </div>
+                      <div class="mb-3">
+                          <label class="form-label">Relations:</label>
+                          <table class="table">
+                              <th>
+                                  <td>Relation</td>
+                                  <td>Target</td>
+                                  <td></td>
+                              </th>
+                              <tr>
+                                  <td>
+                                      <div class="dropdown">
+                                          <button class="btn btn-secondary dropdown-toggle" 
+                                              type="button" 
+                                              data-bs-toggle="dropdown" 
+                                              aria-expanded="false">
+                                              Hypernym
+                                          </button>
+                                          <ul class="dropdown-menu">
+                                              <li><a class="dropdown-item">Hypernym</a></li>
+                                              <li><a class="dropdown-item">Antonym</a></li>
+                                          </ul>
+                                      </div>
+                                  </td>
+                                  <td>
+                                      <tt>00001740-n</tt> <i>ability</i>
+                                      <button class="btn btn-primary float-end">Change</button>
+                                      <button class="btn btn-info float-end">Go</button>
+                                  </td>
+                                  <td>
+                                      <button class="btn btn-danger">Remove</button>
+                                  </td>
+                              </tr>
+                          </table>
+                          <button class="btn btn-success">Add relation</button>
+                      </div>
+                  </form>
+              </div>
+          </div>
+      </div>
+
+          <script src="js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
