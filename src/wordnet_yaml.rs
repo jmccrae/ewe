@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use std::fs::File;
 use std::fmt;
+use std::io::Write;
 use serde::de::{self, Visitor, MapAccess};
 use crate::serde::ser::SerializeMap;
 use crate::rels::YamlSynsetRelType;
@@ -213,6 +214,63 @@ impl Sense {
         self.other.retain(|x| x != target);
     }
 
+    pub fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        write!(w, "\n    - ")?;
+        let mut first = true;
+        first = write_prop_sense(w, &self.also, "also", first)?;
+        first = write_prop_sense(w, &self.antonym, "antonym", first)?;
+        first = write_prop_sense(w, &self.derivation, "derivation", first)?;
+        first = write_prop_sense(w, &self.domain_region, "domain_region", first)?;
+        first = write_prop_sense(w, &self.domain_topic, "domain_topic", first)?;
+        first = write_prop_sense(w, &self.exemplifies, "exemplifies", first)?;
+        first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
+        first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
+        if first {
+            write!(w, "id:\n      - '{}'", self.id.as_str())?;
+            first = false;
+        } else {
+            write!(w, "\n      id:\n      - '{}'", self.id.as_str())?;
+        }
+        write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
+        write_prop_sense(w, &self.other, "other", first)?;
+        write_prop_sense(w, &self.participle, "participle", first)?;
+        write_prop_sense(w, &self.pertainym, "pertainym", first)?;
+        write_prop_sense(w, &self.similar, "similar", first)?;
+        if !self.subcat.is_empty() {
+            write!(w, "\n      subcat:\n      - ")?;
+            let mut f = true;
+            for subcat_id in self.subcat.iter() {
+                if !f {
+                    write!(w, "\n        ")?;
+                }
+                write!(w, "{}", subcat_id);
+            }
+            f = false;
+        }
+        write!(w, "\n      synset: {}\n", self.synset.as_str())?;
+     
+        Ok(())
+    }
+
+}
+
+fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, first : bool) -> std::io::Result<bool> {
+    if senses.is_empty() {
+        Ok(first)
+    } else if !first {
+        write!(w, "\n      {}:\n      - ", name)?;
+        let mut f = true;
+        for sense_id in senses.iter() {
+            if !f {
+                write!(w, "\n        ")?;
+            }
+            write!(w, "'{}'", sense_id.as_str());
+        }
+        f = false;
+        Ok(false)
+    } else {
+        Ok(first)
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
