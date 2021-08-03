@@ -143,67 +143,64 @@ impl Lexicon {
 static YAML_LINE_LENGTH : usize = 80;
 lazy_static! {
     static ref NUMBERS: Regex = Regex::new("^(\\.)?\\d+$").unwrap();
-    //static ref KEY_LIKE: Regex = Regex::new("^\\w+:.*$").unwrap();
 }
 
-fn escape_yaml_string(s : &str, indent : usize) -> String {
-    let s2 = if s.starts_with("\"") || s.ends_with(":") 
+fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
+
+    let s2 : String = if !s.starts_with("'") && s.chars().any(|c| c > '~') {
+        format!("\"{}\"", s.chars().map(|c| {
+            if c == '"' {
+                "\\\"".to_string()
+            } else if c <= '~' {
+                c.to_string()
+            } else if (c as u32) < 256 {
+                format!("\\x{:02X}", c as u32)
+            } else {
+                format!("\\u{:04X}", c as u32)
+            }
+        }).collect::<Vec<String>>().join(""))
+    } else if s.starts_with("\"") || s.ends_with(":") 
         || s.starts_with("'") || s == "true" || s == "false" 
-         || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
-         || s.ends_with(" ") || s.contains(": ")
-         || s == "No" || s == "off" || s == "on" 
-         || s.starts_with("`") {
+        || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
+        || s.ends_with(" ") || s.contains(": ")
+        || s == "No" || s == "off" || s == "on" 
+        || s.starts_with("`") {
         format!("'{}'", str::replace(s, "'", "''"))
     } else {
         s.to_owned()
-    };
+    };        
     if s2.len() + indent > YAML_LINE_LENGTH {
         let mut s3 = String::new();
-        let mut size = indent;
+        let mut size = initial_indent;
         for s4 in s2.split(" ") {
-            //if size > indent {
-            //    if size + s4.len() > YAML_LINE_LENGTH {
-            //        if size + s4.len() < YAML_LINE_LENGTH + YAML_TOL {
-            //            s3.push_str(" ");
-            //            s3.push_str(s4);
-            //            s3.push_str("\n");
-            //            for _ in 0..indent {
-            //                s3.push_str(" ");
-            //            }
-            //            size = indent;
-            //        } else {
-            //            s3.push_str("\n");
-            //            for _ in 0..indent {
-            //                s3.push_str(" ");
-            //            }
-            //            size = indent + s4.len();
-            //            s3.push_str(&s4);
-            //        }
-            //    } else {
-            //        s3.push_str(" ");
-            //        s3.push_str(&s4);
-            //        size += s4.len() + 1;
-            //    }
-            //} else {
-            //    s3.push_str(&s4);
-            //    size += s4.len();
-            //}
-            if size > indent {
+            if size > indent && s3.len() > 0 {
                 s3.push_str(" ");
                 size += 1;
             }
             s3.push_str(&s4);
             size += s4.len();
             if size > YAML_LINE_LENGTH {
-                s3.push_str("\n");
-                for _ in 0..indent {
-                    s3.push_str(" ");
+                if s3.starts_with("\"") {
+                    s3.push_str("\\\n");
+                    for _ in 0..indent {
+                        s3.push_str(" ");
+                    }
+                    s3.push_str("\\");
+                    size = indent + 1;
+                } else {
+                    s3.push_str("\n");
+                    for _ in 0..indent {
+                        s3.push_str(" ");
+                    }
+                    size = indent;
                 }
-                size = indent;
             }
         } 
         if size == indent {
             s3.truncate(s3.len() - indent - 1);
+        }
+        if size == indent + 1 && s3.starts_with("\"") {
+            s3.truncate(s3.len() - indent - 3);
         }
         s3
     } else {
@@ -220,7 +217,7 @@ impl Entries {
     }
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         for (lemma, by_pos) in self.0.iter() {
-            write!(w, "{}:\n", escape_yaml_string(lemma,0))?;
+            write!(w, "{}:\n", escape_yaml_string(lemma,0,0))?;
             for (pos, entry) in by_pos.iter() {
                 write!(w, "  {}:\n", pos)?;
                 entry.save(w)?;
@@ -365,10 +362,10 @@ impl Sense {
         first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
         first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
         if first {
-            write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8))?;
+            write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
         } else {
-            write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8))?;
+            write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
         }
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
         write_prop_sense(w, &self.other, "other", first)?;
@@ -394,13 +391,13 @@ fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, 
     } else if !first {
         write!(w, "\n      {}:", name)?; 
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8))?;
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
         }
         Ok(false)
     } else {
         write!(w, "{}:", name)?; 
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8))?;
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
         }
         Ok(false)
     }
@@ -822,7 +819,7 @@ impl Synset {
         if !self.definition.is_empty() {
             write!(w, "\n  definition:")?;
             for defn in self.definition.iter() {
-                write!(w, "\n  - {}", escape_yaml_string(defn,4))?;
+                write!(w, "\n  - {}", escape_yaml_string(defn,4,4))?;
             }
         }
         write_prop_synset(w, &self.direction, "direction")?;
@@ -850,7 +847,7 @@ impl Synset {
         write_prop_synset(w, &self.manner_of, "manner_of")?;
         write!(w, "\n  members:")?;
         for m in self.members.iter() {
-            write!(w, "\n  - {}", escape_yaml_string(m, 4))?;
+            write!(w, "\n  - {}", escape_yaml_string(m, 4,4))?;
         }
         write_prop_synset(w, &self.mero_location, "mero_location")?;
         write_prop_synset(w, &self.mero_member, "mero_member")?;
@@ -867,7 +864,7 @@ impl Synset {
         write_prop_synset(w, &self.similar, "similar")?;
         match &self.source {
             Some(s) => { 
-                write!(w, "\n  source: {}", escape_yaml_string(s, 4))?;
+                write!(w, "\n  source: {}", escape_yaml_string(s, 4, 4))?;
             },
             None => {}
         };
@@ -911,10 +908,10 @@ impl Example {
         match &self.source {
             Some(s) => {
                 write!(w, "source: {}\n    text: {}", s,
-                       escape_yaml_string(&self.text, 6))?;
+                       escape_yaml_string(&self.text, 6, 10))?;
             },
             None => {
-                write!(w, "{}", escape_yaml_string(&self.text, 4))?;
+                write!(w, "{}", escape_yaml_string(&self.text, 4, 4))?;
             }
         }
         Ok(())
@@ -1147,20 +1144,20 @@ partOfSpeech: n";
     #[test]
     fn test_split_line() {
         let string = "especially of muscles; drawing away from the midline of the body or from an adjacent part";
-        assert_eq!("especially of muscles; drawing away from the midline of the body or from an adjacent\n    part", escape_yaml_string(string, 4));
+        assert_eq!("especially of muscles; drawing away from the midline of the body or from an adjacent\n    part", escape_yaml_string(string, 4, 4));
     }
 
 
     #[test]
     fn test_split_line2() {
         let string = "(usually followed by `to') having the necessary means or skill or know-how or authority to do something";
-        assert_eq!("(usually followed by `to') having the necessary means or skill or know-how or\n    authority to do something", escape_yaml_string(string, 4));
+        assert_eq!("(usually followed by `to') having the necessary means or skill or know-how or\n    authority to do something", escape_yaml_string(string, 4, 4));
     }
 
     #[test]
     fn test_split_line3() {
         let string = "\"the abaxial surface of a leaf is the underside or side facing away from the stem\"";
-        assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4));
+        assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4, 4));
     }
 
     #[test]
@@ -1183,6 +1180,12 @@ partOfSpeech: n";
             form: Vec::new()
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
+    }
+
+    #[test]
+    fn test_unicode_convert() {
+        assert_eq!("\"f\\xF6o\"",escape_yaml_string("föo", 0, 0));
+        assert_eq!("\"\\\"f\\xF6o\\\"\"",escape_yaml_string("\"föo\"", 0, 0));
     }
 
 //    #[test]
