@@ -13,7 +13,6 @@
 //sense_id_re = re.compile(r"ewn-(.*)-(.)-(\d{8})-\d{2}")
 //
 //
-use std::collections::HashSet;
 use crate::wordnet_yaml::*;
 use crate::rels::*;
 

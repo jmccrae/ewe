@@ -2,6 +2,7 @@ extern crate lazy_static;
 extern crate serde;
 extern crate serde_yaml;
 extern crate indicatif;
+extern crate regex;
 
 //mod wordnet;
 mod rels;
@@ -10,7 +11,7 @@ mod wordnet_yaml;
 
 use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense};
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 
 //import change_manager
 //from change_manager import ChangeList
@@ -243,7 +244,7 @@ fn change_definition(wn : &mut Lexicon, change_list : &mut EWEChange) {
     let (synset_id, synset) = enter_synset(wn, "");
 
     println!("Definition     : {}", synset.definition[0]);
-    let mut defn = String::new();
+    let mut defn;
     loop { 
         defn = input("New Definition : ");
         if check_text(&defn) {
@@ -574,7 +575,9 @@ impl EWEChange {
     pub fn new() -> EWEChange { EWEChange(false) }
 }
 
-fn save(wn : &Lexicon) {}
+fn save(wn : &Lexicon) -> std::io::Result<()> {
+    wn.save("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/")
+}
 
 fn input(prompt : &str) -> String {
     io::stdout().lock().write_all(prompt.as_bytes()).expect("Cannot write to STDOUT");
@@ -607,13 +610,13 @@ fn main_menu(wn : &mut Lexicon, ewe_changed : &mut EWEChange) -> bool {
         "5" => change_relation(wn, ewe_changed),
         "6" => split_synset(wn, ewe_changed),
         "7" => {
-            save(wn);
+            save(wn).expect("Could not save");
             ewe_changed.reset();
         },
         "x" => {
             if ewe_changed.changed() {
                 if input("Save changes (Y/n)? ").to_lowercase() != "n" {
-                    save(wn);
+                    save(wn).expect("Could not save");
                     ewe_changed.reset();
                 }
             }

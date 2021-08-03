@@ -1,6 +1,6 @@
 use thiserror::Error;
 use serde::{Serialize,Deserialize,Serializer,Deserializer};
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::fs;
 use std::path::Path;
 use std::fs::File;
@@ -10,6 +10,8 @@ use serde::de::{self, Visitor, MapAccess};
 use crate::serde::ser::SerializeMap;
 use crate::rels::YamlSynsetRelType;
 use indicatif::ProgressBar;
+use lazy_static::lazy_static;
+use regex::Regex;
 
 pub struct Lexicon {
     entries : HashMap<String, Entries>,
@@ -22,11 +24,13 @@ impl Lexicon {
         let mut entries = HashMap::new();
         let mut synsets = HashMap::new();
         let mut synset_id_to_lexfile = HashMap::new();
-        let folder_files = fs::read_dir(folder)?;
+        let folder_files = fs::read_dir(folder)
+            .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
         println!("Loading WordNet");
         let bar = ProgressBar::new(72);
         for file in folder_files {
-            let file = file?;
+            let file = file.map_err(|e|
+                WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
             let file_name = file.path().file_name().
                 and_then(|x| x.to_str()).
                 map(|x| x.to_string()).
@@ -34,9 +38,14 @@ impl Lexicon {
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
                 let key = file_name[8..9].to_string();
                 entries.insert(key,
-                    serde_yaml::from_reader(File::open(file.path())?)?);
+                    serde_yaml::from_reader(File::open(file.path())
+                        .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
+                        .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?);
             } else if file_name.ends_with(".yaml") && file_name != "frames.yaml" {
-                let synsets2 : Synsets = serde_yaml::from_reader(File::open(file.path())?)?;
+                let synsets2 : Synsets = serde_yaml::from_reader(
+                    File::open(file.path())
+                        .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
+                        .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
                 let lexname = file_name[0..file_name.len()-5].to_string();
                 for id in synsets2.0.keys() {
                     synset_id_to_lexfile.insert(id.clone(), lexname.clone());
@@ -47,6 +56,25 @@ impl Lexicon {
         }
         bar.finish();
         Ok(Lexicon { entries, synsets, synset_id_to_lexfile })
+    }
+
+    pub fn save<P: AsRef<Path>>(&self, folder : P) -> std::io::Result<()> {
+        println!("Saving WordNet");
+        let bar = ProgressBar::new(72);
+        for (ekey, entries) in self.entries.iter() {
+            let mut w = File::create(folder.as_ref().join(
+                format!("entries-{}.yaml", ekey)))?;
+            entries.save(&mut w)?;
+            bar.inc(1);
+        }
+        for (skey, synsets) in self.synsets.iter() {
+            let mut w = File::create(folder.as_ref().join(
+                format!("{}.yaml", skey)))?;
+            synsets.save(&mut w)?;
+            bar.inc(1);
+        }
+        bar.finish();
+        Ok(())
     }
 
     pub fn lex_name_for(&self, synset_id : &SynsetId) -> Option<String> {
@@ -112,12 +140,93 @@ impl Lexicon {
     }
 }
 
+static YAML_LINE_LENGTH : usize = 80;
+lazy_static! {
+    static ref NUMBERS: Regex = Regex::new("^(\\.)?\\d+$").unwrap();
+    //static ref KEY_LIKE: Regex = Regex::new("^\\w+:.*$").unwrap();
+}
+
+fn escape_yaml_string(s : &str, indent : usize) -> String {
+    let s2 = if s.starts_with("\"") || s.ends_with(":") 
+        || s.starts_with("'") || s == "true" || s == "false" 
+         || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
+         || s.ends_with(" ") || s.contains(": ")
+         || s == "No" || s == "off" || s == "on" 
+         || s.starts_with("`") {
+        format!("'{}'", str::replace(s, "'", "''"))
+    } else {
+        s.to_owned()
+    };
+    if s2.len() + indent > YAML_LINE_LENGTH {
+        let mut s3 = String::new();
+        let mut size = indent;
+        for s4 in s2.split(" ") {
+            //if size > indent {
+            //    if size + s4.len() > YAML_LINE_LENGTH {
+            //        if size + s4.len() < YAML_LINE_LENGTH + YAML_TOL {
+            //            s3.push_str(" ");
+            //            s3.push_str(s4);
+            //            s3.push_str("\n");
+            //            for _ in 0..indent {
+            //                s3.push_str(" ");
+            //            }
+            //            size = indent;
+            //        } else {
+            //            s3.push_str("\n");
+            //            for _ in 0..indent {
+            //                s3.push_str(" ");
+            //            }
+            //            size = indent + s4.len();
+            //            s3.push_str(&s4);
+            //        }
+            //    } else {
+            //        s3.push_str(" ");
+            //        s3.push_str(&s4);
+            //        size += s4.len() + 1;
+            //    }
+            //} else {
+            //    s3.push_str(&s4);
+            //    size += s4.len();
+            //}
+            if size > indent {
+                s3.push_str(" ");
+                size += 1;
+            }
+            s3.push_str(&s4);
+            size += s4.len();
+            if size > YAML_LINE_LENGTH {
+                s3.push_str("\n");
+                for _ in 0..indent {
+                    s3.push_str(" ");
+                }
+                size = indent;
+            }
+        } 
+        if size == indent {
+            s3.truncate(s3.len() - indent - 1);
+        }
+        s3
+    } else {
+        s2
+    }
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Entries(HashMap<String, HashMap<String, Entry>>);
+pub struct Entries(BTreeMap<String, BTreeMap<String, Entry>>);
 
 impl Entries {
     fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
         self.0.get(lemma).iter().flat_map(|x| x.values()).collect()
+    }
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        for (lemma, by_pos) in self.0.iter() {
+            write!(w, "{}:\n", escape_yaml_string(lemma,0))?;
+            for (pos, entry) in by_pos.iter() {
+                write!(w, "  {}:\n", pos)?;
+                entry.save(w)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -129,10 +238,32 @@ pub struct Entry {
     pub form : Vec<String>
 }
 
+impl Entry {
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        if !self.form.is_empty() {
+            write!(w,"    form:")?;
+            for f in self.form.iter() {
+                write!(w, "\n    - {}", f)?;
+            }
+            write!(w,"\n")?;
+        }
+        write!(w,"    sense:")?;
+        for s in self.sense.iter() {
+            s.save(w)?;
+        }
+        write!(w, "\n")?;
+        Ok(())
+    }
+}
+
+
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sense {
     pub id : SenseId,
     pub synset : SynsetId,
+    #[serde(default)]
+    pub adjposition : Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
@@ -194,7 +325,8 @@ impl Sense {
             exemplifies: Vec::new(),
             is_exemplified_by: Vec::new(),
             similar: Vec::new(),
-            other: Vec::new()
+            other: Vec::new(),
+            adjposition: None
         }
     }
 
@@ -214,9 +346,16 @@ impl Sense {
         self.other.retain(|x| x != target);
     }
 
-    pub fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         write!(w, "\n    - ")?;
         let mut first = true;
+        match self.adjposition {
+            Some(ref adjposition) => { 
+                write!(w, "adjposition: {}", adjposition)?;
+                first = false
+            },
+            None => {}
+        };
         first = write_prop_sense(w, &self.also, "also", first)?;
         first = write_prop_sense(w, &self.antonym, "antonym", first)?;
         first = write_prop_sense(w, &self.derivation, "derivation", first)?;
@@ -226,10 +365,10 @@ impl Sense {
         first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
         first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
         if first {
-            write!(w, "id:\n      - '{}'", self.id.as_str())?;
+            write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8))?;
             first = false;
         } else {
-            write!(w, "\n      id:\n      - '{}'", self.id.as_str())?;
+            write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8))?;
         }
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
         write_prop_sense(w, &self.other, "other", first)?;
@@ -237,17 +376,12 @@ impl Sense {
         write_prop_sense(w, &self.pertainym, "pertainym", first)?;
         write_prop_sense(w, &self.similar, "similar", first)?;
         if !self.subcat.is_empty() {
-            write!(w, "\n      subcat:\n      - ")?;
-            let mut f = true;
+            write!(w, "\n      subcat:")?;
             for subcat_id in self.subcat.iter() {
-                if !f {
-                    write!(w, "\n        ")?;
-                }
-                write!(w, "{}", subcat_id);
+                write!(w, "\n      - {}", subcat_id)?;
             }
-            f = false;
         }
-        write!(w, "\n      synset: {}\n", self.synset.as_str())?;
+        write!(w, "\n      synset: {}", self.synset.as_str())?;
      
         Ok(())
     }
@@ -258,23 +392,34 @@ fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, 
     if senses.is_empty() {
         Ok(first)
     } else if !first {
-        write!(w, "\n      {}:\n      - ", name)?;
-        let mut f = true;
+        write!(w, "\n      {}:", name)?; 
         for sense_id in senses.iter() {
-            if !f {
-                write!(w, "\n        ")?;
-            }
-            write!(w, "'{}'", sense_id.as_str());
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8))?;
         }
-        f = false;
         Ok(false)
     } else {
-        Ok(first)
+        write!(w, "{}:", name)?; 
+        for sense_id in senses.iter() {
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8))?;
+        }
+        Ok(false)
     }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Synsets(HashMap<SynsetId, Synset>);
+pub struct Synsets(BTreeMap<SynsetId, Synset>);
+
+impl Synsets {
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        for (key, ss) in self.0.iter() {
+            write!(w, "{}:", key.as_str())?;
+            ss.save(w)?;
+            write!(w, "\n")?;
+        }
+        Ok(())
+    }
+}
+    
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Synset {
@@ -282,6 +427,7 @@ pub struct Synset {
     #[serde(default)]
     pub example : Vec<Example>,
     pub ili : Option<ILIID>,
+    pub source : Option<String>,
     members : Vec<String>,
     #[serde(rename="partOfSpeech")]
     part_of_speech : PartOfSpeech,
@@ -366,6 +512,56 @@ pub struct Synset {
 }
 
 impl Synset {
+    pub fn new(part_of_speech : PartOfSpeech) -> Synset {
+        Synset {
+            definition : Vec::new(),
+            example : Vec::new(),
+            ili : None,
+            source : None,
+            members : Vec::new(),
+            part_of_speech,
+            agent : Vec::new(),
+            also : Vec::new(),
+            attribute : Vec::new(),
+            be_in_state : Vec::new(),
+            causes : Vec::new(),
+            classifies : Vec::new(),
+            co_agent_instrument : Vec::new(),
+            co_agent_patient : Vec::new(),
+            co_agent_result : Vec::new(),
+            co_patient_instrument : Vec::new(),
+            co_result_instrument : Vec::new(),
+            co_role : Vec::new(),
+            direction : Vec::new(),
+            domain_region : Vec::new(),
+            domain_topic : Vec::new(),
+            exemplifies : Vec::new(),
+            entails : Vec::new(),
+            eq_synonym : Vec::new(),
+            hypernym : Vec::new(),
+            instance_hypernym : Vec::new(),
+            instrument : Vec::new(),
+            location : Vec::new(),
+            manner_of : Vec::new(),
+            mero_location : Vec::new(),
+            mero_member : Vec::new(),
+            mero_part : Vec::new(),
+            mero_portion : Vec::new(),
+            mero_substance : Vec::new(),
+            meronym : Vec::new(),
+            similar : Vec::new(),
+            other : Vec::new(),
+            patient : Vec::new(),
+            restricts : Vec::new(),
+            result : Vec::new(),
+            role : Vec::new(),
+            source_direction : Vec::new(),
+            target_direction : Vec::new(),
+            subevent : Vec::new(),
+            antonym : Vec::new()
+        }
+    }
+
     pub fn remove_all_relations(&mut self, target : &SynsetId) {
         self.agent.retain(|x| x != target);
         self.also.retain(|x| x != target);
@@ -608,6 +804,91 @@ impl Synset {
             }
         }
     }
+
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        write_prop_synset(w, &self.agent, "agent")?;
+        write_prop_synset(w, &self.also, "also")?;
+        write_prop_synset(w, &self.antonym, "antonym")?;
+        write_prop_synset(w, &self.attribute, "attribute")?;
+        write_prop_synset(w, &self.be_in_state, "be_in_state")?;
+        write_prop_synset(w, &self.causes, "causes")?;
+        write_prop_synset(w, &self.classifies, "classifies")?;
+        write_prop_synset(w, &self.co_agent_instrument, "co_agent_instrument")?;
+        write_prop_synset(w, &self.co_agent_patient, "co_agent_patient")?;
+        write_prop_synset(w, &self.co_agent_result, "co_agent_result")?;
+        write_prop_synset(w, &self.co_patient_instrument, "co_patient_instrument")?;
+        write_prop_synset(w, &self.co_result_instrument, "co_result_instrument")?;
+        write_prop_synset(w, &self.co_role, "co_role")?;
+        if !self.definition.is_empty() {
+            write!(w, "\n  definition:")?;
+            for defn in self.definition.iter() {
+                write!(w, "\n  - {}", escape_yaml_string(defn,4))?;
+            }
+        }
+        write_prop_synset(w, &self.direction, "direction")?;
+        write_prop_synset(w, &self.domain_region, "domain_region")?;
+        write_prop_synset(w, &self.domain_topic, "domain_topic")?;
+        write_prop_synset(w, &self.entails, "entails")?;
+        write_prop_synset(w, &self.eq_synonym, "eq_synonym")?;
+        if !self.example.is_empty() {
+            write!(w, "\n  example:")?;
+            for example in self.example.iter() {
+                example.save(w)?;
+            }
+        }
+        write_prop_synset(w, &self.exemplifies, "exemplifies")?;
+        write_prop_synset(w, &self.hypernym, "hypernym")?;
+        match &self.ili {
+            Some(s) => { 
+                write!(w, "\n  ili: {}", s.as_str())?;
+            },
+            None => {}
+        }
+        write_prop_synset(w, &self.instance_hypernym, "instance_hypernym")?;
+        write_prop_synset(w, &self.instrument, "instrument")?;
+        write_prop_synset(w, &self.location, "location")?;
+        write_prop_synset(w, &self.manner_of, "manner_of")?;
+        write!(w, "\n  members:")?;
+        for m in self.members.iter() {
+            write!(w, "\n  - {}", escape_yaml_string(m, 4))?;
+        }
+        write_prop_synset(w, &self.mero_location, "mero_location")?;
+        write_prop_synset(w, &self.mero_member, "mero_member")?;
+        write_prop_synset(w, &self.mero_part, "mero_part")?;
+        write_prop_synset(w, &self.mero_portion, "mero_portion")?;
+        write_prop_synset(w, &self.mero_substance, "mero_substance")?;
+        write_prop_synset(w, &self.meronym, "meronym")?;
+        write_prop_synset(w, &self.other, "other")?;
+        write!(w, "\n  partOfSpeech: {}", self.part_of_speech.value())?;
+        write_prop_synset(w, &self.patient, "patient")?;
+        write_prop_synset(w, &self.restricts, "restricts")?;
+        write_prop_synset(w, &self.result, "result")?;
+        write_prop_synset(w, &self.role, "role")?;
+        write_prop_synset(w, &self.similar, "similar")?;
+        match &self.source {
+            Some(s) => { 
+                write!(w, "\n  source: {}", escape_yaml_string(s, 4))?;
+            },
+            None => {}
+        };
+        write_prop_synset(w, &self.source_direction, "source_direction")?;
+        write_prop_synset(w, &self.subevent, "subevent")?;
+        write_prop_synset(w, &self.target_direction, "target_direction")?;
+        Ok(())
+    }
+
+}
+
+fn write_prop_synset<W : Write>(w : &mut W, synsets : &Vec<SynsetId>, name : &str) -> std::io::Result<()> {
+    if synsets.is_empty() {
+        Ok(())
+    } else {
+        write!(w, "\n  {}:", name)?;
+        for sense_id in synsets.iter() {
+            write!(w, "\n  - {}", sense_id.as_str())?;
+        }
+        Ok(())
+    }
 }
 
 
@@ -616,6 +897,28 @@ impl Synset {
 pub struct Example {
     pub text : String,
     pub source : Option<String>
+}
+
+impl Example {
+    fn new(text : &str, source : Option<String>) -> Example {
+        Example {
+            text: text.to_string(), source 
+        }
+    }
+
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        write!(w, "\n  - ")?;
+        match &self.source {
+            Some(s) => {
+                write!(w, "source: {}\n    text: {}", s,
+                       escape_yaml_string(&self.text, 6))?;
+            },
+            None => {
+                write!(w, "{}", escape_yaml_string(&self.text, 4))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Serialize for Example {
@@ -685,18 +988,36 @@ impl<'de> Visitor<'de> for ExampleVisitor
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ILIID(String);
 
+impl ILIID {
+    pub fn new(s : &str) -> ILIID { ILIID(s.to_string()) }
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-enum PartOfSpeech { n, v, a, r, s }
+pub enum PartOfSpeech { n, v, a, r, s }
+
+impl PartOfSpeech {
+    fn value(&self) -> &'static str {
+        match self {
+            PartOfSpeech::n => "n",
+            PartOfSpeech::v => "v",
+            PartOfSpeech::a => "a",
+            PartOfSpeech::r => "r",
+            PartOfSpeech::s => "s"
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash)]
 pub struct SenseId(String);
 
 impl SenseId {
+    pub fn new(s : &str) -> SenseId { SenseId(s.to_string()) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
 pub struct SynsetId(String);
 
 impl SynsetId {
@@ -706,10 +1027,10 @@ impl SynsetId {
 
 #[derive(Error,Debug)]
 pub enum WordNetYAMLIOError {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Serde(#[from] serde_yaml::Error)
+    #[error("Could not load WordNet: {0}")]
+    Io(String),
+    #[error("Could not load WordNet: {0}")]
+    Serde(String)
 }
 
 #[cfg(test)]
@@ -732,6 +1053,25 @@ mod tests {
                 form: Vec::new()
             });
     }
+
+    #[test]
+    fn test_save_entry() {
+        let entry_str = "    sense:
+    - id: 'foo%1:01:00::'
+      synset: 00001740-n
+";
+        let mut gen_str : Vec<u8> = Vec::new();
+
+        Entry {
+            sense: vec![Sense::new(
+                SenseId("foo%1:01:00::".to_string()),
+                SynsetId("00001740-n".to_string())
+            )],
+            form: Vec::new()
+        }.save(&mut gen_str).unwrap();
+        assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
+    }
+ 
 
     #[test]
     fn test_entries() {
@@ -777,6 +1117,72 @@ members:
 - course
 partOfSpeech: n";
         let s : Synset = serde_yaml::from_str(&synset_str).unwrap();
+    }
+
+    #[test]
+    fn test_save_synset() {
+        let synset_str = "
+  definition:
+  - part of a meal served at one time
+  example:
+  - '\"she prepared a three course meal\"'
+  hypernym:
+  - 07586285-n
+  ili: i76474
+  members:
+  - course
+  partOfSpeech: n";
+        let mut ss = Synset::new(PartOfSpeech::n);
+        ss.definition.push("part of a meal served at one time".to_owned());
+        ss.example.push(Example::new(
+            "\"she prepared a three course meal\"", None));
+        ss.hypernym.push(SynsetId::new("07586285-n"));
+        ss.ili = Some(ILIID::new("i76474"));
+        ss.members.push("course".to_owned());
+        let mut gen_str : Vec<u8> = Vec::new();
+        ss.save(&mut gen_str).unwrap();
+        assert_eq!(synset_str, String::from_utf8(gen_str).unwrap());
+    }
+
+    #[test]
+    fn test_split_line() {
+        let string = "especially of muscles; drawing away from the midline of the body or from an adjacent part";
+        assert_eq!("especially of muscles; drawing away from the midline of the body or from an adjacent\n    part", escape_yaml_string(string, 4));
+    }
+
+
+    #[test]
+    fn test_split_line2() {
+        let string = "(usually followed by `to') having the necessary means or skill or know-how or authority to do something";
+        assert_eq!("(usually followed by `to') having the necessary means or skill or know-how or\n    authority to do something", escape_yaml_string(string, 4));
+    }
+
+    #[test]
+    fn test_split_line3() {
+        let string = "\"the abaxial surface of a leaf is the underside or side facing away from the stem\"";
+        assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4));
+    }
+
+    #[test]
+    fn test_entry_deriv() {
+        let entry_str = "    sense:
+    - derivation:
+      - 'foo%1:01:00::'
+      id: 'foo%1:01:00::'
+      synset: 00001740-n
+";
+        let mut gen_str : Vec<u8> = Vec::new();
+        let mut sense = Sense::new(
+                SenseId("foo%1:01:00::".to_string()),
+                SynsetId("00001740-n".to_string())
+            );
+        sense.derivation.push(SenseId::new("foo%1:01:00::"));
+
+        Entry {
+            sense: vec![sense],
+            form: Vec::new()
+        }.save(&mut gen_str).unwrap();
+        assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
 
 //    #[test]
