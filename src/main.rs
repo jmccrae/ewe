@@ -8,10 +8,12 @@ extern crate regex;
 mod rels;
 mod change_manager;
 mod wordnet_yaml;
+mod sense_keys;
 
 use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense};
 use std::io;
 use std::io::Write;
+use crate::change_manager::{ChangeList};
 
 //import change_manager
 //from change_manager import ChangeList
@@ -141,28 +143,36 @@ fn check_text(defn : &str) -> bool {
     }
 }
 
-fn change_entry(wn : &mut Lexicon, change_list : &mut EWEChange) {}
-//def change_entry(wn, change_list):
-//    action = input("[A]dd/[D]elete/[M]ove? ").upper()
-//    while action != "A" and action != "D" and action != "M":
-//        print("Bad action")
-//        action = input("[A]dd/[D]elete/[M]ove? ").upper()
-//
-//    synset = enter_synset(wn)
-//
-//    entries = wn.members_by_id(synset.id)
-//    if entries:
-//        print("Entries: " + ", ".join(entries))
-//    else:
-//        print("No entries")
-//
-//    if action == "A":
-//        lemma = input("New entry: ")
-//    elif action == "D":
-//        lemma = input("Entry to remove: ")
-//    elif action == "M":
-//        lemma = input("Entry to move: ")
-//
+fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
+    let mut action = input("[A]dd/[D]elete/[M]ove> ").to_uppercase();
+    while action != "A" && action != "D" && action != "M" {
+        println!("Bad action");
+        action = input("[A]dd/[D]elete/[M]ove> ").to_uppercase();
+    }
+
+    let (synset_id, synset) = enter_synset(wn, "");
+
+    let mut synset : Synset = synset.clone();
+
+    let entries = wn.members_by_id(&synset_id);
+
+    if !entries.is_empty() {
+        println!("Entries: {}", entries.join(", "));
+    } else {
+        println!("No entries");
+    }
+
+    let lemma = if action == "A" {
+        input("New entry: ")
+    } else if action == "D" {
+        input("Entry to remove: ")
+    } else /* action == "M" */ {
+        input("Entry to move: ")
+    };
+
+    if action == "A" {
+        change_manager::add_entry(wn, synset_id, &mut synset, lemma, change_list) 
+    }
 //    if action == "A":
 //        change_manager.add_entry(wn, synset, lemma, change_list=change_list)
 //    elif action == "D":
@@ -194,7 +204,9 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut EWEChange) {}
 //    return True
 //
 //
-fn change_synset(wn : &mut Lexicon, change_list : &mut EWEChange) {}
+}
+
+fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def change_synset(wn, change_list):
 //
 //    mode = None
@@ -240,7 +252,7 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut EWEChange) {}
 //    return True
 //
 //
-fn change_definition(wn : &mut Lexicon, change_list : &mut EWEChange) {
+fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
     let (synset_id, synset) = enter_synset(wn, "");
 
     println!("Definition     : {}", synset.definition[0]);
@@ -274,7 +286,7 @@ fn change_definition(wn : &mut Lexicon, change_list : &mut EWEChange) {
 //    return True
 //
 //
-fn change_example(wn : &mut Lexicon, change_list : &mut EWEChange) {}
+fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def change_example(wn, change_list):
 //    synset = enter_synset(wn)
 //
@@ -307,7 +319,7 @@ fn change_example(wn : &mut Lexicon, change_list : &mut EWEChange) {}
 //    return True
 //
 //
-fn change_relation(wn : &mut Lexicon, change_list : &mut EWEChange) {}
+fn change_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def change_relation(wn, change_list, source_id=None):
 //    mode = None
 //    new_source = None
@@ -533,7 +545,7 @@ fn change_relation(wn : &mut Lexicon, change_list : &mut EWEChange) {}
 //    return True
 //
 //
-fn split_synset(wn : &mut Lexicon, change_list : &mut EWEChange) {}
+fn split_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def split_synset(wn, change_list):
 //    synset = enter_synset(wn)
 //
@@ -566,15 +578,6 @@ fn split_synset(wn : &mut Lexicon, change_list : &mut EWEChange) {}
 //change_list = ChangeList()
 
 
-struct EWEChange(bool);
-
-impl EWEChange {
-    pub fn changed(&self) -> bool { self.0 }
-    pub fn mark(&mut self) { self.0 = true; }
-    pub fn reset(&mut self) { self.0 = false; }
-    pub fn new() -> EWEChange { EWEChange(false) }
-}
-
 fn save(wn : &Lexicon) -> std::io::Result<()> {
     wn.save("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/")
 }
@@ -587,7 +590,7 @@ fn input(prompt : &str) -> String {
     buffer.trim().to_string()
 }
 
-fn main_menu(wn : &mut Lexicon, ewe_changed : &mut EWEChange) -> bool {
+fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
     println!("Please choose an option:");
     println!("1. Add/delete/move entry");
     println!("2. Add/delete a synset");
@@ -638,7 +641,7 @@ fn main() {
 
     let mut wn = wordnet_yaml::Lexicon::load("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/").unwrap();
 
-    let mut ewe_changed = EWEChange::new();
+    let mut ewe_changed = ChangeList::new();
 
     while main_menu(&mut wn, &mut ewe_changed) {}
 }

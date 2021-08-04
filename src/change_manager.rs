@@ -16,6 +16,16 @@
 use crate::wordnet_yaml::*;
 use crate::rels::*;
 
+pub struct ChangeList(bool);
+
+impl ChangeList {
+    pub fn changed(&self) -> bool { self.0 }
+    pub fn mark(&mut self) { self.0 = true; }
+    pub fn reset(&mut self) { self.0 = false; }
+    pub fn new() -> ChangeList { ChangeList(false) }
+}
+
+
 //pub struct ChangeList {
 //    lexfiles : HashSet<String>,
 //    entry_files : HashSet<char>
@@ -155,51 +165,33 @@ pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
 //        change_list.change_entry(wn, entry)
 //
 //
-//def add_entry(wn, synset, lemma, idx=0, n=-1, change_list=None):
-//    """Add a new lemma to a synset"""
-//    print("Adding %s to synset %s" % (lemma, synset.id))
-//    n_entries = len(empty_if_none(wn.members_by_id(synset.id)))
-//    entry_global = [entry for entry in empty_if_none(wn.entry_by_lemma(lemma))
-//                    if wn.entry_by_id(entry).lemma.part_of_speech == synset.part_of_speech or
-//                    wn.entry_by_id(entry).lemma.part_of_speech == PartOfSpeech.ADJECTIVE and synset.part_of_speech == PartOfSpeech.ADJECTIVE_SATELLITE or
-//                    wn.entry_by_id(entry).lemma.part_of_speech == PartOfSpeech.ADJECTIVE_SATELLITE and synset.part_of_speech == PartOfSpeech.ADJECTIVE]
-//
-//    if len(entry_global) == 1:
-//        entry_global = wn.entry_by_id(entry_global[0])
-//        n_senses = len(entry_global.senses)
-//    else:
-//        entry_global = None
-//        n_senses = 0
-//
-//    if idx <= 0:
-//        idx = n_entries + 1
-//    elif idx > n_entries + 1:
-//        raise Exception("IDX value specified is higher than number of entries")
-//    elif idx == n_entries + 1:
-//        pass
-//    else:
-//        for sense_id in sense_ids_for_synset(wn, synset):
-//            this_idx = int(sense_id[-2:])
-//            if this_idx >= idx:
-//                change_sense_idx(wn, sense_id, this_idx + 1)
-//
-//    if n < 0:
-//        n = n_senses
-//    elif n > n_senses:
-//        raise Exception("n value exceeds number of senses for lemma")
-//    elif n == n_senses:
-//        pass
-//    else:
-//        sense_n = 0
-//        for sense in entry_global.senses:
-//            if sense_n >= n:
-//                change_sense_n(wn, entry_global, sense.id, sense_n + 1)
-//            sense_n += 1
-//
-//    wn_synset = wn
-//    entries = [entry for entry in empty_if_none(wn_synset.entry_by_lemma(
-//        lemma)) if wn.entry_by_id(entry).lemma.part_of_speech == synset.part_of_speech]
-//
+pub fn add_entry(wn : &Lexicon, synset_id : SynsetId, synset : &mut Synset,
+                 lemma : String, 
+                 change_list : &mut ChangeList) {
+    print!("Adding {} to synset {}", lemma, synset_id.as_str());
+
+    let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter()
+        .filter(|(pos, lemma)| synset.part_of_speech.equals_str(pos))
+        .map(|x| x.1)
+        .collect::<Vec<&Entry>>();
+
+    let mut entry = entries.pop();
+
+    if entries.len() > 1 {
+        println!("More than one entry for {} ({}). Please check the YAML file",
+            lemma, synset.part_of_speech.value());
+    }
+
+    match entry {
+        Some(e) => {
+//        sense.sense_key = 
+//            e.sense.push(Sense::new(
+//                get_sense_key(wn, entry, sense, synset.lex_name),
+//                synset_id.clone()));
+            synset.members.push(lemma.clone());
+        },
+        None => { }
+    }
 //    if entries:
 //        if len(entries) != 1:
 //            raise Exception("More than one entry for part of speech")
@@ -245,6 +237,7 @@ pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
 //    if change_list:
 //        change_list.change_entry(wn, entry)
 //    return entry
+}
 //
 //
 //def delete_entry(wn, synset, entry_id, change_list=None):

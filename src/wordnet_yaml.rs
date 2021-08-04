@@ -20,6 +20,15 @@ pub struct Lexicon {
 }
 
 impl Lexicon {
+    /// Create a new empty lexicon
+    pub fn new() -> Lexicon {
+        Lexicon {
+            entries: HashMap::new(),
+            synsets: HashMap::new(),
+            synset_id_to_lexfile: HashMap::new()
+        }
+    }
+
     pub fn load<P: AsRef<Path>>(folder : P) -> Result<Lexicon, WordNetYAMLIOError> {
         let mut entries = HashMap::new();
         let mut synsets = HashMap::new();
@@ -106,6 +115,31 @@ impl Lexicon {
         }
     }
 
+    pub fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&String, &Entry)> {
+        match lemma.chars().nth(0) {
+            Some(c) if c.to_ascii_lowercase() > 'a' && c.to_ascii_lowercase() < 'z' => {
+                let key = format!("{}", c.to_lowercase());
+                match self.entries.get(&key) {
+                    Some(v) => v.entry_by_lemma_with_pos(lemma),
+                    None => {
+                        eprintln!("No entries for {}", key);
+                        Vec::new()
+                    }
+                }
+            },
+            Some(c) => {
+                match self.entries.get("0") {
+                    Some(v) => v.entry_by_lemma_with_pos(lemma),
+                    None => Vec::new()
+                }
+            },
+            None => {
+                eprintln!("Query with empty string");
+                Vec::new()
+            }
+        }
+    }
+
     pub fn synset_by_id(&self, synset_id : &SynsetId) -> Option<&Synset> {
         match self.lex_name_for(synset_id) {
             Some(lex_name) => {
@@ -137,6 +171,29 @@ impl Lexicon {
 
     pub fn has_synset(&self, synset_id : &SynsetId) -> bool {
         self.synset_by_id(synset_id).is_some()
+    }
+
+    pub fn members_by_id(&self, synset_id : &SynsetId) -> Vec<String> {
+        self.synset_by_id(synset_id).iter().flat_map(|synset|
+            synset.members.iter().map(|x| x.clone())).collect()
+    }
+
+    pub fn insert_entry(&mut self, lemma : String, pos : String, entry : Entry) {
+        let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
+        let key = if key < 'a' || key > 'z' {
+            '0'
+        } else {
+            key
+        };
+        self.entries.entry(key.to_string()).
+            or_insert_with(|| Entries::new()).insert_entry(lemma, pos, entry);
+    }
+
+    pub fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
+                         synset : Synset) {
+        self.synset_id_to_lexfile.insert(synset_id.clone(), lexname.clone());
+        self.synsets.entry(lexname).
+            or_insert_with(|| Synsets::new()).0.insert(synset_id, synset);
     }
 }
 
@@ -283,9 +340,18 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
 pub struct Entries(BTreeMap<String, BTreeMap<String, Entry>>);
 
 impl Entries {
+    fn new() -> Entries {
+        Entries(BTreeMap::new())
+    }
+
     fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
         self.0.get(lemma).iter().flat_map(|x| x.values()).collect()
     }
+
+    fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&String, &Entry)> {
+        self.0.get(lemma).iter().flat_map(|x| x.iter()).collect()
+    }
+
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         for (lemma, by_pos) in self.0.iter() {
             write!(w, "{}:\n", escape_yaml_string(lemma,0,0))?;
@@ -296,9 +362,13 @@ impl Entries {
         }
         Ok(())
     }
+    pub fn insert_entry(&mut self, lemma : String, pos : String, entry : Entry) {
+        self.0.entry(lemma).
+            or_insert_with(|| BTreeMap::new()).insert(pos, entry);
+    }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct Entry {
     pub sense : Vec<Sense>,
     #[serde(default)]
@@ -307,6 +377,13 @@ pub struct Entry {
 }
 
 impl Entry {
+    pub fn new() -> Entry {
+        Entry {
+            sense: Vec::new(),
+            form: Vec::new()
+        }
+    }
+
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         if !self.form.is_empty() {
             write!(w,"    form:")?;
@@ -326,7 +403,7 @@ impl Entry {
 
 
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct Sense {
     pub id : SenseId,
     pub synset : SynsetId,
@@ -478,6 +555,8 @@ fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, 
 pub struct Synsets(BTreeMap<SynsetId, Synset>);
 
 impl Synsets {
+    fn new() -> Synsets { Synsets(BTreeMap::new()) }
+
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         for (key, ss) in self.0.iter() {
             write!(w, "{}:", key.as_str())?;
@@ -489,16 +568,16 @@ impl Synsets {
 }
     
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct Synset {
     pub definition : Vec<String>,
     #[serde(default)]
     pub example : Vec<Example>,
     pub ili : Option<ILIID>,
     pub source : Option<String>,
-    members : Vec<String>,
+    pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]
-    part_of_speech : PartOfSpeech,
+    pub part_of_speech : PartOfSpeech,
     #[serde(default)]
     agent : Vec<SynsetId>,
     #[serde(default)]
@@ -558,7 +637,7 @@ pub struct Synset {
     #[serde(default)]
     meronym : Vec<SynsetId>,
     #[serde(default)]
-    similar : Vec<SynsetId>,
+    pub similar : Vec<SynsetId>,
     #[serde(default)]
     other : Vec<SynsetId>,
     #[serde(default)]
@@ -961,7 +1040,7 @@ fn write_prop_synset<W : Write>(w : &mut W, synsets : &Vec<SynsetId>, name : &st
 
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq,Clone)]
 pub struct Example {
     pub text : String,
     pub source : Option<String>
@@ -1053,7 +1132,7 @@ impl<'de> Visitor<'de> for ExampleVisitor
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct ILIID(String);
 
 impl ILIID {
@@ -1062,17 +1141,47 @@ impl ILIID {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub enum PartOfSpeech { n, v, a, r, s }
 
 impl PartOfSpeech {
-    fn value(&self) -> &'static str {
+    pub fn value(&self) -> &'static str {
         match self {
             PartOfSpeech::n => "n",
             PartOfSpeech::v => "v",
             PartOfSpeech::a => "a",
             PartOfSpeech::r => "r",
             PartOfSpeech::s => "s"
+        }
+    }
+
+    pub fn equals_pos(&self, s : &str) -> bool {
+        match self {
+            PartOfSpeech::n => s.starts_with("n"),
+            PartOfSpeech::v => s.starts_with("v"),
+            PartOfSpeech::a => s.starts_with("a") || s.starts_with("s"),
+            PartOfSpeech::r => s.starts_with("r"),
+            PartOfSpeech::s => s.starts_with("a") || s.starts_with("s")
+        }
+    }
+
+    pub fn equals_str(&self, s : &str) -> bool {
+        match self {
+            PartOfSpeech::n => s.starts_with("n"),
+            PartOfSpeech::v => s.starts_with("v"),
+            PartOfSpeech::a => s.starts_with("a"),
+            PartOfSpeech::r => s.starts_with("r"),
+            PartOfSpeech::s => s.starts_with("s")
+        }
+    }
+
+    pub fn ss_type(&self) -> u32 {
+        match self {
+            PartOfSpeech::n => 1,
+            PartOfSpeech::v => 2,
+            PartOfSpeech::a => 3,
+            PartOfSpeech::r => 4,
+            PartOfSpeech::s => 5
         }
     }
 }
