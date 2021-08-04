@@ -168,7 +168,7 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
         format!("'{}'", str::replace(s, "'", "''"))
     } else {
         s.to_owned()
-    };        
+    }; 
     if s2.len() + indent > YAML_LINE_LENGTH {
         let mut s3 = String::new();
         let mut size = initial_indent;
@@ -177,22 +177,70 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                 s3.push_str(" ");
                 size += 1;
             }
-            s3.push_str(&s4);
-            size += s4.len();
-            if size > YAML_LINE_LENGTH {
-                if s3.starts_with("\"") {
-                    s3.push_str("\\\n");
-                    for _ in 0..indent {
-                        s3.push_str(" ");
+            // Very odd rule in the Python line splitting algorithm
+            if s2.starts_with("\"") &&
+                s4.len() + size > YAML_LINE_LENGTH &&
+                (s4.contains("\\x") || s4.contains("\\u")
+                 || s4.contains("\\\"")) {
+                let mut indices : Vec<usize> =s4.find("\\x").iter().chain(
+                    s4.find("\\u").iter().chain(
+                        s4.find("\\\"").iter())).map(|x| *x).collect();
+                indices.sort();
+                let mut s5 = s4;
+                for i in indices {
+                    let (s6, s7) = s5.split_at(i);
+                    let n = if s7.starts_with("\\u") {
+                        6
+                    } else if s7.starts_with("\\x") {
+                        4
+                    } else /*s7.starts_with("\\\"")*/ {
+                        2
+                    };
+                    if s6.len() + n + size > YAML_LINE_LENGTH {
+                        s3.push_str(s6);
+                        if n == 2 {
+                            s3.push_str("\n\\");
+                            s3.push_str(&s7[0..n]);
+                            for _ in 0..indent {
+                                s3.push_str(" ");
+                            }
+                            size = indent;
+                            s5 = &s7[n..];
+                        } else {
+                            s3.push_str(&s7[0..n]);
+                            s3.push_str("\\\n");
+                            for _ in 0..indent {
+                                s3.push_str(" ");
+                            }
+                            size = indent;
+                            s5 = &s7[n..];
+                        }
+                    } else {
+                        s3.push_str(s6);
+                        size += s6.len();
+                        s5 = s7;
                     }
-                    s3.push_str("\\");
-                    size = indent + 1;
-                } else {
-                    s3.push_str("\n");
-                    for _ in 0..indent {
-                        s3.push_str(" ");
+                }
+                s3.push_str(s5);
+                size += s5.len();
+            } else {
+                s3.push_str(&s4);
+                size += s4.len();
+                if size > YAML_LINE_LENGTH {
+                    if s3.starts_with("\"") {
+                        s3.push_str("\\\n");
+                        for _ in 0..indent {
+                            s3.push_str(" ");
+                        }
+                        s3.push_str("\\");
+                        size = indent + 1;
+                    } else {
+                        s3.push_str("\n");
+                        for _ in 0..indent {
+                            s3.push_str(" ");
+                        }
+                        size = indent;
                     }
-                    size = indent;
                 }
             }
         } 
@@ -1158,6 +1206,18 @@ partOfSpeech: n";
     fn test_split_line3() {
         let string = "\"the abaxial surface of a leaf is the underside or side facing away from the stem\"";
         assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4, 4));
+    }
+
+    #[test]
+    fn test_split_line4() {
+        let string = "Canned cream of mushroom soup has been described as \"America's béchamel\"";
+        assert_eq!("\"Canned cream of mushroom soup has been described as \\\"America's b\\xE9chamel\\\n\\\"", escape_yaml_string(string, 6, 6));
+    }
+
+    #[test]
+    fn test_split_line5() {
+        let string = "If you consider a point on a radius of the rolling curve in generating a cardioid that is not on its circumference, the result is a conchoid called the limaçon of Pascal.";
+        assert_eq!("\"If you consider a point on a radius of the rolling curve in generating a cardioid\\\n    \\ that is not on its circumference, the result is a conchoid called the lima\\xE7\\\n    on of Pascal.\"", escape_yaml_string(string, 4, 4));
     }
 
     #[test]
