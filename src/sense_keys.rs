@@ -120,9 +120,10 @@ fn get_head_word(wn : &Lexicon, ss : &Synset) -> (String, String) {
 }
 
 /// Calculate the sense key of an entry
+/// Pass `None` for `sense_key` for new senses
 pub fn get_sense_key(wn : &Lexicon, lemma : &str,
                  entry : &Entry, sense_key : Option<&SenseId>,
-                 synset : &Synset, synset_id : &SynsetId) -> String {
+                 synset : &Synset, synset_id : &SynsetId) -> SenseId {
     let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let ss_type = synset.part_of_speech.ss_type();
     let lex_filenum = wn.lex_name_for(synset_id).and_then(|lex_name|
@@ -138,9 +139,9 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
     } else {
         (String::new(), String::new())
     };
-    format!("{}%{}:{:02}:{:02}:{}:{}",
+    SenseId::new_owned(format!("{}%{}:{:02}:{:02}:{}:{}",
             lemma, ss_type, lex_filenum,
-            lex_id, head_word, head_id)
+            lex_id, head_word, head_id))
 }
 
 #[cfg(test)]
@@ -156,7 +157,7 @@ mod tests {
             "n".to_string(), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
-        assert_eq!("foot%1:08:01::",
+        assert_eq!(SenseId::new("foot%1:08:01::"),
                    get_sense_key(&lexicon, "foot", &entry, None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
@@ -174,7 +175,7 @@ mod tests {
             "n".to_string(), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
-        assert_eq!("foot%1:08:02::",
+        assert_eq!(SenseId::new("foot%1:08:02::"),
                    get_sense_key(&lexicon, "foot", &entry, None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
@@ -204,7 +205,7 @@ mod tests {
             SynsetId::new("00000001-a"), synset1.clone());
         lexicon.insert_synset("adj.all".to_string(),
             SynsetId::new("00000002-s"), synset2.clone());
-        assert_eq!("scorching%5:00:01:hot:01",
+        assert_eq!(SenseId::new("scorching%5:00:01:hot:01"),
                    get_sense_key(&lexicon, "scorching", &entry2, 
                                  Some(&SenseId::new("scorching%5:00:01:???:")),
                                  &synset2,

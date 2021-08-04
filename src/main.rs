@@ -152,8 +152,6 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
 
     let (synset_id, synset) = enter_synset(wn, "");
 
-    let mut synset : Synset = synset.clone();
-
     let entries = wn.members_by_id(&synset_id);
 
     if !entries.is_empty() {
@@ -171,39 +169,23 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
     };
 
     if action == "A" {
-        change_manager::add_entry(wn, synset_id, &mut synset, lemma, change_list) 
+        let pos = synset.part_of_speech.value().to_string();
+        change_manager::add_entry(wn, synset_id, 
+                                  pos, lemma, change_list) 
+    } else if action == "D" {
+        let pos = synset.part_of_speech.value().to_string();
+        change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+    } else if action == "M" {
+        let (target_synset_id, target_synset) = enter_synset(wn, "target ");
+        let pos = synset.part_of_speech.value().to_string();
+        if synset.part_of_speech == target_synset.part_of_speech {
+            change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+            change_manager::add_entry(wn, target_synset_id, 
+                                      pos, lemma, change_list);
+        } else {
+            println!("Different part of speech, skipping this change");
+        }
     }
-//    if action == "A":
-//        change_manager.add_entry(wn, synset, lemma, change_list=change_list)
-//    elif action == "D":
-//        change_manager.delete_entry(
-//            wn,
-//            synset,
-//            "ewn-%s-%s" %
-//            (wordnet.escape_lemma(lemma),
-//             synset.part_of_speech.value),
-//            change_list=change_list)
-//    elif action == "M":
-//        target_synset = enter_synset(wn, "target ")
-//
-//        if synset.lex_name == target_synset.lex_name:
-//            change_manager.change_entry(
-//                wn, synset, target_synset, lemma, change_list=change_list)
-//        else:
-//            print(
-//                "Moving across lexicographer files so implementing change as delete then add")
-//            change_manager.delete_entry(
-//                wn,
-//                synset,
-//                "ewn-%s-%s" %
-//                (wordnet.escape_lemma(lemma),
-//                 synset.part_of_speech.value),
-//                change_list=change_list)
-//            change_manager.add_entry(
-//                wn, target_synset, lemma, change_list=change_list)
-//    return True
-//
-//
 }
 
 fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}

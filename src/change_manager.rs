@@ -15,6 +15,7 @@
 //
 use crate::wordnet_yaml::*;
 use crate::rels::*;
+use crate::sense_keys::get_sense_key;
 
 pub struct ChangeList(bool);
 
@@ -165,81 +166,82 @@ pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
 //        change_list.change_entry(wn, entry)
 //
 //
-pub fn add_entry(wn : &Lexicon, synset_id : SynsetId, synset : &mut Synset,
+pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId, 
+                 synset_pos : String,
                  lemma : String, 
                  change_list : &mut ChangeList) {
-    print!("Adding {} to synset {}", lemma, synset_id.as_str());
+    println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
-    let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter()
-        .filter(|(pos, lemma)| synset.part_of_speech.equals_str(pos))
+    let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter_mut()
+        .filter(|(pos, lemma)| synset_pos == **pos)
         .map(|x| x.1)
         .collect::<Vec<&Entry>>();
 
-    let mut entry = entries.pop();
 
     if entries.len() > 1 {
         println!("More than one entry for {} ({}). Please check the YAML file",
-            lemma, synset.part_of_speech.value());
+            lemma, synset_pos);
     }
+
+    let mut entry = entries.pop();
 
     match entry {
         Some(e) => {
-//        sense.sense_key = 
-//            e.sense.push(Sense::new(
-//                get_sense_key(wn, entry, sense, synset.lex_name),
-//                synset_id.clone()));
-            synset.members.push(lemma.clone());
+            match wn.synset_by_id(&synset_id) {
+                Some(synset) => {
+                    let sense = Sense::new(
+                            get_sense_key(wn, &lemma, e, None, synset, &synset_id),
+                            synset_id.clone());
+                    wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
+                    change_list.mark();
+                },
+                None => {}
+            }
         },
-        None => { }
+        None => { 
+            match wn.synset_by_id(&synset_id) {
+                Some(synset) => {
+                    let e = Entry::new();
+                    let sense = Sense::new(
+                            get_sense_key(wn, &lemma, &e, None, synset, &synset_id),
+                            synset_id.clone());
+                    wn.insert_entry(lemma.clone(), synset_pos.clone(), e);
+                    wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
+                    change_list.mark();
+                },
+                None => {}
+            }
+        }
     }
-//    if entries:
-//        if len(entries) != 1:
-//            raise Exception("More than one entry for part of speech")
-//        print("Found an entry!")
-//        wn_entry = wn.entry_by_id(entries[0])
-//        entry = wn_synset.entry_by_id(entries[0])
-//        sense = Sense(
-//            id="ewn-%s-%s-%s-%02d" %
-//            (escape_lemma(lemma),
-//             synset.part_of_speech.value,
-//             synset_key(
-//                synset.id),
-//                idx),
-//            synset=synset.id,
-//            n=n,
-//            sense_key=None)
-//
-//        wn_entry.senses.append(sense)
-//        entry.senses.append(sense)
-//        sense.sense_key = get_sense_key(wn, entry, sense, synset.lex_name)
-//        if sense.synset not in wn.members:
-//            wn.members[sense.synset] = []
-//        wn.members[sense.synset].append(wn_entry.lemma.written_form)
-//    else:
-//        n = 0
-//        print("Creating new entry")
-//        entry = LexicalEntry(
-//            "ewn-%s-%s" % (escape_lemma(lemma), synset.part_of_speech.value))
-//        entry.set_lemma(Lemma(lemma, synset.part_of_speech))
-//        sense = Sense(
-//                id="ewn-%s-%s-%s-%02d" %
-//                (escape_lemma(lemma),
-//                 synset.part_of_speech.value,
-//                 synset_key(
-//                    synset.id),
-//                    idx),
-//                synset=synset.id,
-//                n=n,
-//                sense_key=None)
-//        entry.add_sense(sense)
-//        sense.sense_key = get_sense_key(wn, entry, sense, synset.lex_name)
-//        wn.add_entry(entry)
-//    if change_list:
-//        change_list.change_entry(wn, entry)
-//    return entry
+    match wn.synset_by_id_mut(&synset_id) {
+        Some(ref mut synset) => {
+            synset.members.push(lemma.clone());
+            change_list.mark();
+        },
+        None => {
+            eprintln!("Adding entry to non-existant synset");
+        }
+    }
 }
-//
-//
+
+
+pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str, 
+                    pos : &str, change_list : &mut ChangeList) {
+    wn.remove_sense(lemma, pos, synset_id);
+    change_list.mark();
+    match wn.synset_by_id_mut(&synset_id) {
+        Some(ref mut synset) => {
+            synset.members.retain(|l| l != lemma);
+            if synset.members.is_empty() {
+                println!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
+            }
+        },
+        None => {
+            eprintln!("Removing entry from non-existant synset");
+        }
+    }
+
+}
 //def delete_entry(wn, synset, entry_id, change_list=None):
 //    """Delete a lemma from a synset"""
 //    print("Deleting %s from synset %s" % (entry_id, synset.id))

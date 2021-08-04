@@ -179,13 +179,7 @@ impl Lexicon {
     }
 
     pub fn insert_entry(&mut self, lemma : String, pos : String, entry : Entry) {
-        let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
-        let key = if key < 'a' || key > 'z' {
-            '0'
-        } else {
-            key
-        };
-        self.entries.entry(key.to_string()).
+        self.entries.entry(entry_key(&lemma)).
             or_insert_with(|| Entries::new()).insert_entry(lemma, pos, entry);
     }
 
@@ -195,7 +189,37 @@ impl Lexicon {
         self.synsets.entry(lexname).
             or_insert_with(|| Synsets::new()).0.insert(synset_id, synset);
     }
+
+    pub fn insert_sense(&mut self, lemma : String, pos : String, sense : Sense) {
+        self.entries.entry(entry_key(&lemma)).
+            or_insert_with(|| Entries::new()).insert_sense(lemma, pos, sense);
+    }
+
+    pub fn remove_entry(&mut self, lemma : &str, pos : &str) {
+        match self.entries.get_mut(&entry_key(lemma)) {
+            Some(e) => e.remove_entry(lemma, pos),
+            None => {}
+        }
+    }
+
+    pub fn remove_sense(&mut self, lemma : &str, pos : &str, synset_id : &SynsetId) {
+        match self.entries.get_mut(&entry_key(lemma)) {
+            Some(e) => e.remove_sense(lemma, pos, synset_id),
+            None => {}
+        }
+
+    }
 }
+
+fn entry_key(lemma : &str) -> String {
+    let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
+    if key < 'a' || key > 'z' {
+        '0'.to_string()
+    } else {
+        key.to_string()
+    }
+}
+
 
 static YAML_LINE_LENGTH : usize = 80;
 lazy_static! {
@@ -362,9 +386,47 @@ impl Entries {
         }
         Ok(())
     }
-    pub fn insert_entry(&mut self, lemma : String, pos : String, entry : Entry) {
+    fn insert_entry(&mut self, lemma : String, pos : String, entry : Entry) {
         self.0.entry(lemma).
             or_insert_with(|| BTreeMap::new()).insert(pos, entry);
+    }
+
+    fn insert_sense(&mut self, lemma : String, pos : String, sense : Sense) {
+        match self.0.entry(lemma).
+            or_insert_with(|| BTreeMap::new()).get_mut(&pos) {
+                Some(entry) => entry.sense.push(sense),
+                None => eprintln!("Failed to insert sense to non-existant entry")
+            };
+    }
+
+    fn remove_entry(&mut self, lemma : &str, pos : &str) {
+        match self.0.get_mut(lemma) {
+            Some(m) => { m.remove(pos); },
+            None => {}
+        };
+        if self.0.contains_key(lemma) && self.0.get(lemma).unwrap().is_empty() {
+            self.0.remove(lemma);
+        }
+    }
+
+    fn remove_sense(&mut self, lemma : &str, pos : &str, synset : &SynsetId) {
+        match self.0.get_mut(lemma) {
+            Some(m) => {
+                match m.get_mut(pos) {
+                    Some(e) => {
+                        e.sense.retain(|s| s.synset != *synset)
+                    },
+                    None => {}
+                }
+                if m.contains_key(pos) && m.get(pos).unwrap().sense.is_empty() {
+                    m.remove(pos);
+                }
+            },
+            None => {}
+        };
+        if self.0.contains_key(lemma) && self.0.get(lemma).unwrap().is_empty() {
+            self.0.remove(lemma);
+        }
     }
 }
 
@@ -999,6 +1061,9 @@ impl Synset {
         for m in self.members.iter() {
             write!(w, "\n  - {}", escape_yaml_string(m, 4,4))?;
         }
+        if self.members.is_empty() {
+            write!(w, " []");
+        }
         write_prop_synset(w, &self.mero_location, "mero_location")?;
         write_prop_synset(w, &self.mero_member, "mero_member")?;
         write_prop_synset(w, &self.mero_part, "mero_part")?;
@@ -1191,6 +1256,7 @@ pub struct SenseId(String);
 
 impl SenseId {
     pub fn new(s : &str) -> SenseId { SenseId(s.to_string()) }
+    pub fn new_owned(s : String) -> SenseId { SenseId(s) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
