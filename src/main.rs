@@ -20,7 +20,7 @@ use crate::change_manager::{ChangeList};
 //from autocorrect import Speller
 //import wordnet
 //import re
-//
+
 //#####################################
 //# English WordNet Editor (EWE)
 //
@@ -169,21 +169,32 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
     };
 
     if action == "A" {
-        let pos = synset.part_of_speech.value().to_string();
+        let pos = synset.part_of_speech.to_pos_key();
         change_manager::add_entry(wn, synset_id, 
-                                  pos, lemma, change_list) 
+                                  lemma, pos, change_list); 
     } else if action == "D" {
-        let pos = synset.part_of_speech.value().to_string();
-        change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+            Some(pos) => {
+                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+            },
+            None => {
+                println!("Could not find entry, skipping change")
+            }
+        }
     } else if action == "M" {
         let (target_synset_id, target_synset) = enter_synset(wn, "target ");
-        let pos = synset.part_of_speech.value().to_string();
-        if synset.part_of_speech == target_synset.part_of_speech {
-            change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
-            change_manager::add_entry(wn, target_synset_id, 
-                                      pos, lemma, change_list);
-        } else {
-            println!("Different part of speech, skipping this change");
+        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+            Some(pos) => {
+                if synset.part_of_speech == target_synset.part_of_speech {
+                    change_manager::move_entry(wn, synset_id, target_synset_id,
+                                               lemma, pos, change_list);
+                } else {
+                    println!("Different part of speech, skipping this change");
+                }
+            },
+            None => {
+                println!("Could not find entry, skipping change")
+            }
         }
     }
 }

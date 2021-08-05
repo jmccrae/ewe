@@ -147,6 +147,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wordnet_yaml::PosKey;
 
     #[test]
     fn test_sense_key_1() {
@@ -154,7 +155,7 @@ mod tests {
         let synset = Synset::new(PartOfSpeech::n);
         let entry = Entry::new();
         lexicon.insert_entry("foot".to_string(),
-            "n".to_string(), entry.clone());
+            PosKey::new("n".to_string()), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
         assert_eq!(SenseId::new("foot%1:08:01::"),
@@ -172,7 +173,7 @@ mod tests {
                 SynsetId::new("00001750-n")
                 ));
         lexicon.insert_entry("foot".to_string(),
-            "n".to_string(), entry.clone());
+            PosKey::new("n".to_string()), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
         assert_eq!(SenseId::new("foot%1:08:02::"),
@@ -198,9 +199,9 @@ mod tests {
                 SynsetId::new("00000002-s")
                 ));
         lexicon.insert_entry("hot".to_string(),
-            "a".to_string(), entry1.clone());
+            PosKey::new("a".to_string()), entry1.clone());
         lexicon.insert_entry("scorching".to_string(),
-            "s".to_string(), entry2.clone());
+            PosKey::new("s".to_string()), entry2.clone());
         lexicon.insert_synset("adj.all".to_string(),
             SynsetId::new("00000001-a"), synset1.clone());
         lexicon.insert_synset("adj.all".to_string(),

@@ -9,6 +9,11 @@
 //import wordnet_yaml
 //from collections import defaultdict
 //from sense_keys import get_sense_key
+//},
+//None => {
+//println!("Could not find entry, skipping change")
+//}
+//}
 //
 //sense_id_re = re.compile(r"ewn-(.*)-(.)-(\d{8})-\d{2}")
 //
@@ -93,6 +98,7 @@ pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
                   target : &mut Synset, target_id : &SynsetId) {
     println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
                     target_id.as_str());
+    // TODO: check for updated sense key if adding `similar`
     let (non_inv, yaml_rel_type) = rel_type.clone().to_yaml();
     if non_inv {
         source.insert_rel(&yaml_rel_type, target_id);
@@ -167,9 +173,9 @@ pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
 //
 //
 pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId, 
-                 synset_pos : String,
                  lemma : String, 
-                 change_list : &mut ChangeList) {
+                 synset_pos : PosKey,
+                 change_list : &mut ChangeList) -> Option<SenseId> {
     println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
     let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter_mut()
@@ -180,39 +186,42 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
 
     if entries.len() > 1 {
         println!("More than one entry for {} ({}). Please check the YAML file",
-            lemma, synset_pos);
+            lemma, synset_pos.as_str());
     }
 
     let mut entry = entries.pop();
 
-    match entry {
+    let sense_id = match entry {
         Some(e) => {
             match wn.synset_by_id(&synset_id) {
                 Some(synset) => {
-                    let sense = Sense::new(
-                            get_sense_key(wn, &lemma, e, None, synset, &synset_id),
+                    let sense_id = 
+                            get_sense_key(wn, &lemma, e, None, synset, &synset_id);
+                    let sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
                     wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
                     change_list.mark();
+                    Some(sense_id)
                 },
-                None => {}
+                None => None
             }
         },
         None => { 
             match wn.synset_by_id(&synset_id) {
                 Some(synset) => {
                     let e = Entry::new();
-                    let sense = Sense::new(
-                            get_sense_key(wn, &lemma, &e, None, synset, &synset_id),
+                    let sense_id = get_sense_key(wn, &lemma, &e, None, synset, &synset_id);
+                    let sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
                     wn.insert_entry(lemma.clone(), synset_pos.clone(), e);
                     wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
                     change_list.mark();
+                    Some(sense_id)
                 },
-                None => {}
+                None => None
             }
         }
-    }
+    };
     match wn.synset_by_id_mut(&synset_id) {
         Some(ref mut synset) => {
             synset.members.push(lemma.clone());
@@ -222,12 +231,19 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
             eprintln!("Adding entry to non-existant synset");
         }
     }
+    sense_id
 }
 
 
 pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str, 
-                    pos : &str, change_list : &mut ChangeList) {
-    wn.remove_sense(lemma, pos, synset_id);
+                    pos : &PosKey, change_list : &mut ChangeList) {
+    println!("Removing {} from synset {}", lemma, synset_id.as_str());
+    let links = wn.sense_links_to(lemma, pos, synset_id);
+    for sense_id in  wn.remove_sense(lemma, pos, synset_id) {
+        for (rel, source) in links.iter() {
+            wn.remove_rel(&source, rel.clone(), &sense_id);
+        }
+    }
     change_list.mark();
     match wn.synset_by_id_mut(&synset_id) {
         Some(ref mut synset) => {
@@ -242,6 +258,35 @@ pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str,
     }
 
 }
+
+pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId, 
+              target_synset_id : SynsetId,
+              lemma : String, pos : PosKey,
+              change_list : &mut ChangeList) {
+
+    let links_from = wn.sense_links_from(&lemma, &pos, &synset_id);
+    let links_to   = wn.sense_links_to(&lemma, &pos, &synset_id);
+    let forms = wn.get_forms(&lemma, &pos);
+    delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+    match add_entry(wn, target_synset_id, 
+                    lemma.clone(), pos.clone(), change_list) {
+        Some(sense_id) => {
+            for (rel, target) in links_from {
+                wn.add_rel(&sense_id, rel, &target);
+            }
+            for (rel, source) in links_to {
+                wn.add_rel(&source, rel, &sense_id);
+            }
+        },
+        None => {
+            println!("New synset not created");
+        }
+    };
+    for form in forms {
+        wn.add_form(&lemma, &pos, form);
+    }
+}
+
 //def delete_entry(wn, synset, entry_id, change_list=None):
 //    """Delete a lemma from a synset"""
 //    print("Deleting %s from synset %s" % (entry_id, synset.id))
