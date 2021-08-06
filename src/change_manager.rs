@@ -8,7 +8,7 @@
 //from merge import wn_merge
 //import wordnet_yaml
 //from collections import defaultdict
-//from sense_keys import get_sense_key
+//from sense_keys import get_sense_kesense_y
 //},
 //None => {
 //println!("Could not find entry, skipping change")
@@ -77,10 +77,12 @@ impl ChangeList {
 //         
 //}
 
-pub fn delete_rel(wn : &Lexicon, source_id : &SynsetId,
-                  source : &mut Synset, target : &SynsetId) {
+pub fn delete_rel(wn : &mut Lexicon, source_id : &SynsetId, target : &SynsetId) {
     println!("Delete {} =*=> {}", source_id.as_str(), target.as_str());
-    source.remove_all_relations(target);
+    match wn.synset_by_id_mut(source_id) {
+        Some(source) =>  source.remove_all_relations(target),
+        None => {}
+    };
     //match change_list {
     //    Some(cl) => cl.change_synset(wn, source_id),
     //    None => {}
@@ -236,19 +238,19 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
 
 
 pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str, 
-                    pos : &PosKey, change_list : &mut ChangeList) {
+                    pos : &PosKey, warn : bool, change_list : &mut ChangeList) {
     println!("Removing {} from synset {}", lemma, synset_id.as_str());
     let links = wn.sense_links_to(lemma, pos, synset_id);
     for sense_id in  wn.remove_sense(lemma, pos, synset_id) {
         for (rel, source) in links.iter() {
-            wn.remove_rel(&source, rel.clone(), &sense_id);
+            wn.remove_sense_rel(&source, rel.clone(), &sense_id);
         }
     }
     change_list.mark();
     match wn.synset_by_id_mut(&synset_id) {
         Some(ref mut synset) => {
             synset.members.retain(|l| l != lemma);
-            if synset.members.is_empty() {
+            if warn && synset.members.is_empty() {
                 println!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
             }
         },
@@ -267,15 +269,15 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
     let links_from = wn.sense_links_from(&lemma, &pos, &synset_id);
     let links_to   = wn.sense_links_to(&lemma, &pos, &synset_id);
     let forms = wn.get_forms(&lemma, &pos);
-    delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+    delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
     match add_entry(wn, target_synset_id, 
                     lemma.clone(), pos.clone(), change_list) {
         Some(sense_id) => {
             for (rel, target) in links_from {
-                wn.add_rel(&sense_id, rel, &target);
+                wn.add_sense_rel(&sense_id, rel, &target);
             }
             for (rel, source) in links_to {
-                wn.add_rel(&source, rel, &sense_id);
+                wn.add_sense_rel(&source, rel, &sense_id);
             }
         },
         None => {
@@ -352,28 +354,60 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 //            print("this may be a bug")
 //
 //
-//def delete_synset(
-//        wn,
-//        synset,
-//        supersede,
-//        reason,
-//        delent=True,
-//        change_list=None):
-//    """Delete a synset"""
-//    print("Deleting synset %s" % synset.id)
-//
-//    if delent:
-//        entries = empty_if_none(wn.members_by_id(synset.id))
-//
-//        for entry in entries:
-//            delete_entry(
-//                wn, synset, "ewn-%s-%s" %
-//                (escape_lemma(entry), synset.part_of_speech.value), change_list)
-//
-//    for rel in synset.synset_relations:
-//        delete_rel(wn.synset_by_id(rel.target), synset, change_list)
-//
-//    wn_synset = wn
+pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
+                 supersede_id : Option<&SynsetId>,
+                 reason : String, delent : bool, change_list: &mut ChangeList) {
+    println!("Deleting synset {}", synset_id.as_str());
+
+    if delent {
+        let entries = wn.members_by_id(synset_id);
+        for entry in entries {
+            match wn.pos_for_entry_synset(&entry, synset_id) {
+                Some(pos) =>
+                    delete_entry(wn, synset_id, &entry, &pos, false, change_list),
+                    None => {}
+            }
+        }
+    }
+
+    match supersede_id {
+        Some(supersede_id) => {
+            match wn.synset_by_id(synset_id) {
+                Some(ss) => {
+                    for (rel, target) in ss.links_from() {
+                        delete_rel(wn, synset_id, &target);
+                        wn.add_rel(supersede_id, rel, &target);
+                    }
+                    for (rel, source) in wn.links_to(synset_id) {
+                        delete_rel(wn, &source, synset_id);
+                        wn.add_rel(&source, rel, supersede_id);
+                    }
+                },
+                None => {}
+            }
+        },
+        None => {
+            match wn.synset_by_id(synset_id) {
+                Some(ss) => {
+                    for (rel, target) in ss.links_from() {
+                        delete_rel(wn, synset_id, &target);
+                    }
+                    for (rel, source) in wn.links_to(synset_id) {
+                        delete_rel(wn, &source, synset_id);
+                    }
+                },
+                None => {}
+            }
+        }
+    }
+    
+    match supersede_id {
+        Some(ss_id) => {
+            wn.deprecate(synset_id, ss_id, reason);
+        },
+        None => {}
+    }
+
 //    wn_synset.synsets = [ss for ss in wn_synset.synsets
 //                         if synset.id != ss.id]
 //    if supersede:
@@ -389,6 +423,8 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 //                   reason.replace("\n", "").replace("\"", "\"\"")))
 //    if change_list:
 //        change_list.change_synset(synset)
+    change_list.mark();
+}
 //
 //
 //def change_sense_n(wn, entry, sense_id, new_n, change_list=None):
@@ -452,6 +488,9 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 //    return nid
 //
 //
+pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
+              pos : PosKey, ssid : Option<SynsetId>, 
+              change_list : &mut ChangeList) -> SynsetId {
 //def add_synset(wn, definition, lexfile, pos, ssid=None, change_list=None):
 //    if not ssid:
 //        ssid = new_id(wn, pos, definition)
@@ -463,6 +502,8 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 //    if change_list:
 //        change_list.change_synset(ss)
 //    return ssid
+    SynsetId::new("")
+}
 //
 //
 //def merge_synset(wn, synsets, reason, lexfile, ssid=None, change_list=None):

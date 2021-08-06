@@ -3,6 +3,7 @@ extern crate serde;
 extern crate serde_yaml;
 extern crate indicatif;
 extern crate regex;
+extern crate csv;
 
 //mod wordnet;
 mod rels;
@@ -10,10 +11,12 @@ mod change_manager;
 mod wordnet_yaml;
 mod sense_keys;
 
-use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense};
+use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense,PosKey};
 use std::io;
 use std::io::Write;
 use crate::change_manager::{ChangeList};
+use lazy_static::lazy_static;
+use regex::Regex;
 
 //import change_manager
 //from change_manager import ChangeList
@@ -175,7 +178,7 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
     } else if action == "D" {
         match wn.pos_for_entry_synset(&lemma, &synset_id) {
             Some(pos) => {
-                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, change_list);
+                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
             },
             None => {
                 println!("Could not find entry, skipping change")
@@ -199,52 +202,52 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
-//def change_synset(wn, change_list):
-//
-//    mode = None
-//    while mode != "a" and mode != "d":
-//        mode = input("(A)dd synset/(d)elete synset: ").lower()
-//
-//    if mode == "d":
-//        synset = enter_synset(wn)
-//        reason = input("Reason for deletion with (#IssueNo): ")
-//        while not re.match("\w+.*\(#\d+\)$", reason):
-//            print("Bad reason please state at least one word with the issue number in parentheses, e.g., duplicate (#123)")
-//            reason = input("Reason for deletion with (#IssueNo): ")
-//        supersede_synset = enter_synset(wn, "superseding ")
-//
-//    if mode == "a":
-//        definition = input("Definition: ")
-//        lexfile = input("Lexicographer file: ")
-//        pos = input(
-//            "Part of speech (n)oun/(v)erb/(a)djective/adve(r)b/(s)atellite: ").lower()
-//
-//    if mode == "a":
-//        new_id = change_manager.add_synset(
-//            wn, definition, lexfile, pos, change_list=change_list)
-//        while True:
-//            lemma = input("Add Lemma (blank to stop): ")
-//            if lemma:
-//                change_manager.add_entry(wn, wn.synset_by_id(
-//                    new_id), lemma, change_list=change_list)
-//            else:
-//                break
-//        print(
-//            "New synset created with ID %s. Add at least one relation:" %
-//            new_id)
+lazy_static! {
+    static ref REASON_REGEX : Regex = Regex::new("\\w+.*\\(#\\d+\\)$").unwrap();
+}
+
+fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
+    let mut mode = String::new();
+    while mode != "a" && mode != "d" {
+        mode = input("(A)dd synset/(d)elete synset: ").to_lowercase();
+    }
+
+    if mode == "d" {
+        let (synset_id, _) = enter_synset(wn, "");
+        let mut reason = input("Reason for deletion with (#IssueNo): ");
+        while !REASON_REGEX.is_match(&reason) {
+            println!("Bad reason please state at least one word with the issue number in parentheses, e.g., duplicate (#123)");
+            reason = input("Reason for deletion with (#IssueNo): ");
+        }
+        let (supersede_synset_id, _) = 
+            enter_synset(wn, "superseding ");
+        change_manager::delete_synset(wn, 
+                                      &synset_id, Some(&supersede_synset_id),
+                                      reason, true, change_list);
+    } else /*if mode == "a"*/ {
+        let definition = input("Definition: ");
+        let lexfile = input("Lexicographer file: ");
+        let pos = PosKey::new(input(
+            "Part of speech (n)oun/(v)erb/(a)djective/adve(r)b/(s)atellite: ")
+            .to_lowercase());
+        let new_id = change_manager::add_synset(
+            wn, definition, lexfile, pos.clone(), None, change_list);
+        loop {
+            let lemma = input("Add Lemma (blank to stop): ");
+            if lemma.len() > 0 {
+                change_manager::add_entry(wn, new_id.clone(),
+                    lemma, pos.clone(), change_list);
+            } else {
+                break;
+            }
+        }
+        println!("New synset created with ID {}. Add at least one relation:",
+                 new_id.as_str());
+        // TODO: change_relation
 //        change_relation(wn, change_list, new_id)
-//
-//    elif mode == "d":
-//        change_manager.delete_synset(
-//            wn,
-//            synset,
-//            supersede_synset,
-//            reason,
-//            change_list=change_list)
-//    return True
-//
-//
+    }
+}
+
 fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
     let (synset_id, synset) = enter_synset(wn, "");
 

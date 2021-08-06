@@ -8,17 +8,20 @@ use std::fmt;
 use std::io::Write;
 use serde::de::{self, Visitor, MapAccess};
 use crate::serde::ser::SerializeMap;
-use crate::rels::{YamlSynsetRelType,SenseRelType};
+use crate::rels::{YamlSynsetRelType,SenseRelType,SynsetRelType};
 use indicatif::ProgressBar;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+/// The Lexicon contains the whole WordNet graph
 pub struct Lexicon {
     entries : HashMap<String, Entries>,
     synsets : HashMap<String, Synsets>,
     synset_id_to_lexfile : HashMap<SynsetId, String>,
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
-    sense_id_to_lemma_pos : HashMap<SenseId, (String, PosKey)>
+    links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
+    sense_id_to_lemma_pos : HashMap<SenseId, (String, PosKey)>,
+    deprecations : Vec<DeprecationRecord>
 }
 
 impl Lexicon {
@@ -29,11 +32,25 @@ impl Lexicon {
             synsets: HashMap::new(),
             synset_id_to_lexfile: HashMap::new(),
             sense_links_to: HashMap::new(),
-            sense_id_to_lemma_pos: HashMap::new()
+            links_to : HashMap::new(),
+            sense_id_to_lemma_pos: HashMap::new(),
+            deprecations: Vec::new()
         }
     }
 
+    /// Load a lexicon from a folder of YAML files
     pub fn load<P: AsRef<Path>>(folder : P) -> Result<Lexicon, WordNetYAMLIOError> {
+        let dep_file = folder.as_ref().join("deprecations.csv");
+        let mut deprecations = Vec::new();
+        if dep_file.exists() {
+            let mut reader = csv::Reader::from_path(dep_file)
+                .map_err(|e| WordNetYAMLIOError::Csv(format!("Error reading deprecations due to {}", e)))?;
+            for r in reader.deserialize() {
+                deprecations.push(r.map_err(|e| {
+                    WordNetYAMLIOError::Csv(format!("Error reading deprecations due to {}", e))
+                })?);
+            }
+        } 
         let mut entries : HashMap<String, Entries> = HashMap::new();
         let mut synsets = HashMap::new();
         let mut synset_id_to_lexfile = HashMap::new();
@@ -86,12 +103,20 @@ impl Lexicon {
                 }
             }
         }
+        let mut links_to = HashMap::new();
+        for ss in synsets.values() {
+            for (ssid, s) in ss.0.iter() {
+                add_link_to(&mut links_to, ssid, s);
+            }
+        }
         bar.finish();
-        Ok(Lexicon { entries, synsets, synset_id_to_lexfile, sense_links_to,
-            sense_id_to_lemma_pos
+        Ok(Lexicon { entries, synsets, synset_id_to_lexfile, 
+            sense_links_to, links_to,
+            sense_id_to_lemma_pos, deprecations
         })
     }
 
+    /// Save a lexicon to a set of files
     pub fn save<P: AsRef<Path>>(&self, folder : P) -> std::io::Result<()> {
         println!("Saving WordNet");
         let bar = ProgressBar::new(72);
@@ -107,14 +132,26 @@ impl Lexicon {
             synsets.save(&mut w)?;
             bar.inc(1);
         }
+        match csv::Writer::from_path(folder.as_ref().join("deprecations.csv")) {
+            Ok(mut csv_writer) => {
+                for dep in self.deprecations.iter() {
+                    csv_writer.serialize(dep).unwrap_or_else(|_| eprintln!("Cannot write CSV file"));
+                }
+            },
+            Err(_) => {
+                eprintln!("Cannot write CSV file");
+            }
+        }
         bar.finish();
         Ok(())
     }
 
+    /// Get the lexicographer file name for a synset
     pub fn lex_name_for(&self, synset_id : &SynsetId) -> Option<String> {
         self.synset_id_to_lexfile.get(synset_id).map(|x| x.clone())
     }
 
+    /// Get the entry data for a lemma
     pub fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
         match lemma.chars().nth(0) {
             Some(c) if c.to_ascii_lowercase() > 'a' && c.to_ascii_lowercase() < 'z' => {
@@ -140,6 +177,7 @@ impl Lexicon {
         }
     }
 
+    /// Get the entry data (with the part of speech key) for a lemma
     pub fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
         match lemma.chars().nth(0) {
             Some(c) if c.to_ascii_lowercase() > 'a' && c.to_ascii_lowercase() < 'z' => {
@@ -165,6 +203,7 @@ impl Lexicon {
         }
     }
 
+    /// Get the part of speech key for an entry referring to a specific synset
     pub fn pos_for_entry_synset(&self, lemma : &str, synset_id : &SynsetId) -> Option<PosKey> {
         for (pos, entry) in self.entry_by_lemma_with_pos(lemma) {
             for sense in entry.sense.iter() {
@@ -176,6 +215,7 @@ impl Lexicon {
         return None;
     }
 
+    /// Get synset data by ID
     pub fn synset_by_id(&self, synset_id : &SynsetId) -> Option<&Synset> {
         match self.lex_name_for(synset_id) {
             Some(lex_name) => {
@@ -190,6 +230,7 @@ impl Lexicon {
         }
     }
 
+    /// Get synset data by ID (mutable)
     pub fn synset_by_id_mut(&mut self, synset_id : &SynsetId) -> Option<&mut Synset> {
         match self.lex_name_for(synset_id) {
             Some(lex_name) => {
@@ -204,16 +245,18 @@ impl Lexicon {
         }
     }
 
-
+    /// Verifies if a synset is in the graph
     pub fn has_synset(&self, synset_id : &SynsetId) -> bool {
         self.synset_by_id(synset_id).is_some()
     }
 
+    /// Get the list of lemmas associated with a synset
     pub fn members_by_id(&self, synset_id : &SynsetId) -> Vec<String> {
         self.synset_by_id(synset_id).iter().flat_map(|synset|
             synset.members.iter().map(|x| x.clone())).collect()
     }
 
+    /// Add an entry to WordNet
     pub fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) {
         add_sense_link_to(&mut self.sense_links_to, &entry);
         for sense in entry.sense.iter() {
@@ -223,6 +266,7 @@ impl Lexicon {
             or_insert_with(|| Entries::new()).insert_entry(lemma, pos, entry);
     }
 
+    /// Add a synset to WordNet
     pub fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
                          synset : Synset) {
         self.synset_id_to_lexfile.insert(synset_id.clone(), lexname.clone());
@@ -230,6 +274,7 @@ impl Lexicon {
             or_insert_with(|| Synsets::new()).0.insert(synset_id, synset);
     }
 
+    /// Add a sense to an existing entry. This will not create an entry if it does not exist
     pub fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) {
         add_sense_link_to_sense(&mut self.sense_links_to, &sense);
         self.sense_id_to_lemma_pos.insert(sense.id.clone(), (lemma.clone(), pos.clone()));
@@ -237,6 +282,7 @@ impl Lexicon {
             or_insert_with(|| Entries::new()).insert_sense(lemma, pos, sense);
     }
 
+    /// Remove an entry from WordNet
     pub fn remove_entry(&mut self, lemma : &str, pos : &PosKey) {
         match self.entries.get_mut(&entry_key(lemma)) {
             Some(e) => e.remove_entry(&mut self.sense_links_to, lemma, pos),
@@ -244,6 +290,7 @@ impl Lexicon {
         }
     }
 
+    /// Remove the sense of an existing entry. This does not remove incoming sense links!
     pub fn remove_sense(&mut self, lemma : &str, pos : &PosKey, 
                         synset_id : &SynsetId) -> Vec<SenseId> {
         match self.entries.get_mut(&entry_key(lemma)) {
@@ -253,6 +300,22 @@ impl Lexicon {
 
     }
 
+    /// Remove a synset. This does not remove any senses or incoming links!
+    pub fn remove_synset(&mut self, synset_id : &SynsetId) {
+        match self.lex_name_for(synset_id) {
+            Some(lexname) => {
+                match self.synsets.get_mut(&lexname) {
+                    Some(m) => {
+                        m.0.remove_entry(synset_id);
+                    },
+                    None => {}
+                }
+            },
+            None => {}
+        }
+    }
+
+    /// For a given sense, get all links from this sense
     pub fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
                             synset_id : &SynsetId) -> Vec<(SenseRelType, SenseId)> {
         match self.entries.get(&entry_key(lemma)) {
@@ -261,6 +324,7 @@ impl Lexicon {
         }
     }
 
+    /// For a given sense, find all backlinks referring to this sense
     pub fn sense_links_to(&self, lemma : &str, pos : &PosKey,
                           synset_id : &SynsetId) -> Vec<(SenseRelType, SenseId)> {
         match self.get_sense_id(lemma, pos, synset_id) {
@@ -274,6 +338,15 @@ impl Lexicon {
         }
     }
 
+    /// For a synset, find all backlinks referring to this synset
+    pub fn links_to(&self, synset_id : &SynsetId) -> Vec<(SynsetRelType, SynsetId)> {
+        match self.links_to.get(synset_id) {
+            Some(s) => s.clone(),
+            None => Vec::new()
+        }
+    }
+
+    /// Get a sense ID for a lemma, POS key and synset
     fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> 
         Option<&'a SenseId> {
         match self.entries.get(&entry_key(lemma)) {
@@ -282,7 +355,8 @@ impl Lexicon {
         }
     }
 
-    pub fn add_rel(&mut self, source : &SenseId, rel : SenseRelType,
+    /// Add a relation between two senses
+    pub fn add_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                    target : &SenseId) {
         match self.sense_id_to_lemma_pos.get(source) {
             Some((lemma, pos)) => {
@@ -298,7 +372,8 @@ impl Lexicon {
         }
     }
 
-    pub fn remove_rel(&mut self, source : &SenseId, rel : SenseRelType,
+    /// Remove a relation between two senses
+    pub fn remove_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                       target : &SenseId) {
         match self.sense_id_to_lemma_pos.get(source) {
             Some((lemma, pos)) => {
@@ -314,8 +389,24 @@ impl Lexicon {
         }
     }
 
+    /// Add a synset relation to WordNet
+    pub fn add_rel(&mut self, source : &SynsetId, rel : SynsetRelType,
+                   target : &SynsetId) {
+        let (s2t, rel) = rel.to_yaml();
+        if s2t {
+            match self.synset_by_id_mut(source) {
+                Some(ss) => ss.insert_rel(&rel, target),
+                None => {}
+            }
+        } else {
+            match self.synset_by_id_mut(source) {
+                Some(ss) => ss.insert_rel(&rel, target),
+                None => {}
+            }
+        }
+    }
 
-
+    /// Get the list of variant forms of an entry
     pub fn get_forms(&self, lemma : &str, pos : &PosKey) -> Vec<String> {
         match self.entries.get(&entry_key(&lemma)) {
             Some(e) => e.get_forms(lemma, pos),
@@ -323,6 +414,7 @@ impl Lexicon {
         }
     }
 
+    /// Add a variant form to an entry
     pub fn add_form(&mut self, lemma : &str, pos : &PosKey, form : String) {
         match self.entries.get_mut(&entry_key(&lemma)) {
             Some(e) => e.add_form(lemma, pos, form),
@@ -330,6 +422,30 @@ impl Lexicon {
         }
     }
 
+    /// Add a deprecation note
+    pub fn deprecate(&mut self, synset : &SynsetId, supersede : &SynsetId, 
+                     reason : String) {
+        let ili = match self.synset_by_id(synset) {
+            Some(ss) => match ss.ili {
+                Some(ref ili) => ili.as_str().to_string(),
+                None => String::new()
+            },
+            None => String::new()
+        };
+        let supersede_ili = match self.synset_by_id(supersede) {
+            Some(ss) => match ss.ili {
+                Some(ref ili) => ili.as_str().to_string(),
+                None => String::new()
+            },
+            None => String::new()
+        };
+        self.deprecations.push(DeprecationRecord(
+            format!("ewn-{}", synset.as_str()),
+            ili,
+            format!("ewn-{}", supersede.as_str()),
+            supersede_ili,
+            reason));
+    }
 
 
 }
@@ -360,6 +476,24 @@ fn remove_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>
                 Some(e) => e.retain(|sr| sr.1 != sense.id),
                 None => {}
             }
+        }
+    }
+}
+
+fn add_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
+               synset_id : &SynsetId, synset : &Synset) {
+    for (rel_type, target) in synset.links_from() {
+        map.entry(target).or_insert_with(|| Vec::new()).
+            push((rel_type, synset_id.clone()));
+    }
+}
+
+fn remove_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
+               synset_id : &SynsetId, synset : &Synset) {
+    for (rel_type, target) in synset.links_from() {
+        match map.get_mut(&target) {
+            Some(m) => m.retain(|sr| sr.1 != *synset_id),
+            None => {}
         }
     }
 }
@@ -959,31 +1093,11 @@ pub struct Synset {
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
-    agent : Vec<SynsetId>,
-    #[serde(default)]
     also : Vec<SynsetId>,
     #[serde(default)]
     attribute : Vec<SynsetId>,
     #[serde(default)]
-    be_in_state : Vec<SynsetId>,
-    #[serde(default)]
     causes : Vec<SynsetId>,
-    #[serde(default)]
-    classifies : Vec<SynsetId>,
-    #[serde(default)]
-    co_agent_instrument : Vec<SynsetId>,
-    #[serde(default)]
-    co_agent_patient : Vec<SynsetId>,
-    #[serde(default)]
-    co_agent_result : Vec<SynsetId>,
-    #[serde(default)]
-    co_patient_instrument : Vec<SynsetId>,
-    #[serde(default)]
-    co_result_instrument : Vec<SynsetId>,
-    #[serde(default)]
-    co_role : Vec<SynsetId>,
-    #[serde(default)]
-    direction : Vec<SynsetId>,
     #[serde(default)]
     domain_region : Vec<SynsetId>,
     #[serde(default)]
@@ -993,17 +1107,9 @@ pub struct Synset {
     #[serde(default)]
     entails : Vec<SynsetId>,
     #[serde(default)]
-    eq_synonym : Vec<SynsetId>,
-    #[serde(default)]
     hypernym : Vec<SynsetId>,
     #[serde(default)]
     instance_hypernym : Vec<SynsetId>,
-    #[serde(default)]
-    instrument : Vec<SynsetId>,
-    #[serde(default)]
-    location : Vec<SynsetId>,
-    #[serde(default)]
-    manner_of : Vec<SynsetId>,
     #[serde(default)]
     mero_location : Vec<SynsetId>,
     #[serde(default)]
@@ -1019,23 +1125,7 @@ pub struct Synset {
     #[serde(default)]
     pub similar : Vec<SynsetId>,
     #[serde(default)]
-    other : Vec<SynsetId>,
-    #[serde(default)]
-    patient : Vec<SynsetId>,
-    #[serde(default)]
-    restricts : Vec<SynsetId>,
-    #[serde(default)]
-    result : Vec<SynsetId>,
-    #[serde(default)]
-    role : Vec<SynsetId>,
-    #[serde(default)]
-    source_direction : Vec<SynsetId>,
-    #[serde(default)]
-    target_direction : Vec<SynsetId>,
-    #[serde(default)]
-    subevent : Vec<SynsetId>,
-    #[serde(default)]
-    antonym : Vec<SynsetId>
+    other : Vec<SynsetId>
 }
 
 impl Synset {
@@ -1047,29 +1137,15 @@ impl Synset {
             source : None,
             members : Vec::new(),
             part_of_speech,
-            agent : Vec::new(),
             also : Vec::new(),
             attribute : Vec::new(),
-            be_in_state : Vec::new(),
             causes : Vec::new(),
-            classifies : Vec::new(),
-            co_agent_instrument : Vec::new(),
-            co_agent_patient : Vec::new(),
-            co_agent_result : Vec::new(),
-            co_patient_instrument : Vec::new(),
-            co_result_instrument : Vec::new(),
-            co_role : Vec::new(),
-            direction : Vec::new(),
             domain_region : Vec::new(),
             domain_topic : Vec::new(),
             exemplifies : Vec::new(),
             entails : Vec::new(),
-            eq_synonym : Vec::new(),
             hypernym : Vec::new(),
             instance_hypernym : Vec::new(),
-            instrument : Vec::new(),
-            location : Vec::new(),
-            manner_of : Vec::new(),
             mero_location : Vec::new(),
             mero_member : Vec::new(),
             mero_part : Vec::new(),
@@ -1077,42 +1153,20 @@ impl Synset {
             mero_substance : Vec::new(),
             meronym : Vec::new(),
             similar : Vec::new(),
-            other : Vec::new(),
-            patient : Vec::new(),
-            restricts : Vec::new(),
-            result : Vec::new(),
-            role : Vec::new(),
-            source_direction : Vec::new(),
-            target_direction : Vec::new(),
-            subevent : Vec::new(),
-            antonym : Vec::new()
+            other : Vec::new()
         }
     }
 
     pub fn remove_all_relations(&mut self, target : &SynsetId) {
-        self.agent.retain(|x| x != target);
         self.also.retain(|x| x != target);
         self.attribute.retain(|x| x != target);
-        self.be_in_state.retain(|x| x != target);
         self.causes.retain(|x| x != target);
-        self.classifies.retain(|x| x != target);
-        self.co_agent_instrument.retain(|x| x != target);
-        self.co_agent_patient.retain(|x| x != target);
-        self.co_agent_result.retain(|x| x != target);
-        self.co_patient_instrument.retain(|x| x != target);
-        self.co_result_instrument.retain(|x| x != target);
-        self.co_role.retain(|x| x != target);
-        self.direction.retain(|x| x != target);
         self.domain_region.retain(|x| x != target);
         self.domain_topic.retain(|x| x != target);
         self.exemplifies.retain(|x| x != target);
         self.entails.retain(|x| x != target);
-        self.eq_synonym.retain(|x| x != target);
         self.hypernym.retain(|x| x != target);
         self.instance_hypernym.retain(|x| x != target);
-        self.instrument.retain(|x| x != target);
-        self.location.retain(|x| x != target);
-        self.manner_of.retain(|x| x != target);
         self.mero_location.retain(|x| x != target);
         self.mero_member.retain(|x| x != target);
         self.mero_part.retain(|x| x != target);
@@ -1121,24 +1175,11 @@ impl Synset {
         self.meronym.retain(|x| x != target);
         self.similar.retain(|x| x != target);
         self.other.retain(|x| x != target);
-        self.patient.retain(|x| x != target);
-        self.restricts.retain(|x| x != target);
-        self.result.retain(|x| x != target);
-        self.role.retain(|x| x != target);
-        self.source_direction.retain(|x| x != target);
-        self.target_direction.retain(|x| x != target);
-        self.subevent.retain(|x| x != target);
-        self.antonym.retain(|x| x != target);
     }
 
     pub fn insert_rel(&mut self, rel_type : &YamlSynsetRelType,
                       target_id : &SynsetId) {
         match rel_type {
-            YamlSynsetRelType::Agent => {
-                if !self.agent.iter().any(|id| id == target_id) {
-                   self.agent.push(target_id.clone());
-                }
-            },
             YamlSynsetRelType::Also => {
                 if !self.also.iter().any(|id| id == target_id) {
                     self.also.push(target_id.clone());
@@ -1149,54 +1190,9 @@ impl Synset {
                     self.attribute.push(target_id.clone());
                 }
             },
-            YamlSynsetRelType::BeInState => {
-                if !self.be_in_state.iter().any(|id| id == target_id) {
-                    self.be_in_state.push(target_id.clone());
-                }
-            },
             YamlSynsetRelType::Causes => {
                 if !self.causes.iter().any(|id| id == target_id) {
                     self.causes.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Classifies => {
-                if !self.classifies.iter().any(|id| id == target_id) {
-                    self.classifies.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoAgentInstrument => {
-                if !self.co_agent_instrument.iter().any(|id| id == target_id) {
-                    self.co_agent_instrument.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoAgentPatient => {
-                if !self.co_agent_patient.iter().any(|id| id == target_id) {
-                    self.co_agent_patient.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoAgentResult => {
-                if !self.co_agent_result.iter().any(|id| id == target_id) {
-                    self.co_agent_result.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoPatientInstrument => {
-                if !self.co_patient_instrument.iter().any(|id| id == target_id) {
-                    self.co_patient_instrument.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoResultInstrument => {
-                if !self.co_result_instrument.iter().any(|id| id == target_id) {
-                    self.co_result_instrument.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::CoRole => {
-                if !self.co_role.iter().any(|id| id == target_id) {
-                    self.co_role.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Direction => {
-                if !self.direction.iter().any(|id| id == target_id) {
-                    self.direction.push(target_id.clone());
                 }
             },
             YamlSynsetRelType::DomainRegion => {
@@ -1219,11 +1215,6 @@ impl Synset {
                     self.entails.push(target_id.clone());
                 }
             },
-            YamlSynsetRelType::EqSynonym => {
-                if !self.eq_synonym.iter().any(|id| id == target_id) {
-                    self.eq_synonym.push(target_id.clone());
-                }
-            },
             YamlSynsetRelType::Hypernym => {
                 if !self.hypernym.iter().any(|id| id == target_id) {
                     self.hypernym.push(target_id.clone());
@@ -1232,21 +1223,6 @@ impl Synset {
             YamlSynsetRelType::InstanceHypernym => {
                 if !self.instance_hypernym.iter().any(|id| id == target_id) {
                     self.instance_hypernym.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Instrument => {
-                if !self.instrument.iter().any(|id| id == target_id) {
-                    self.instrument.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Location => {
-                if !self.location.iter().any(|id| id == target_id) {
-                    self.location.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::MannerOf => {
-                if !self.manner_of.iter().any(|id| id == target_id) {
-                    self.manner_of.push(target_id.clone());
                 }
             },
             YamlSynsetRelType::MeroLocation => {
@@ -1288,75 +1264,23 @@ impl Synset {
                 if !self.other.iter().any(|id| id == target_id) {
                     self.other.push(target_id.clone());
                 }
-            },
-            YamlSynsetRelType::Patient => {
-                if !self.patient.iter().any(|id| id == target_id) {
-                    self.patient.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Restricts => {
-                if !self.restricts.iter().any(|id| id == target_id) {
-                    self.restricts.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Result => {
-                if !self.result.iter().any(|id| id == target_id) {
-                    self.result.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Role => {
-                if !self.role.iter().any(|id| id == target_id) {
-                    self.role.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::SourceDirection => {
-                if !self.source_direction.iter().any(|id| id == target_id) {
-                    self.source_direction.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::TargetDirection => {
-                if !self.target_direction.iter().any(|id| id == target_id) {
-                    self.target_direction.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Subevent => {
-                if !self.subevent.iter().any(|id| id == target_id) {
-                    self.subevent.push(target_id.clone());
-                }
-            },
-            YamlSynsetRelType::Antonym => {
-                if !self.antonym.iter().any(|id| id == target_id) {
-                    self.antonym.push(target_id.clone());
-                }
             }
         }
     }
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        write_prop_synset(w, &self.agent, "agent")?;
         write_prop_synset(w, &self.also, "also")?;
-        write_prop_synset(w, &self.antonym, "antonym")?;
         write_prop_synset(w, &self.attribute, "attribute")?;
-        write_prop_synset(w, &self.be_in_state, "be_in_state")?;
         write_prop_synset(w, &self.causes, "causes")?;
-        write_prop_synset(w, &self.classifies, "classifies")?;
-        write_prop_synset(w, &self.co_agent_instrument, "co_agent_instrument")?;
-        write_prop_synset(w, &self.co_agent_patient, "co_agent_patient")?;
-        write_prop_synset(w, &self.co_agent_result, "co_agent_result")?;
-        write_prop_synset(w, &self.co_patient_instrument, "co_patient_instrument")?;
-        write_prop_synset(w, &self.co_result_instrument, "co_result_instrument")?;
-        write_prop_synset(w, &self.co_role, "co_role")?;
         if !self.definition.is_empty() {
             write!(w, "\n  definition:")?;
             for defn in self.definition.iter() {
                 write!(w, "\n  - {}", escape_yaml_string(defn,4,4))?;
             }
         }
-        write_prop_synset(w, &self.direction, "direction")?;
         write_prop_synset(w, &self.domain_region, "domain_region")?;
         write_prop_synset(w, &self.domain_topic, "domain_topic")?;
         write_prop_synset(w, &self.entails, "entails")?;
-        write_prop_synset(w, &self.eq_synonym, "eq_synonym")?;
         if !self.example.is_empty() {
             write!(w, "\n  example:")?;
             for example in self.example.iter() {
@@ -1372,9 +1296,6 @@ impl Synset {
             None => {}
         }
         write_prop_synset(w, &self.instance_hypernym, "instance_hypernym")?;
-        write_prop_synset(w, &self.instrument, "instrument")?;
-        write_prop_synset(w, &self.location, "location")?;
-        write_prop_synset(w, &self.manner_of, "manner_of")?;
         write!(w, "\n  members:")?;
         for m in self.members.iter() {
             write!(w, "\n  - {}", escape_yaml_string(m, 4,4))?;
@@ -1390,10 +1311,6 @@ impl Synset {
         write_prop_synset(w, &self.meronym, "meronym")?;
         write_prop_synset(w, &self.other, "other")?;
         write!(w, "\n  partOfSpeech: {}", self.part_of_speech.value())?;
-        write_prop_synset(w, &self.patient, "patient")?;
-        write_prop_synset(w, &self.restricts, "restricts")?;
-        write_prop_synset(w, &self.result, "result")?;
-        write_prop_synset(w, &self.role, "role")?;
         write_prop_synset(w, &self.similar, "similar")?;
         match &self.source {
             Some(s) => { 
@@ -1401,10 +1318,63 @@ impl Synset {
             },
             None => {}
         };
-        write_prop_synset(w, &self.source_direction, "source_direction")?;
-        write_prop_synset(w, &self.subevent, "subevent")?;
-        write_prop_synset(w, &self.target_direction, "target_direction")?;
         Ok(())
+    }
+
+    pub fn links_from(&self) -> Vec<(SynsetRelType, SynsetId)> {
+        let mut links_from = Vec::new();
+        for s in self.also.iter() {
+            links_from.push((SynsetRelType::Also, s.clone()));
+        }
+        for s in self.attribute.iter() {
+            links_from.push((SynsetRelType::Attribute, s.clone()));
+        }
+        for s in self.causes.iter() {
+            links_from.push((SynsetRelType::Causes, s.clone()));
+        }
+        for s in self.domain_region.iter() {
+            links_from.push((SynsetRelType::DomainRegion, s.clone()));
+        }
+        for s in self.domain_topic.iter() {
+            links_from.push((SynsetRelType::DomainTopic, s.clone()));
+        }
+        for s in self.exemplifies.iter() {
+            links_from.push((SynsetRelType::Exemplifies, s.clone()));
+        }
+        for s in self.entails.iter() {
+            links_from.push((SynsetRelType::Entails, s.clone()));
+        }
+        for s in self.hypernym.iter() {
+            links_from.push((SynsetRelType::Hypernym, s.clone()));
+        }
+        for s in self.instance_hypernym.iter() {
+            links_from.push((SynsetRelType::InstanceHypernym, s.clone()));
+        }
+        for s in self.mero_location.iter() {
+            links_from.push((SynsetRelType::MeroLocation, s.clone()));
+        }
+        for s in self.mero_member.iter() {
+            links_from.push((SynsetRelType::MeroMember, s.clone()));
+        }
+        for s in self.mero_part.iter() {
+            links_from.push((SynsetRelType::MeroPart, s.clone()));
+        }
+        for s in self.mero_portion.iter() {
+            links_from.push((SynsetRelType::MeroPortion, s.clone()));
+        }
+        for s in self.mero_substance.iter() {
+            links_from.push((SynsetRelType::MeroSubstance, s.clone()));
+        }
+        for s in self.meronym.iter() {
+            links_from.push((SynsetRelType::Meronym, s.clone()));
+        }
+        for s in self.similar.iter() {
+            links_from.push((SynsetRelType::Similar, s.clone()));
+        }
+        for s in self.other.iter() {
+            links_from.push((SynsetRelType::Other, s.clone()));
+        }
+        links_from
     }
 
 }
@@ -1590,12 +1560,18 @@ impl SynsetId {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
+pub struct DeprecationRecord(String,String,String,String,String);
+
+
 #[derive(Error,Debug)]
 pub enum WordNetYAMLIOError {
     #[error("Could not load WordNet: {0}")]
     Io(String),
     #[error("Could not load WordNet: {0}")]
-    Serde(String)
+    Serde(String),
+    #[error("Could not load WordNet: {0}")]
+    Csv(String)
 }
 
 #[cfg(test)]
