@@ -21,6 +21,8 @@
 use crate::wordnet_yaml::*;
 use crate::rels::*;
 use crate::sense_keys::get_sense_key;
+use sha2::Sha256;
+use crate::sha2::Digest;
 
 pub struct ChangeList(bool);
 
@@ -408,21 +410,6 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
         None => {}
     }
 
-//    wn_synset.synsets = [ss for ss in wn_synset.synsets
-//                         if synset.id != ss.id]
-//    if supersede:
-//        if not isinstance(supersede, list):
-//            supersede = [supersede]
-//    else:
-//        supersede = []
-//    with open("src/deprecations.csv", "a") as out:
-//        out.write("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n" %
-//                  (synset.id, synset.ili,
-//                   ",".join(s.id for s in supersede),
-//                   ",".join(s.ili for s in supersede),
-//                   reason.replace("\n", "").replace("\"", "\"\"")))
-//    if change_list:
-//        change_list.change_synset(synset)
     change_list.mark();
 }
 //
@@ -475,34 +462,38 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
 //            if sense.synset == synset.id]
 //
 //
-//def new_id(wn, pos, definition):
-//    s = hashlib.sha256()
-//    s.update(definition.encode())
-//    nid = "ewn-8%07d-%s" % ((int(s.hexdigest(), 16) % 10000000), pos)
-//    if wn.synset_by_id(nid):
-//        print(
-//            "Could not find ID for new synset. Either a duplicate definition or a hash collision for " +
-//            nid +
-//            ". Note it is possible to force a synset ID by giving it as an argument")
-//        sys.exit(-1)
-//    return nid
-//
-//
+fn new_id(wn : &Lexicon, pos : &PartOfSpeech, definition : &str) -> Result<SynsetId, String> {
+    let s = Sha256::digest(definition.as_bytes());
+    let mut key : u32 = 0;
+    for x in s.into_iter() {
+        key = (key * 16 + x as u32) % 10000000;
+    }
+    let nid = SynsetId::new_owned(format!("8{:07}-{}", key, pos.value()));
+    match wn.synset_by_id(&nid) {
+        Some(_) => Err(format!("Duplicate Synset ID. This is likely due to a duplicate definition")),
+        None => Ok(nid)
+    }
+}
+
+/// Add a synset. Fails if POS key has invalid value.
 pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
               pos : PosKey, ssid : Option<SynsetId>, 
-              change_list : &mut ChangeList) -> SynsetId {
-//def add_synset(wn, definition, lexfile, pos, ssid=None, change_list=None):
-//    if not ssid:
-//        ssid = new_id(wn, pos, definition)
-//    ss = Synset(ssid, "in",
-//                PartOfSpeech(pos), lexfile)
-//    ss.definitions = [Definition(definition)] 
-//    ss.ili_definition = Definition(definition)
-//    wn.add_synset(ss)
-//    if change_list:
-//        change_list.change_synset(ss)
-//    return ssid
-    SynsetId::new("")
+              change_list : &mut ChangeList) -> Result<SynsetId, String> {
+   match pos.to_part_of_speech() {
+        Some(pos) => {
+            let ssid = match ssid {
+                Some(ssid) => ssid,
+                None => new_id(wn, &pos, &definition)?
+            };
+            let mut synset = Synset::new(pos);
+            synset.definition.push(definition);
+            wn.insert_synset(lexfile, ssid.clone(), synset);
+            Ok(ssid)
+        },
+        None => {
+            Err(format!("Part of speech value is not valid"))
+        }
+    }
 }
 //
 //
@@ -582,6 +573,14 @@ pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
 //        insert_rel(target, inv_rel_type, source, change_list)
 //
 //
+pub fn add_relation(wn : &mut Lexicon, source_id : SynsetId,
+                rel : SynsetRelType, target_id : SynsetId, change_list : &mut ChangeList) {
+    if rel.is_symmetric() {
+        wn.add_rel(&target_id, rel.clone(), &source_id);
+    }
+    wn.add_rel(&source_id, rel, &target_id);
+    change_list.mark();
+}
 //def add_relation(wn, source, target, new_rel, change_list=None):
 //    """Change the type of a link"""
 //    insert_rel(source, new_rel, target, change_list)
@@ -685,6 +684,14 @@ pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
 //        insert_sense_rel(wn, target, inv_rel_type, source, change_list)
 //
 //
+pub fn add_sense_relation(wn : &mut Lexicon, source : SenseId, rel : SenseRelType,
+                      target : SenseId, change_list : &mut ChangeList) {
+    if rel.is_symmetric() {
+        wn.add_sense_rel(&target, rel.clone(), &source);
+    }
+    wn.add_sense_rel(&source, rel, &target);
+    change_list.mark();
+}
 //def add_sense_relation(wn, source, target, new_rel, change_list=None):
 //    """Change the type of a link"""
 //    insert_sense_rel(wn, source, new_rel, target, change_list)

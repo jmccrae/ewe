@@ -4,6 +4,7 @@ extern crate serde_yaml;
 extern crate indicatif;
 extern crate regex;
 extern crate csv;
+extern crate sha2;
 
 //mod wordnet;
 mod rels;
@@ -11,7 +12,8 @@ mod change_manager;
 mod wordnet_yaml;
 mod sense_keys;
 
-use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense,PosKey};
+use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
+use crate::rels::{SenseRelType, SynsetRelType};
 use std::io;
 use std::io::Write;
 use crate::change_manager::{ChangeList};
@@ -91,6 +93,14 @@ fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Syns
     synset.unwrap()
 }
 
+fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
+    panic!("TODO");
+}
+
+fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str, 
+                      synset_id : Option<SynsetId>) -> (SynsetId, Option<SenseId>) {
+    panic!("TODO");
+}
 //def enter_sense_synset(wordnet, spec_string="", synset_id=None):
 //    '''Handle the user input of a single synset or sense'''
 //    if not synset_id:
@@ -230,21 +240,26 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
         let pos = PosKey::new(input(
             "Part of speech (n)oun/(v)erb/(a)djective/adve(r)b/(s)atellite: ")
             .to_lowercase());
-        let new_id = change_manager::add_synset(
-            wn, definition, lexfile, pos.clone(), None, change_list);
-        loop {
-            let lemma = input("Add Lemma (blank to stop): ");
-            if lemma.len() > 0 {
-                change_manager::add_entry(wn, new_id.clone(),
-                    lemma, pos.clone(), change_list);
-            } else {
-                break;
+        match change_manager::add_synset(
+            wn, definition, lexfile, pos.clone(), None, change_list) {
+            Ok(new_id) => {
+                loop {
+                    let lemma = input("Add Lemma (blank to stop): ");
+                    if lemma.len() > 0 {
+                        change_manager::add_entry(wn, new_id.clone(),
+                            lemma, pos.clone(), change_list);
+                    } else {
+                        break;
+                    }
+                }
+                println!("New synset created with ID {}. Add at least one relation:",
+                         new_id.as_str());
+                add_relation(wn, Some(new_id), change_list);
+            },
+            Err(e) => {
+                println!("{}", e);
             }
         }
-        println!("New synset created with ID {}. Add at least one relation:",
-                 new_id.as_str());
-        // TODO: change_relation
-//        change_relation(wn, change_list, new_id)
     }
 }
 
@@ -315,83 +330,195 @@ fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //    return True
 //
 //
-fn change_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {}
-//def change_relation(wn, change_list, source_id=None):
-//    mode = None
-//    new_source = None
-//    new_target = None
-//    new_relation = None
-//    delete = False
-//    reverse = False
-//    add = False
-//    delete = False
-//    if source_id:
-//        source_entry_id = None
-//        mode = "a"
-//        add = True
-//        new_relation = input("Enter new relation: ")
+
+fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
+                change_list : &mut ChangeList) {
+    let new_relation = Some(input("Enter new relation: "));
+    let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", source_id);
+    match source_sense_id {
+        Some(source_sense_id) => {
+            let mut relation = input("Enter new relation: ");
+            while SenseRelType::from(&relation).is_none() {
+                println!("Bad relation type");
+                relation = input("Enter new relation: ");
+            }
+            let rel = SenseRelType::from(&relation).unwrap();
+            let target_sense_id = enter_sense(wn, "target ");
+            change_manager::add_sense_relation(wn, source_sense_id,
+                                               rel, target_sense_id,
+                                               change_list);
+        },
+        None => {
+            let mut relation = input("Enter new relation: ");
+            while SynsetRelType::from(&relation).is_none() {
+                println!("Bad relation type");
+                relation = input("Enter new relation: ");
+            }
+            let rel = SynsetRelType::from(&relation).unwrap();
+            let target_id = enter_synset(wn, "target ").0;
+            change_manager::add_relation(wn, source_id,
+                                         rel, target_id,
+                                         change_list);
+        }
+    }
+
+}
+
+fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
+
+}
+
+fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
+
+}
+
+fn change_relation_type(wn : &mut Lexicon, change_List : &mut ChangeList) {
+  //          let mut mode2 = input("Change [S]ubject/[T]arget/[R]elation: ").to_lowercase();
+  //          while mode2 != "s" && mode2 != "t" && mode2 != "r" {
+  //              if mode2 == "s" {
+  //                  let (ssid, sid) = enter_sense_synset(
+  //                      wn, "new source ", None);
+  //                  new_source = Some(ssid);
+  //                  new_source_sense_id = Some(sid);
+  //              } else if mode2 == "t" {
+  //                  let (ssid, sid) = enter_sense_synset(
+  //                      wn, "new target ", None);
+  //                  new_target = Some(ssid);
+  //                  new_target_sense_id = Some(sid);
+  //              } else if mode2 == "r" {
+  //                  new_relation = Some(input("Enter new relation: "));
+  //              } else {
+  //                  println!("Bad choice")
+  //              }
+  //              mode2 = input("Change [S]ubject/[T]arget/[R]elation: ").to_lowercase();
+  //          }
+
+}
+
+fn change_relation(wn : &mut Lexicon, 
+                   change_list : &mut ChangeList) {
+    let mut mode = String::new();
+    while mode != "a" && mode != "d" && mode != "r" && mode != "c" {
+        mode = input("[A]dd new relation/[D]elete existing relation/[R]everse relation/[C]hange relation: ").to_lowercase();
+        if mode == "a" {
+            add_relation(wn, None, change_list);
+        } else if mode == "c" {
+            change_relation_type(wn, change_list);
+        } else if mode == "d" {
+            delete_relation(wn, change_list);
+        } else if mode == "r" {
+            reverse_relation(wn, change_list);
+        }
+    }
+}
 //
-//    while mode != "a" and mode != "d" and mode != "r" and mode != "c":
-//        mode = input("[A]dd new relation/[D]elete existing relation/" +
-//                     "[R]everse relation/[C]hange relation: ").lower()
-//        if mode == "a":
-//            add = True
-//            new_relation = input("Enter new relation: ")
-//        elif mode == "c":
-//            mode = input("Change [S]ubject/[T]arget/[R]elation: ").lower()
-//            if mode == "s":
-//                new_source, new_source_sense_id = enter_sense_synset(
-//                    wn, "new source ")
-//            elif mode == "t":
-//                new_target, new_target_sense_id = enter_sense_synset(
-//                    wn, "new target ")
-//            elif mode == "r":
-//                new_relation = input("Enter new relation: ")
-//            else:
-//                print("Bad choice")
-//                return False
-//        elif mode == "d":
-//            delete = True
-//        elif mode == "r":
-//            reverse = True
+//    if source_id.is_none() {
+//        match new_relation {
+//            Some(ref new_relation) =>
+//                match SenseRelType::from(&new_relation) {
+//                    Some(_) => {
+//                        source_id = Some(enter_synset(wn, "source ").0);
+//                        source_sense_id = None;
+//                    },
+//                    None => {
+//                        println!("Unsupported relation");
+//                        return;
+//                    }
+//                },
+//            None => {
+//                if new_source.is_some() && new_source_sense_id.is_some() {
+//                    let (ssid, sid) = enter_sense_synset(wn, "old source ", None);
+//                    source_id = Some(ssid);
+//                    source_sense_id = Some(sid);
+//                } else if new_source.is_some() {
+//                    source_id = Some(enter_synset(wn, "old source ").0);
+//                    source_sense_id = None;
+//                } else {
+//                    let (ssid, sid) = enter_sense_synset(wn, "source ", None);
+//                    source_id = Some(ssid);
+//                    source_sense_id = Some(sid);
+//                }
+//            }
+//        }
+//    } else {
+//        source_sense_id = None;
+//    }
 //
-//    if not source_id:
-//        if (new_relation and
-//                new_relation not in wordnet.SenseRelType._value2member_map_):
-//            source_id = enter_synset(wn, "source ").id
-//            source_sense_id = None
-//        elif new_source and new_source_sense_id:
-//            source_id, source_sense_id = enter_sense_synset(wn, "old source ")
-//        elif new_source:
-//            source_id = enter_synset(wn, "old source ").id
-//            source_sense_id = None
-//        else:
-//            source_id, source_sense_id = enter_sense_synset(wn, "source ")
-//    else:
-//        source_sense_id = None
+//    match new_relation {
+//        Some(ref nr) =>
+//            if SenseRelType::from(nr).is_some() {
+//                target_id = Some(enter_synset(wn, "target ").0);
+//                target_sense_id = None;
+//            } else {
+//                println!("Unsupported relation");
+//                return;
+//            },
+//        None => {
+//            if new_target.is_some() && new_target_sense_id.is_some() {
+//                let (ssid, sid) = enter_sense_synset(wn, "old target ", None);
+//                target_id = Some(ssid);
+//                target_sense_id = Some(sid);
+//            } else if new_target.is_some() {
+//                target_id = Some(enter_synset(wn, "old target ").0);
+//                target_sense_id = None;
+//            } else {
+//                let (ssid, sid) = enter_sense_synset(wn, "old target ", None);
+//                target_id = Some(ssid);
+//                target_sense_id = Some(sid);
+//                if source_sense_id.is_none() { // occurs when creating a new entry
+//                    let (ssid, sid) = enter_sense_synset(wn, "source ", None);
+//                    source_id = Some(ssid);
+//                    source_sense_id = Some(sid);
+//                }
+//            }
+//        }
+//    }
 //
-//    if (new_relation and
-//            new_relation not in wordnet.SenseRelType._value2member_map_):
-//        target_id = enter_synset(wn, "target ").id
-//        target_sense_id = None
-//    elif new_target and new_target_sense_id:
-//        target_id, target_sense_id = enter_sense_synset(wn, "old target ")
-//    elif new_target:
-//        target_id = enter_synset(wn, "old target ").id
-//        target_sense_id = None
-//    else:
-//        target_id, target_sense_id = enter_sense_synset(wn, "target ")
-//        if not source_sense_id: # Occurs when creating a new entry
-//            source_id, source_sense_id = enter_sense_synset(wn, "source ", source_id)
+//    if !wn.has_synset(source_synset_id) {
+//        println!("Could not find source synset " + source_id)
+//        return;
+//    }
+//    if !wn.has_synset(target_sense_id) {
+//        println!("Could not find target synset " + target_id)
+//        return;
+//    }
 //
-//    source_synset = wn.synset_by_id(source_id)
-//    if not source_synset:
-//        print("Could not find source synset " + source_id)
-//        return False
-//    target_synset = wn.synset_by_id(target_id)
-//    if not target_synset:
-//        print("Could not find target synset " + target_id)
-//        return False
+//    match source_sense_id {
+//        Some(source_sense_id) => {
+//            if source_sense_id.is_some() && target_sense_id.is_some() && new_source_sense_id.is_some() {
+//                if !wn.has_sense(source_sense_id) {
+//                    println!("Source sense {} does not exist", source_sense_id.unwrap().as_str());
+//                    return;
+//                }
+//                if !wn.has_sense(target_sense_id) {
+//                    println!("Target sense {} does not exist", target_sense_id.unwrap().as_str());
+//                    return;
+//                }
+//                if !wn.has_sense(new_source_sense_id) {
+//                    println!("New source sense {} does not exists", new_source_sense_id.unwrap().as_str());
+//                    return;
+//                }
+//                change_manager::update_source_sense(wn, source_sense_id,
+//                                                    target_sense_id,
+//                                                    new_source_sense_id,
+//                                                    change_list);
+//            } else {
+//                panic!("Wrong info collected");
+//            }
+//        }, None => {
+//
+//
+//    match new_source {
+//        Some(ref new_source) => {
+//            match 
+//                change_manager::update_source(wn, source_sense,
+//                                              target_sense,
+//                                              new_source,
+//                                              change_list);
+//            }
+//    }
+//
+//
 //
 //    if new_source:
 //        if source_sense_id or target_sense_id:
@@ -539,7 +666,6 @@ fn change_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //    else:
 //        print("No change specified")
 //    return True
-//
 //
 fn split_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def split_synset(wn, change_list):

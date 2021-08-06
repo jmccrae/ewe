@@ -250,6 +250,11 @@ impl Lexicon {
         self.synset_by_id(synset_id).is_some()
     }
 
+    /// Verifies if a sense is in the graph
+    pub fn has_sense(&self, sense_id : &SenseId) -> bool {
+        self.sense_id_to_lemma_pos.get(sense_id).is_some()
+    }
+
     /// Get the list of lemmas associated with a synset
     pub fn members_by_id(&self, synset_id : &SynsetId) -> Vec<String> {
         self.synset_by_id(synset_id).iter().flat_map(|synset|
@@ -653,6 +658,21 @@ pub struct PosKey(String);
 impl PosKey {
     pub fn new(s : String) -> PosKey { PosKey(s) }
     pub fn as_str(&self) -> &str { &self.0 }
+    pub fn to_part_of_speech(&self) -> Option<PartOfSpeech> {
+        if self.0.starts_with("n") {
+            Some(PartOfSpeech::n)
+        } else if self.0.starts_with("v") {
+            Some(PartOfSpeech::v)
+        } else if self.0.starts_with("a") {
+            Some(PartOfSpeech::a)
+        } else if self.0.starts_with("r") {
+            Some(PartOfSpeech::r)
+        } else if self.0.starts_with("s") {
+            Some(PartOfSpeech::s)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -1557,6 +1577,7 @@ pub struct SynsetId(String);
 
 impl SynsetId {
     pub fn new(s : &str) -> SynsetId { SynsetId(s.to_string()) }
+    pub fn new_owned(s : String) -> SynsetId { SynsetId(s) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
 

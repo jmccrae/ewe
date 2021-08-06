@@ -305,6 +305,13 @@ impl SynsetRelType {
             //SynsetRelType::Antonym => (true, YamlSynsetRelType::Antonym)
         }
     }
+
+    pub fn is_symmetric(&self) -> bool {
+        match self {
+            SynsetRelType::Similar => true,
+            _ => false
+        }
+    }
 }
 
 pub enum YamlSynsetRelType {
@@ -480,22 +487,11 @@ impl SenseRelType {
             _ => None
         }
     }
+    
+    pub fn is_symmetric(&self) -> bool {
+        *self == SenseRelType::Antonym ||
+            *self == SenseRelType::Similar ||
+            *self == SenseRelType::Also ||
+            *self == SenseRelType::Derivation
+    }
 }
-
-lazy_static! {
-    static ref INVERSE_SENSE_RELS : HashMap<SenseRelType, SenseRelType> = {
-        let mut map = HashMap::new();
-        map.insert(SenseRelType::DomainRegion, SenseRelType::HasDomainRegion);
-        map.insert(SenseRelType::HasDomainRegion, SenseRelType::DomainRegion);
-        map.insert(SenseRelType::DomainTopic, SenseRelType::HasDomainTopic);
-        map.insert(SenseRelType::HasDomainTopic, SenseRelType::DomainTopic);
-        map.insert(SenseRelType::Exemplifies, SenseRelType::IsExemplifiedBy);
-        map.insert(SenseRelType::IsExemplifiedBy, SenseRelType::Exemplifies);
-        map.insert(SenseRelType::Antonym, SenseRelType::Antonym);
-        map.insert(SenseRelType::Similar, SenseRelType::Similar);
-        map.insert(SenseRelType::Also, SenseRelType::Also);
-        map.insert(SenseRelType::Derivation, SenseRelType::Derivation);
-        map
-    };
-}
-
