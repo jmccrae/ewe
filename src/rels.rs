@@ -1,6 +1,3 @@
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-
 #[derive(Clone,PartialEq,Debug,Eq,Hash)]
 pub enum SynsetRelType { 
 //  Agent,
@@ -451,23 +448,23 @@ pub enum SenseRelType {
 }
 
 impl SenseRelType {
-    pub fn value(&self) -> &'static str {
-        match self { 
-            SenseRelType::Antonym => "antonym",
-            SenseRelType::Also => "also",
-            SenseRelType::Participle => "participle",
-            SenseRelType::Pertainym => "pertainym",
-            SenseRelType::Derivation => "derivation",
-            SenseRelType::DomainTopic => "domain_topic",
-            SenseRelType::HasDomainTopic => "has_domain_topic",
-            SenseRelType::DomainRegion => "domain_region",
-            SenseRelType::HasDomainRegion => "has_domain_region",
-            SenseRelType::Exemplifies => "exemplifies",
-            SenseRelType::IsExemplifiedBy => "is_exemplified_by",
-            SenseRelType::Similar => "similar",
-            SenseRelType::Other => "other"
-        }
-    }
+    //pub fn value(&self) -> &'static str {
+    //    match self { 
+    //        SenseRelType::Antonym => "antonym",
+    //        SenseRelType::Also => "also",
+    //        SenseRelType::Participle => "participle",
+    //        SenseRelType::Pertainym => "pertainym",
+    //        SenseRelType::Derivation => "derivation",
+    //        SenseRelType::DomainTopic => "domain_topic",
+    //        SenseRelType::HasDomainTopic => "has_domain_topic",
+    //        SenseRelType::DomainRegion => "domain_region",
+    //        SenseRelType::HasDomainRegion => "has_domain_region",
+    //        SenseRelType::Exemplifies => "exemplifies",
+    //        SenseRelType::IsExemplifiedBy => "is_exemplified_by",
+    //        SenseRelType::Similar => "similar",
+    //        SenseRelType::Other => "other"
+    //    }
+    //}
 
     pub fn from(v : &str) -> Option<SenseRelType> {
         match v {

@@ -79,6 +79,7 @@ impl ChangeList {
 //         
 //}
 
+#[allow(unused_variables)]
 pub fn delete_rel(wn : &mut Lexicon, source_id : &SynsetId, 
                   target : &SynsetId, change_list : &mut ChangeList) {
     println!("Delete {} =*=> {}", source_id.as_str(), target.as_str());
@@ -96,10 +97,13 @@ pub fn delete_sense_rel(wn : &mut Lexicon,
 
 pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
                   rel_type : &SynsetRelType,
-                  target_id : &SynsetId) {
+                  target_id : &SynsetId, change_list : &mut ChangeList) {
     println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
                     target_id.as_str());
     wn.add_rel(source_id, rel_type.clone(), target_id);
+    if rel_type.is_symmetric() {
+        wn.add_rel(target_id, rel_type.clone(), source_id);
+    }
     if *rel_type == SynsetRelType::Similar {
         let mut changes = Vec::new();
         for id in vec![source_id, target_id] {
@@ -120,15 +124,16 @@ pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
             wn.update_sense_key(&old, &new);
         }
     }
+    change_list.mark();
 }
 
-pub fn insert_sense_rel(wn : &mut Lexicon, source_id : &SenseId,
-                  rel_type : &SenseRelType,
-                  target_id : &SenseId) {
-    println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
-                    target_id.as_str());
-    wn.add_sense_rel(source_id, rel_type.clone(), target_id);
-}
+//pub fn insert_sense_rel(wn : &mut Lexicon, source_id : &SenseId,
+//                  rel_type : &SenseRelType,
+//                  target_id : &SenseId) {
+//    println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
+//                    target_id.as_str());
+//    wn.add_sense_rel(source_id, rel_type.clone(), target_id);
+//}
 
 
 //def insert_rel(source, rel_type, target, change_list=None):
@@ -204,7 +209,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
     println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
     let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter_mut()
-        .filter(|(pos, lemma)| synset_pos == **pos)
+        .filter(|(pos, _)| synset_pos == **pos)
         .map(|x| x.1)
         .collect::<Vec<&Entry>>();
 
@@ -214,7 +219,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
             lemma, synset_pos.as_str());
     }
 
-    let mut entry = entries.pop();
+    let entry = entries.pop();
 
     let sense_id = match entry {
         Some(e) => {
@@ -412,10 +417,10 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
         None => {
             match wn.synset_by_id(synset_id) {
                 Some(ss) => {
-                    for (rel, target) in ss.links_from() {
+                    for (_, target) in ss.links_from() {
                         delete_rel(wn, synset_id, &target, change_list);
                     }
-                    for (rel, source) in wn.links_to(synset_id) {
+                    for (_, source) in wn.links_to(synset_id) {
                         delete_rel(wn, &source, synset_id, change_list);
                     }
                 },
@@ -509,6 +514,7 @@ pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
             let mut synset = Synset::new(pos);
             synset.definition.push(definition);
             wn.insert_synset(lexfile, ssid.clone(), synset);
+            change_list.mark();
             Ok(ssid)
         },
         None => {
@@ -594,14 +600,6 @@ pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
 //        insert_rel(target, inv_rel_type, source, change_list)
 //
 //
-pub fn add_relation(wn : &mut Lexicon, source_id : SynsetId,
-                rel : SynsetRelType, target_id : SynsetId, change_list : &mut ChangeList) {
-    if rel.is_symmetric() {
-        wn.add_rel(&target_id, rel.clone(), &source_id);
-    }
-    wn.add_rel(&source_id, rel, &target_id);
-    change_list.mark();
-}
 //def add_relation(wn, source, target, new_rel, change_list=None):
 //    """Change the type of a link"""
 //    insert_rel(source, new_rel, target, change_list)

@@ -20,16 +20,7 @@ use crate::change_manager::{ChangeList};
 use lazy_static::lazy_static;
 use regex::Regex;
 
-//import change_manager
-//from change_manager import ChangeList
-//from autocorrect import Speller
-//import wordnet
-//import re
-
-//#####################################
-//# English WordNet Editor (EWE)
-//
-//
+/// Supports the user in choosing a synset
 fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Synset) {
     let mut synset = None;
     while synset.is_none() {
@@ -343,6 +334,7 @@ fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
 //    return True
 //
 //
+#[allow(unused_variables)]
 fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def change_example(wn, change_list):
 //    synset = enter_synset(wn)
@@ -401,8 +393,8 @@ fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
             }
             let rel = SynsetRelType::from(&relation).unwrap();
             let target_id = enter_synset(wn, "target ").0;
-            change_manager::add_relation(wn, source_id,
-                                         rel, target_id,
+            change_manager::insert_rel(wn, &source_id,
+                                         &rel, &target_id,
                                          change_list);
         }
     }
@@ -413,23 +405,25 @@ fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
-            let mut target_sense_id = enter_sense(wn, "target ");
+            let target_sense_id = enter_sense(wn, "target ");
             change_manager::delete_sense_rel(wn, &source_sense_id,
                                              &target_sense_id, change_list);
         },
         None => {
-            let mut target_id = enter_synset(wn, "target ").0;
+            let target_id = enter_synset(wn, "target ").0;
             change_manager::delete_rel(wn, &source_id, &target_id,
                                        change_list);
         }
     }
 }
 
+#[allow(unused_variables)]
 fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
 
 }
 
-fn change_relation_type(wn : &mut Lexicon, change_List : &mut ChangeList) {
+#[allow(unused_variables)]
+fn change_relation_type(wn : &mut Lexicon, change_list : &mut ChangeList) {
   //          let mut mode2 = input("Change [S]ubject/[T]arget/[R]elation: ").to_lowercase();
   //          while mode2 != "s" && mode2 != "t" && mode2 != "r" {
   //              if mode2 == "s" {
@@ -724,6 +718,7 @@ fn change_relation(wn : &mut Lexicon,
 //        print("No change specified")
 //    return True
 //
+#[allow(unused_variables)]
 fn split_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 //def split_synset(wn, change_list):
 //    synset = enter_synset(wn)
@@ -783,7 +778,7 @@ fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
     println!("X. Exit EWE");
 
 
-    let mut mode = input("Option> ");
+    let mode = input("Option> ");
     match mode.to_lowercase().as_str() {
         "1" => change_entry(wn, ewe_changed),
         "2" => change_synset(wn, ewe_changed),

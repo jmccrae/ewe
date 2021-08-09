@@ -90,7 +90,9 @@ fn extract_lex_id(sense_key : &SenseId) -> i32 {
 }
 
 fn sense_for_entry_synset_id<'a>(wn : &'a Lexicon, ss_id : &SynsetId, lemma : &str) -> Vec<&'a Sense> {
-    wn.entry_by_lemma(lemma).iter().flat_map(|e| e.sense.iter()).collect()
+    wn.entry_by_lemma(lemma).iter().flat_map(|e| e.sense.iter()).
+        filter(|sense| sense.synset == *ss_id).
+        collect()
 }
 
 fn get_head_word(wn : &Lexicon, ss : &Synset) -> (String, String) {
