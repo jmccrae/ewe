@@ -119,6 +119,22 @@ fn get_head_word(wn : &Lexicon, ss : &Synset) -> (String, String) {
     }
 }
 
+pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
+                      synset_id : &SynsetId) -> Option<SenseId> {
+    match wn.synset_by_id(synset_id) {
+        Some(synset) => {
+            for entry in wn.entry_by_lemma(lemma) {
+                if entry.sense.iter().any(|sense| sense.synset == *synset_id) {
+                    return Some(get_sense_key(wn, lemma, entry, sense_key,
+                                              synset, synset_id));
+                }
+            }
+        },
+        None => {}
+    }
+    None
+}
+
 /// Calculate the sense key of an entry
 /// Pass `None` for `sense_key` for new senses
 pub fn get_sense_key(wn : &Lexicon, lemma : &str,

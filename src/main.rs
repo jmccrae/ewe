@@ -93,13 +93,59 @@ fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Syns
     synset.unwrap()
 }
 
-fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
-    panic!("TODO");
-}
-
 fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str, 
                       synset_id : Option<SynsetId>) -> (SynsetId, Option<SenseId>) {
-    panic!("TODO");
+    let synset_id = match synset_id {
+        Some(ssid) => ssid,
+        None => enter_synset(wordnet, spec_string).0
+    };
+    let mems = wordnet.members_by_id(&synset_id);
+    println!("0. Synset (no sense)");
+    for (i, m) in mems.iter().enumerate() {
+        println!("{}. {}", i + 1, m);
+    }
+    let sense_no = input("Enter sense number: ");
+    let sense_id = match sense_no.parse::<usize>() {
+        Ok(i) => {
+            if i >= 1 && i <= mems.len() {
+                wordnet.get_sense(&mems[i], &synset_id)
+                    .iter()
+                    .filter(|sense| sense.synset == synset_id)
+                    .map(|sense| sense.id.clone())
+                    .nth(0)
+            } else {
+                None
+            }
+        },
+        Err(_) => None
+    };
+    (synset_id, sense_id)
+}
+
+fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
+    let synset_id = enter_synset(wordnet, spec_string).0;
+    let mems = wordnet.members_by_id(&synset_id);
+    loop {
+        for (i, m) in mems.iter().enumerate() {
+            println!("{}. {}", i + 1, m);
+        }
+        let sense_no = input("Enter sense number: ");
+        match sense_no.parse::<usize>() {
+            Ok(i) => {
+                if i >= 1 && i <= mems.len() {
+                    match wordnet.get_sense(&mems[i], &synset_id)
+                        .iter()
+                        .filter(|sense| sense.synset == synset_id)
+                        .map(|sense| sense.id.clone())
+                        .nth(0) {
+                        Some(ssid) => { return ssid; },
+                        None => {}
+                    }
+                } 
+            },
+            Err(_) => {}
+        }
+    }
 }
 //def enter_sense_synset(wordnet, spec_string="", synset_id=None):
 //    '''Handle the user input of a single synset or sense'''
@@ -333,7 +379,6 @@ fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {}
 
 fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
                 change_list : &mut ChangeList) {
-    let new_relation = Some(input("Enter new relation: "));
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", source_id);
     match source_sense_id {
         Some(source_sense_id) => {
@@ -365,7 +410,19 @@ fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
 }
 
 fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
-
+    let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
+    match source_sense_id {
+        Some(source_sense_id) => {
+            let mut target_sense_id = enter_sense(wn, "target ");
+            change_manager::delete_sense_rel(wn, &source_sense_id,
+                                             &target_sense_id, change_list);
+        },
+        None => {
+            let mut target_id = enter_synset(wn, "target ").0;
+            change_manager::delete_rel(wn, &source_id, &target_id,
+                                       change_list);
+        }
+    }
 }
 
 fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {

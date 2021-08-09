@@ -203,6 +203,14 @@ impl Lexicon {
         }
     }
 
+    /// Get the mutable sense by lemma and synset id
+    pub fn get_sense<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Vec<&'a Sense> {
+        match self.entries.get(&entry_key(&lemma)) {
+            Some(entries) => entries.get_sense(lemma, synset_id),
+            None => Vec::new()
+        }
+    }
+
     /// Get the part of speech key for an entry referring to a specific synset
     pub fn pos_for_entry_synset(&self, lemma : &str, synset_id : &SynsetId) -> Option<PosKey> {
         for (pos, entry) in self.entry_by_lemma_with_pos(lemma) {
@@ -377,13 +385,13 @@ impl Lexicon {
         }
     }
 
-    /// Remove a relation between two senses
-    pub fn remove_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
+    /// Remove all links between two senses
+    pub fn remove_sense_rel(&mut self, source : &SenseId, 
                       target : &SenseId) {
         match self.sense_id_to_lemma_pos.get(source) {
             Some((lemma, pos)) => {
                 match self.entries.get_mut(&entry_key(lemma)) {
-                    Some(e) => e.remove_rel(lemma, pos, source, rel, target),
+                    Some(e) => e.remove_rel(lemma, pos, source, target),
                     None => {
                     }
                 }
@@ -408,6 +416,14 @@ impl Lexicon {
                 Some(ss) => ss.insert_rel(&rel, target),
                 None => {}
             }
+        }
+    }
+
+    /// Remove all links between two senses
+    pub fn remove_rel(&mut self, source : &SynsetId, target : &SynsetId) {
+        match self.synset_by_id_mut(source) {
+            Some(ss) => ss.remove_rel(target),
+            None => {}
         }
     }
 
@@ -452,7 +468,28 @@ impl Lexicon {
             reason));
     }
 
-
+    pub fn update_sense_key(&mut self, old_key : &SenseId, new_key : &SenseId) {
+        match self.sense_id_to_lemma_pos.get(old_key) {
+            Some((lemma, pos)) => {
+                match self.entries.get_mut(&entry_key(lemma)) {
+                    Some(e) => {
+                        e.update_sense_key(lemma, pos, old_key, new_key);
+                    },
+                    None => {}
+                }
+            },
+            None => {}
+        }
+        match self.sense_links_to.get(old_key).map(|x| x.clone()) {
+            Some(links_to) => {
+                for (rel, source) in links_to {
+                    self.remove_sense_rel(&source, old_key);
+                    self.add_sense_rel(&source, rel.clone(), old_key);
+                }
+            },
+            None => {}
+        }
+    }
 }
 
 fn add_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
@@ -532,7 +569,7 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                 format!("\\u{:04X}", c as u32)
             }
         }).collect::<Vec<String>>().join(""))
-    } else if s.starts_with("\"") || s.ends_with(":") 
+    } else if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
         || s.starts_with("'") || s == "true" || s == "false" 
         || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
         || s.ends_with(" ") || s.contains(": ")
@@ -809,14 +846,14 @@ impl Entries {
     }
 
     fn remove_rel(&mut self, lemma : &str, pos : &PosKey,
-               source : &SenseId, rel : SenseRelType,
+               source : &SenseId, 
                target : &SenseId) {
         match self.0.get_mut(lemma) {
             Some(m) => match m.get_mut(pos) {
                 Some(e) => {
                     for sense in e.sense.iter_mut() {
                         if sense.id == *source {
-                            sense.remove_rel(rel.clone(), target);
+                            sense.remove_rel(target);
                         }
                     }
                 },
@@ -843,6 +880,44 @@ impl Entries {
                     e.form.push(form);
                 },
                 None => {}
+            },
+            None => {}
+        }
+    }
+
+    pub fn get_sense<'a>(&'a self, lemma : &str, 
+                         synset_id : &SynsetId) -> Vec<&'a Sense> {
+        match self.0.get(lemma) {
+            Some(m) => {
+                let mut senses = Vec::new();
+                for (_, ss) in m.iter() {
+                    for s in ss.sense.iter() {
+                        if s.synset == *synset_id {
+                            senses.push(s);
+                        }
+                    }
+                }
+                senses
+            },
+            None => Vec::new()
+        }
+    }
+
+
+    fn update_sense_key(&mut self, lemma : &str, key : &PosKey,
+                        old_key : &SenseId, new_key : &SenseId) {
+        match self.0.get_mut(lemma) {
+            Some(x) => {
+                match x.get_mut(key) {
+                    Some(entry) => {
+                        for sense in entry.sense.iter_mut() {
+                            if sense.id == *old_key {
+                                sense.id = new_key.clone();
+                            }
+                        }
+                    },
+                    None => {}
+                }
             },
             None => {}
         }
@@ -956,7 +1031,7 @@ impl Sense {
         }
     }
 
-    pub fn remove_all_relations(&mut self, target : &SenseId) {
+    pub fn remove_rel(&mut self, target : &SenseId) {
         self.antonym.retain(|x| x != target);
         self.also.retain(|x| x != target);
         self.participle.retain(|x| x != target);
@@ -1046,25 +1121,6 @@ impl Sense {
             SenseRelType::Other => self.other.push(target)
         };
     }
-
-    fn remove_rel(&mut self, rel : SenseRelType, target : &SenseId) {
-        match rel {
-            SenseRelType::Antonym => self.antonym.retain(|s| s != target),
-            SenseRelType::Also => self.also.retain(|s| s != target),
-            SenseRelType::Participle => self.participle.retain(|s| s != target),
-            SenseRelType::Pertainym => self.pertainym.retain(|s| s != target),
-            SenseRelType::Derivation => self.derivation.retain(|s| s != target),
-            SenseRelType::DomainTopic => self.domain_topic.retain(|s| s != target),
-            SenseRelType::HasDomainTopic => self.has_domain_topic.retain(|s| s != target),
-            SenseRelType::DomainRegion => self.domain_region.retain(|s| s != target),
-            SenseRelType::HasDomainRegion => self.has_domain_region.retain(|s| s != target),
-            SenseRelType::Exemplifies => self.exemplifies.retain(|s| s != target),
-            SenseRelType::IsExemplifiedBy => self.is_exemplified_by.retain(|s| s != target),
-            SenseRelType::Similar => self.similar.retain(|s| s != target),
-            SenseRelType::Other => self.other.retain(|s| s != target)
-        };
-    }
-
 }
 
 fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, first : bool) -> std::io::Result<bool> {
@@ -1177,7 +1233,7 @@ impl Synset {
         }
     }
 
-    pub fn remove_all_relations(&mut self, target : &SynsetId) {
+    fn remove_rel(&mut self, target : &SynsetId) {
         self.also.retain(|x| x != target);
         self.attribute.retain(|x| x != target);
         self.causes.retain(|x| x != target);
@@ -1197,7 +1253,7 @@ impl Synset {
         self.other.retain(|x| x != target);
     }
 
-    pub fn insert_rel(&mut self, rel_type : &YamlSynsetRelType,
+    fn insert_rel(&mut self, rel_type : &YamlSynsetRelType,
                       target_id : &SynsetId) {
         match rel_type {
             YamlSynsetRelType::Also => {
@@ -1430,7 +1486,8 @@ impl Example {
         write!(w, "\n  - ")?;
         match &self.source {
             Some(s) => {
-                write!(w, "source: {}\n    text: {}", s,
+                write!(w, "source: {}\n    text: {}", 
+                       escape_yaml_string(s, 6, 10),
                        escape_yaml_string(&self.text, 6, 10))?;
             },
             None => {

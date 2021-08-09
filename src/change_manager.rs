@@ -20,7 +20,7 @@
 //
 use crate::wordnet_yaml::*;
 use crate::rels::*;
-use crate::sense_keys::get_sense_key;
+use crate::sense_keys::{get_sense_key, get_sense_key2};
 use sha2::Sha256;
 use crate::sha2::Digest;
 
@@ -79,37 +79,58 @@ impl ChangeList {
 //         
 //}
 
-pub fn delete_rel(wn : &mut Lexicon, source_id : &SynsetId, target : &SynsetId) {
+pub fn delete_rel(wn : &mut Lexicon, source_id : &SynsetId, 
+                  target : &SynsetId, change_list : &mut ChangeList) {
     println!("Delete {} =*=> {}", source_id.as_str(), target.as_str());
-    match wn.synset_by_id_mut(source_id) {
-        Some(source) =>  source.remove_all_relations(target),
-        None => {}
-    };
-    //match change_list {
-    //    Some(cl) => cl.change_synset(wn, source_id),
-    //    None => {}
-    //};
+    panic!("TODO");
 }
 
-pub fn delete_sense_rel(wn : &Lexicon, 
-                        sense : &mut Sense, target : &SenseId) {
-    println!("Delete {} =*=> {}", sense.id.as_str(), target.as_str());
-    sense.remove_all_relations(target);
+pub fn delete_sense_rel(wn : &mut Lexicon, 
+                        source : &SenseId, target : &SenseId,
+                        change_list : &mut ChangeList) {
+    println!("Delete {} =*=> {}", source.as_str(), target.as_str());
+    wn.remove_sense_rel(source, target);
+    wn.remove_sense_rel(target, source);
+    change_list.mark();
 }
 
-pub fn insert_rel(source : &mut Synset, source_id : &SynsetId,
+pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
                   rel_type : &SynsetRelType,
-                  target : &mut Synset, target_id : &SynsetId) {
+                  target_id : &SynsetId) {
     println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
                     target_id.as_str());
-    // TODO: check for updated sense key if adding `similar`
-    let (non_inv, yaml_rel_type) = rel_type.clone().to_yaml();
-    if non_inv {
-        source.insert_rel(&yaml_rel_type, target_id);
-    } else {
-        target.insert_rel(&yaml_rel_type, source_id);
+    wn.add_rel(source_id, rel_type.clone(), target_id);
+    if *rel_type == SynsetRelType::Similar {
+        let mut changes = Vec::new();
+        for id in vec![source_id, target_id] {
+            for member in wn.members_by_id(id) {
+                for sense in wn.get_sense(&member, id) {
+                    match get_sense_key2(wn, &member, Some(&sense.id), id) {
+                        Some(calc_key) => {
+                            if sense.id != calc_key {
+                                changes.push((sense.id.clone(), calc_key.clone()));
+                            }
+                        },
+                        None => {}
+                    }
+                }
+            }
+        }
+        for (old, new) in changes {
+            wn.update_sense_key(&old, &new);
+        }
     }
 }
+
+pub fn insert_sense_rel(wn : &mut Lexicon, source_id : &SenseId,
+                  rel_type : &SenseRelType,
+                  target_id : &SenseId) {
+    println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
+                    target_id.as_str());
+    wn.add_sense_rel(source_id, rel_type.clone(), target_id);
+}
+
+
 //def insert_rel(source, rel_type, target, change_list=None):
 //    """Insert a single relation between two synsets"""
 //    print("Insert %s =%s=> %s" % (source.id, rel_type, target.id))
@@ -244,8 +265,8 @@ pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str,
     println!("Removing {} from synset {}", lemma, synset_id.as_str());
     let links = wn.sense_links_to(lemma, pos, synset_id);
     for sense_id in  wn.remove_sense(lemma, pos, synset_id) {
-        for (rel, source) in links.iter() {
-            wn.remove_sense_rel(&source, rel.clone(), &sense_id);
+        for (_, source) in links.iter() {
+            wn.remove_sense_rel(&source, &sense_id);
         }
     }
     change_list.mark();
@@ -377,11 +398,11 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
             match wn.synset_by_id(synset_id) {
                 Some(ss) => {
                     for (rel, target) in ss.links_from() {
-                        delete_rel(wn, synset_id, &target);
+                        delete_rel(wn, synset_id, &target, change_list);
                         wn.add_rel(supersede_id, rel, &target);
                     }
                     for (rel, source) in wn.links_to(synset_id) {
-                        delete_rel(wn, &source, synset_id);
+                        delete_rel(wn, &source, synset_id, change_list);
                         wn.add_rel(&source, rel, supersede_id);
                     }
                 },
@@ -392,10 +413,10 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
             match wn.synset_by_id(synset_id) {
                 Some(ss) => {
                     for (rel, target) in ss.links_from() {
-                        delete_rel(wn, synset_id, &target);
+                        delete_rel(wn, synset_id, &target, change_list);
                     }
                     for (rel, source) in wn.links_to(synset_id) {
-                        delete_rel(wn, &source, synset_id);
+                        delete_rel(wn, &source, synset_id, change_list);
                     }
                 },
                 None => {}
