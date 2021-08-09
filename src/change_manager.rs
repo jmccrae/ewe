@@ -1,23 +1,3 @@
-//"""Utility functions for changing the wordnet"""
-//from wordnet import *
-//import pickle
-//import os
-//from glob import glob
-//import fileinput
-//import hashlib
-//from merge import wn_merge
-//import wordnet_yaml
-//from collections import defaultdict
-//from sense_keys import get_sense_kesense_y
-//},
-//None => {
-//println!("Could not find entry, skipping change")
-//}
-//}
-//
-//sense_id_re = re.compile(r"ewn-(.*)-(.)-(\d{8})-\d{2}")
-//
-//
 use crate::wordnet_yaml::*;
 use crate::rels::*;
 use crate::sense_keys::{get_sense_key, get_sense_key2};
@@ -33,51 +13,6 @@ impl ChangeList {
     pub fn new() -> ChangeList { ChangeList(false) }
 }
 
-
-//pub struct ChangeList {
-//    lexfiles : HashSet<String>,
-//    entry_files : HashSet<char>
-//}
-//
-//impl ChangeList {
-//    fn new() -> ChangeList {
-//        ChangeList {
-//            lexfiles: HashSet::new(),
-//            entry_files: HashSet::new()
-//        }
-//    }
-//
-//    fn change_entry(&mut self, wn : &Lexicon, entry : &Entry, lemma : &str) {
-//        for sense in entry.sense.iter() {
-//            match wn.lex_name_for(&sense.synset) {
-//                Some(s) => {
-//                    self.lexfiles.insert(s);
-//                },
-//                None => {
-//                    eprintln!("Synset without lexfile: {:?}", sense.synset);
-//                }
-//            }
-//            let mut entry_key = lemma.chars().nth(0).expect("Empty lemma!");
-//            if entry_key < 'a' || entry_key > 'z' {
-//                entry_key = '0';
-//            }
-//            self.entry_files.insert(entry_key);
-//        }
-//
-//    }
-//
-//    fn change_synset(&mut self, wn : &Lexicon, synset : &SynsetId) {
-//        match wn.lex_name_for(&synset) {
-//            Some(s) => {
-//                self.lexfiles.insert(s);
-//            },
-//            None => {
-//                eprintln!("Synset without lexfile: {:?}", synset);
-//            }
-//        }
-//    }
-//         
-//}
 
 #[allow(unused_variables)]
 pub fn delete_rel(wn : &mut Lexicon, source_id : &SynsetId, 
@@ -428,6 +363,8 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
             }
         }
     }
+
+    // TODO: Delete synset
     
     match supersede_id {
         Some(ss_id) => {

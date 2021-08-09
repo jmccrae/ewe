@@ -307,7 +307,10 @@ impl Lexicon {
     pub fn remove_sense(&mut self, lemma : &str, pos : &PosKey, 
                         synset_id : &SynsetId) -> Vec<SenseId> {
         match self.entries.get_mut(&entry_key(lemma)) {
-            Some(e) => e.remove_sense(lemma, pos, synset_id),
+            Some(e) => {
+                // TODO: remove sense_links_to
+                e.remove_sense(lemma, pos, synset_id)
+            }
             None => Vec::new()
         }
 
