@@ -26,6 +26,7 @@ pub struct Lexicon {
 
 impl Lexicon {
     /// Create a new empty lexicon
+    #[allow(dead_code)]
     pub fn new() -> Lexicon {
         Lexicon {
             entries: HashMap::new(),
@@ -282,6 +283,7 @@ impl Lexicon {
     /// Add a synset to WordNet
     pub fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
                          synset : Synset) {
+        add_link_to(&mut self.links_to, &synset_id, &synset);
         self.synset_id_to_lexfile.insert(synset_id.clone(), lexname.clone());
         self.synsets.entry(lexname).
             or_insert_with(|| Synsets::new()).0.insert(synset_id, synset);
@@ -306,30 +308,45 @@ impl Lexicon {
     /// Remove the sense of an existing entry. This does not remove incoming sense links!
     pub fn remove_sense(&mut self, lemma : &str, pos : &PosKey, 
                         synset_id : &SynsetId) -> Vec<SenseId> {
+        let v = self.sense_links_from(lemma, pos, synset_id);
         match self.entries.get_mut(&entry_key(lemma)) {
             Some(e) => {
-                // TODO: remove sense_links_to
-                e.remove_sense(lemma, pos, synset_id)
+                let keys = e.remove_sense(lemma, pos, synset_id);
+                for source in keys.iter() {
+                    for (rel, target) in v.iter() {
+                        match self.sense_links_to.get_mut(target) {
+                            Some(key) => key.retain(|x| x.0 != *rel && 
+                                                    x.1 != *source),
+                            None => {}
+                        }
+                    }
+                }
+                keys
             }
             None => Vec::new()
         }
 
     }
 
-    ///// Remove a synset. This does not remove any senses or incoming links!
-    //pub fn remove_synset(&mut self, synset_id : &SynsetId) {
-    //    match self.lex_name_for(synset_id) {
-    //        Some(lexname) => {
-    //            match self.synsets.get_mut(&lexname) {
-    //                Some(m) => {
-    //                    m.0.remove_entry(synset_id);
-    //                },
-    //                None => {}
-    //            }
-    //        },
-    //        None => {}
-    //    }
-    //}
+    /// Remove a synset. This does not remove any senses or incoming links!
+    pub fn remove_synset(&mut self, synset_id : &SynsetId) {
+        match self.lex_name_for(synset_id) {
+            Some(lexname) => {
+                match self.synsets.get_mut(&lexname) {
+                    Some(m) => {
+                        match m.0.remove_entry(synset_id) {
+                            Some((_, ss)) => {
+                                remove_link_to(&mut self.links_to, synset_id, &ss);
+                            },
+                            None => {}
+                        }
+                    },
+                    None => {}
+                }
+            },
+            None => {}
+        }
+    }
 
     /// For a given sense, get all links from this sense
     pub fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
@@ -353,11 +370,43 @@ impl Lexicon {
             None => Vec::new()
         }
     }
+    
+    /// For a given sense, get all links from this sense
+    pub fn sense_links_from_id(&self, sense_id : &SenseId) 
+                        -> Vec<(SenseRelType, SenseId)> {
+        match self.sense_id_to_lemma_pos.get(sense_id) {
+            Some((lemma, pos)) => {
+                match self.entries.get(&entry_key(lemma)) {
+                    Some(e) => e.sense_links_from_id(lemma, pos, sense_id),
+                    None => Vec::new()
+                }
+            },
+            None => Vec::new()
+        }
+    }
+
+    ///// For a given sense, find all backlinks referring to this sense
+    //pub fn sense_links_to_id(&self, sense_id : &SenseId) -> 
+    //    Vec<(SenseRelType, SenseId)> {
+    //        match self.sense_links_to.get(sense_id) {
+    //            Some(v) => v.clone(),
+    //            None => Vec::new()
+    //    }
+    //}
+
 
     /// For a synset, find all backlinks referring to this synset
     pub fn links_to(&self, synset_id : &SynsetId) -> Vec<(SynsetRelType, SynsetId)> {
         match self.links_to.get(synset_id) {
             Some(s) => s.clone(),
+            None => Vec::new()
+        }
+    }
+
+    /// For a synset, find all links from this synset
+    pub fn links_from(&self, synset_id : &SynsetId) -> Vec<(SynsetRelType, SynsetId)> {
+        match self.synset_by_id(synset_id) {
+            Some(ss) => ss.links_from(),
             None => Vec::new()
         }
     }
@@ -374,6 +423,8 @@ impl Lexicon {
     /// Add a relation between two senses
     pub fn add_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                    target : &SenseId) {
+        self.sense_links_to.entry(target.clone()).or_insert_with(|| Vec::new()).
+            push((rel.clone(), source.clone()));
         match self.sense_id_to_lemma_pos.get(source) {
             Some((lemma, pos)) => {
                 match self.entries.get_mut(&entry_key(lemma)) {
@@ -391,6 +442,10 @@ impl Lexicon {
     /// Remove all links between two senses
     pub fn remove_sense_rel(&mut self, source : &SenseId, 
                       target : &SenseId) {
+        match self.sense_links_to.get_mut(target) {
+            Some(v) => v.retain(|x| x.1 != *source),
+            None => {}
+        }
         match self.sense_id_to_lemma_pos.get(source) {
             Some((lemma, pos)) => {
                 match self.entries.get_mut(&entry_key(lemma)) {
@@ -408,6 +463,8 @@ impl Lexicon {
     /// Add a synset relation to WordNet
     pub fn add_rel(&mut self, source : &SynsetId, rel : SynsetRelType,
                    target : &SynsetId) {
+        self.links_to.entry(target.clone()).or_insert_with(|| Vec::new()).
+            push((rel.clone(), source.clone()));
         let (s2t, rel) = rel.to_yaml();
         if s2t {
             match self.synset_by_id_mut(source) {
@@ -422,13 +479,17 @@ impl Lexicon {
         }
     }
 
-    ///// Remove all links between two senses
-    //pub fn remove_rel(&mut self, source : &SynsetId, target : &SynsetId) {
-    //    match self.synset_by_id_mut(source) {
-    //        Some(ss) => ss.remove_rel(target),
-    //        None => {}
-    //    }
-    //}
+    /// Remove all links between two synsets
+    pub fn remove_rel(&mut self, source : &SynsetId, target : &SynsetId) {
+        match self.links_to.get_mut(target) {
+            Some(v) => v.retain(|x| x.1 != *source),
+            None => {}
+        }
+        match self.synset_by_id_mut(source) {
+            Some(ss) => ss.remove_rel(target),
+            None => {}
+        }
+    }
 
     /// Get the list of variant forms of an entry
     pub fn get_forms(&self, lemma : &str, pos : &PosKey) -> Vec<String> {
@@ -513,18 +574,6 @@ fn add_sense_link_to_sense(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseI
     }
 }
 
-//fn remove_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
-//                        entry : &Entry) {
-//    for sense in entry.sense.iter() {
-//        for (_, target) in sense.sense_links_from() {
-//            match map.get_mut(&target) {
-//                Some(e) => e.retain(|sr| sr.1 != sense.id),
-//                None => {}
-//            }
-//        }
-//    }
-//}
-
 fn add_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
                synset_id : &SynsetId, synset : &Synset) {
     for (rel_type, target) in synset.links_from() {
@@ -533,15 +582,15 @@ fn add_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
     }
 }
 
-//fn remove_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
-//               synset_id : &SynsetId, synset : &Synset) {
-//    for (_, target) in synset.links_from() {
-//        match map.get_mut(&target) {
-//            Some(m) => m.retain(|sr| sr.1 != *synset_id),
-//            None => {}
-//        }
-//    }
-//}
+fn remove_link_to(map : &mut HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
+               synset_id : &SynsetId, synset : &Synset) {
+    for (_, target) in synset.links_from() {
+        match map.get_mut(&target) {
+            Some(m) => m.retain(|sr| sr.1 != *synset_id),
+            None => {}
+        }
+    }
+}
 
 fn entry_key(lemma : &str) -> String {
     let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
@@ -805,6 +854,23 @@ impl Entries {
                 match m.get(pos) {
                     Some(ref mut e) => {
                         e.sense.iter().filter(|sense| sense.synset == *synset_id)
+                            .flat_map(|sense| sense.sense_links_from()).collect()
+                    },
+                    None => Vec::new()
+                }
+            },
+            None => Vec::new()
+        }
+    }
+
+
+    pub fn sense_links_from_id(&self, lemma : &str, pos : &PosKey, 
+                               sense_id : &SenseId) -> Vec<(SenseRelType, SenseId)> {
+        match self.0.get(lemma) {
+            Some(ref mut m) => {
+                match m.get(pos) {
+                    Some(ref mut e) => {
+                        e.sense.iter().filter(|sense| sense.id == *sense_id)
                             .flat_map(|sense| sense.sense_links_from()).collect()
                     },
                     None => Vec::new()
@@ -1236,25 +1302,25 @@ impl Synset {
         }
     }
 
-    //fn remove_rel(&mut self, target : &SynsetId) {
-    //    self.also.retain(|x| x != target);
-    //    self.attribute.retain(|x| x != target);
-    //    self.causes.retain(|x| x != target);
-    //    self.domain_region.retain(|x| x != target);
-    //    self.domain_topic.retain(|x| x != target);
-    //    self.exemplifies.retain(|x| x != target);
-    //    self.entails.retain(|x| x != target);
-    //    self.hypernym.retain(|x| x != target);
-    //    self.instance_hypernym.retain(|x| x != target);
-    //    self.mero_location.retain(|x| x != target);
-    //    self.mero_member.retain(|x| x != target);
-    //    self.mero_part.retain(|x| x != target);
-    //    self.mero_portion.retain(|x| x != target);
-    //    self.mero_substance.retain(|x| x != target);
-    //    self.meronym.retain(|x| x != target);
-    //    self.similar.retain(|x| x != target);
-    //    self.other.retain(|x| x != target);
-    //}
+    fn remove_rel(&mut self, target : &SynsetId) {
+        self.also.retain(|x| x != target);
+        self.attribute.retain(|x| x != target);
+        self.causes.retain(|x| x != target);
+        self.domain_region.retain(|x| x != target);
+        self.domain_topic.retain(|x| x != target);
+        self.exemplifies.retain(|x| x != target);
+        self.entails.retain(|x| x != target);
+        self.hypernym.retain(|x| x != target);
+        self.instance_hypernym.retain(|x| x != target);
+        self.mero_location.retain(|x| x != target);
+        self.mero_member.retain(|x| x != target);
+        self.mero_part.retain(|x| x != target);
+        self.mero_portion.retain(|x| x != target);
+        self.mero_substance.retain(|x| x != target);
+        self.meronym.retain(|x| x != target);
+        self.similar.retain(|x| x != target);
+        self.other.retain(|x| x != target);
+    }
 
     fn insert_rel(&mut self, rel_type : &YamlSynsetRelType,
                       target_id : &SynsetId) {
@@ -1479,9 +1545,9 @@ pub struct Example {
 }
 
 impl Example {
-    fn new(text : &str, source : Option<String>) -> Example {
+    pub fn new(text : String, source : Option<String>) -> Example {
         Example {
-            text: text.to_string(), source 
+            text: text, source 
         }
     }
 
@@ -1569,6 +1635,7 @@ impl<'de> Visitor<'de> for ExampleVisitor
 pub struct ILIID(String);
 
 impl ILIID {
+    #[allow(dead_code)]
     pub fn new(s : &str) -> ILIID { ILIID(s.to_string()) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
@@ -1627,8 +1694,7 @@ impl PartOfSpeech {
 pub struct SenseId(String);
 
 impl SenseId {
-    pub fn new(s : &str) -> SenseId { SenseId(s.to_string()) }
-    pub fn new_owned(s : String) -> SenseId { SenseId(s) }
+    pub fn new(s : String) -> SenseId { SenseId(s) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
@@ -1757,7 +1823,7 @@ partOfSpeech: n";
         let mut ss = Synset::new(PartOfSpeech::n);
         ss.definition.push("part of a meal served at one time".to_owned());
         ss.example.push(Example::new(
-            "\"she prepared a three course meal\"", None));
+            "\"she prepared a three course meal\"".to_owned(), None));
         ss.hypernym.push(SynsetId::new("07586285-n"));
         ss.ili = Some(ILIID::new("i76474"));
         ss.members.push("course".to_owned());
@@ -1810,7 +1876,7 @@ partOfSpeech: n";
                 SenseId("foo%1:01:00::".to_string()),
                 SynsetId("00001740-n".to_string())
             );
-        sense.derivation.push(SenseId::new("foo%1:01:00::"));
+        sense.derivation.push(SenseId::new("foo%1:01:00::".to_owned()));
 
         Entry {
             sense: vec![sense],

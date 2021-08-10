@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use crate::wordnet_yaml::{Lexicon, Synset, SynsetId, Entry, Sense, SenseId, PartOfSpeech};
+use crate::wordnet::{Lexicon, Synset, SynsetId, Entry, Sense, SenseId, PartOfSpeech};
 use regex::Regex;
 use std::cmp::max;
 
@@ -157,7 +157,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
     } else {
         (String::new(), String::new())
     };
-    SenseId::new_owned(format!("{}%{}:{:02}:{:02}:{}:{}",
+    SenseId::new(format!("{}%{}:{:02}:{:02}:{}:{}",
             lemma, ss_type, lex_filenum,
             lex_id, head_word, head_id))
 }
@@ -165,7 +165,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wordnet_yaml::PosKey;
+    use crate::wordnet::PosKey;
 
     #[test]
     fn test_sense_key_1() {
@@ -176,7 +176,7 @@ mod tests {
             PosKey::new("n".to_string()), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
-        assert_eq!(SenseId::new("foot%1:08:01::"),
+        assert_eq!(SenseId::new("foot%1:08:01::".to_owned()),
                    get_sense_key(&lexicon, "foot", &entry, None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
@@ -187,14 +187,14 @@ mod tests {
         let synset = Synset::new(PartOfSpeech::n);
         let mut entry = Entry::new();
         entry.sense.push(Sense::new(
-                SenseId::new("foot%1:08:01::"),
+                SenseId::new("foot%1:08:01::".to_owned()),
                 SynsetId::new("00001750-n")
                 ));
         lexicon.insert_entry("foot".to_string(),
             PosKey::new("n".to_string()), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
-        assert_eq!(SenseId::new("foot%1:08:02::"),
+        assert_eq!(SenseId::new("foot%1:08:02::".to_owned()),
                    get_sense_key(&lexicon, "foot", &entry, None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
@@ -209,11 +209,11 @@ mod tests {
         synset1.members.push("scorching".to_string());
         let mut entry1 = Entry::new();
         entry1.sense.push(Sense::new(
-                SenseId::new("hot%3:00:01::"),
+                SenseId::new("hot%3:00:01::".to_owned()),
                 SynsetId::new("00000001-a")));
         let mut entry2 = Entry::new();
         entry2.sense.push(Sense::new(
-                SenseId::new("scorching%5:00:01:???:"),
+                SenseId::new("scorching%5:00:01:???:".to_owned()),
                 SynsetId::new("00000002-s")
                 ));
         lexicon.insert_entry("hot".to_string(),
@@ -224,9 +224,9 @@ mod tests {
             SynsetId::new("00000001-a"), synset1.clone());
         lexicon.insert_synset("adj.all".to_string(),
             SynsetId::new("00000002-s"), synset2.clone());
-        assert_eq!(SenseId::new("scorching%5:00:01:hot:01"),
+        assert_eq!(SenseId::new("scorching%5:00:01:hot:01".to_owned()),
                    get_sense_key(&lexicon, "scorching", &entry2, 
-                                 Some(&SenseId::new("scorching%5:00:01:???:")),
+                                 Some(&SenseId::new("scorching%5:00:01:???:".to_owned())),
                                  &synset2,
                                  &SynsetId::new("00000002-s")));
     }

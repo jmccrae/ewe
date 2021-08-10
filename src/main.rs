@@ -8,10 +8,10 @@ extern crate sha2;
 
 mod rels;
 mod change_manager;
-mod wordnet_yaml;
+mod wordnet;
 mod sense_keys;
 
-use crate::wordnet_yaml::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
+use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
 use crate::rels::{SenseRelType, SynsetRelType};
 use std::io;
 use std::io::Write;
@@ -275,40 +275,51 @@ fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
     change_list.mark();
 }
 
-#[allow(unused_variables)]
-fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {}
-//def change_example(wn, change_list):
-//    synset = enter_synset(wn)
-//
-//    mode = None
-//    while mode != "a" and mode != "d":
-//        mode = input("[A]dd/[D]elete example: ").lower()
-//
-//    if mode == "a":
-//        while True:
-//            example = input("Example: ")
-//
-//            if not example.startswith("\""):
-//                print("Examples must start and end with a quotation")
-//                continue
-//
-//            if check_text(example, "example"):
-//                break
-//
-//        change_manager.add_ex(wn, synset, example, change_list=change_list)
-//    else:
-//        if synset.examples:
-//            for i, ex in enumerate(synset.examples):
-//                print("%d. %s" % (i + 1, ex.text))
-//            number = "0"
-//            while not number.isdigit() or int(number) < 1 or int(
-//                    number) > len(synset.examples):
-//                number = input("Example Number> ")
-//            example = synset.examples[int(number) - 1].text
-//        change_manager.delete_ex(wn, synset, example, change_list=change_list)
-//    return True
-//
-//
+fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {
+    let (synset_id, synset) = enter_synset(wn, "");
+
+    let mut mode = String::new();
+    while mode != "a" && mode != "d" {
+        mode = input("[A]dd/[D]elete example: ").to_lowercase();
+    }
+    if mode == "a" {
+        loop {
+            let example = input("Example: ");
+
+            if example.starts_with("\"") {
+                println!("Examples cannot start with a quotation");
+                continue;
+            }
+
+            if !check_text(&example) {
+                continue;
+            }
+
+            let source = input("Source (blank for no source): ");
+            let source = if source == "" { None } else { Some(source) };
+
+            change_manager::add_ex(wn, &synset_id, example, source, change_list);
+            break;
+        }
+    } else /* mode == "d" */ {
+        if synset.example.is_empty() {
+            println!("No examples to delete!");
+        } else {
+            for (i, ex) in synset.example.iter().enumerate() {
+                println!("{}. {}", i + 1, ex.text);
+            }
+            let mut number = 0;
+            while number < 1 || number > synset.example.len() {
+                let n = input("Example Number: ");
+                match n.parse() {
+                    Ok(n) => number = n,
+                    Err(_) => { eprintln!("Please enter a number!"); }
+                }
+            }
+            change_manager::delete_ex(wn, &synset_id, number - 1, change_list);
+        }
+    }
+}
 
 fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
                 change_list : &mut ChangeList) {
@@ -322,7 +333,7 @@ fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
             }
             let rel = SenseRelType::from(&relation).unwrap();
             let target_sense_id = enter_sense(wn, "target ");
-            change_manager::add_sense_relation(wn, source_sense_id,
+            change_manager::insert_sense_relation(wn, source_sense_id,
                                                rel, target_sense_id,
                                                change_list);
         },
@@ -358,44 +369,29 @@ fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-#[allow(unused_variables)]
 fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
-
-}
-
-#[allow(unused_variables)]
-fn change_relation_type(wn : &mut Lexicon, change_list : &mut ChangeList) {
-  //          let mut mode2 = input("Change [S]ubject/[T]arget/[R]elation: ").to_lowercase();
-  //          while mode2 != "s" && mode2 != "t" && mode2 != "r" {
-  //              if mode2 == "s" {
-  //                  let (ssid, sid) = enter_sense_synset(
-  //                      wn, "new source ", None);
-  //                  new_source = Some(ssid);
-  //                  new_source_sense_id = Some(sid);
-  //              } else if mode2 == "t" {
-  //                  let (ssid, sid) = enter_sense_synset(
-  //                      wn, "new target ", None);
-  //                  new_target = Some(ssid);
-  //                  new_target_sense_id = Some(sid);
-  //              } else if mode2 == "r" {
-  //                  new_relation = Some(input("Enter new relation: "));
-  //              } else {
-  //                  println!("Bad choice")
-  //              }
-  //              mode2 = input("Change [S]ubject/[T]arget/[R]elation: ").to_lowercase();
-  //          }
-
+    let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
+    match source_sense_id {
+        Some(source_sense_id) => {
+            let target_sense_id = enter_sense(wn, "target ");
+            change_manager::reverse_sense_rel(wn, &source_sense_id,
+                                             &target_sense_id, change_list);
+        },
+        None => {
+            let target_id = enter_synset(wn, "target ").0;
+            change_manager::reverse_rel(wn, &source_id, &target_id,
+                                       change_list);
+        }
+    }
 }
 
 fn change_relation(wn : &mut Lexicon, 
                    change_list : &mut ChangeList) {
     let mut mode = String::new();
     while mode != "a" && mode != "d" && mode != "r" && mode != "c" {
-        mode = input("[A]dd new relation/[D]elete existing relation/[R]everse relation/[C]hange relation: ").to_lowercase();
+        mode = input("[A]dd new relation/[D]elete existing relation/[R]everse relation: ").to_lowercase();
         if mode == "a" {
             add_relation(wn, None, change_list);
-        } else if mode == "c" {
-            change_relation_type(wn, change_list);
         } else if mode == "d" {
             delete_relation(wn, change_list);
         } else if mode == "r" {
@@ -403,40 +399,6 @@ fn change_relation(wn : &mut Lexicon,
         }
     }
 }
-
-#[allow(unused_variables)]
-fn split_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {}
-//def split_synset(wn, change_list):
-//    synset = enter_synset(wn)
-//
-//    definition = []
-//    print("Enter definitions (empty line to finish)")
-//    while True:
-//        d1 = input("Definition: ")
-//        if d1:
-//            definition.append(d1)
-//        else:
-//            break
-//
-//    reason = input("Reason for deletion (#IssueNo): ")
-//
-//    new_ids = []
-//    for definition in definition:
-//        new_ids.append(change_manager.add_synset(wn, definition,
-//                                                 synset.lex_name,
-//                                                 synset.part_of_speech.value,
-//                                                 change_list=change_list))
-//
-//    change_manager.delete_synset(wn, synset,
-//                                 [wn.synset_by_id(new_id)
-//                                  for new_id in new_ids],
-//                                 reason, change_list=change_list)
-//    return True
-//
-//
-//ewe_changed = False
-//change_list = ChangeList()
-
 
 fn save(wn : &Lexicon) -> std::io::Result<()> {
     wn.save("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/")
@@ -457,9 +419,8 @@ fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
     println!("3. Change a definition");
     println!("4. Change an example");
     println!("5. Change a relation");
-    println!("6. Split a synset");
     if ewe_changed.changed() {
-        println!("7. Save changes");
+        println!("6. Save changes");
     }
     println!("X. Exit EWE");
 
@@ -471,8 +432,7 @@ fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
         "3" => change_definition(wn, ewe_changed),
         "4" => change_example(wn, ewe_changed),
         "5" => change_relation(wn, ewe_changed),
-        "6" => split_synset(wn, ewe_changed),
-        "7" => {
+        "6" => {
             save(wn).expect("Could not save");
             ewe_changed.reset();
         },
@@ -499,7 +459,7 @@ fn main() {
     println!("    II  II                               ");
     println!("");
 
-    let mut wn = wordnet_yaml::Lexicon::load("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/").unwrap();
+    let mut wn = wordnet::Lexicon::load("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/").unwrap();
 
     let mut ewe_changed = ChangeList::new();
 
