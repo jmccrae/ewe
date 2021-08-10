@@ -18,6 +18,7 @@ use std::io::Write;
 use crate::change_manager::{ChangeList};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::path::Path;
 
 /// Supports the user in choosing a synset
 fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Synset) {
@@ -459,7 +460,25 @@ fn main() {
     println!("    II  II                               ");
     println!("");
 
-    let mut wn = wordnet::Lexicon::load("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/").unwrap();
+    let path = if Path::new("./src/yaml/entries-a.yaml").exists() {
+        "./src/yaml/".to_owned()
+    } else if Path::new("./entries-a.yaml").exists() {
+        "./".to_owned()
+    } else {
+        let mut s = input("WordNet Home Folder: ");
+        while !Path::new(&s).join("entries-a.yaml").exists() &&
+            !Path::new(&s).join("src/yaml/entries-a.yaml").exists() {
+            println!("Could not find WordNet at this path.");
+            s = input("WordNet Home Folder: ");
+        }
+        if Path::new(&s).join("entries-a.yaml").exists() {
+            s
+        } else {
+            Path::new(&s).join("src/yaml/").to_string_lossy().to_string()
+        }
+    };
+
+    let mut wn = wordnet::Lexicon::load(path).unwrap();
 
     let mut ewe_changed = ChangeList::new();
 

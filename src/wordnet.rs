@@ -41,7 +41,7 @@ impl Lexicon {
 
     /// Load a lexicon from a folder of YAML files
     pub fn load<P: AsRef<Path>>(folder : P) -> Result<Lexicon, WordNetYAMLIOError> {
-        let dep_file = folder.as_ref().join("deprecations.csv");
+        let dep_file = folder.as_ref().join("../deprecations.csv");
         let mut deprecations = Vec::new();
         if dep_file.exists() {
             let mut reader = csv::Reader::from_path(dep_file)
@@ -133,8 +133,14 @@ impl Lexicon {
             synsets.save(&mut w)?;
             bar.inc(1);
         }
-        match csv::Writer::from_path(folder.as_ref().join("deprecations.csv")) {
+        match csv::WriterBuilder::new()
+            .quote_style(csv::QuoteStyle::Always)
+            .from_path(folder.as_ref().join("../deprecations.csv")) {
             Ok(mut csv_writer) => {
+                csv_writer.serialize(DeprecationRecord("ID".to_string(),
+                    "ILI".to_string(), "SUPERSEDED_BY".to_string(),
+                    "SUPERSEDING_ILI".to_string(), "REASON".to_string()))
+                        .unwrap_or_else(|_| eprintln!("Cannot write CSV"));
                 for dep in self.deprecations.iter() {
                     csv_writer.serialize(dep).unwrap_or_else(|_| eprintln!("Cannot write CSV file"));
                 }
@@ -1709,7 +1715,6 @@ impl SynsetId {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
 pub struct DeprecationRecord(String,String,String,String,String);
-
 
 #[derive(Error,Debug)]
 pub enum WordNetYAMLIOError {
