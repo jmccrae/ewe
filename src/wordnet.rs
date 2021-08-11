@@ -160,27 +160,9 @@ impl Lexicon {
 
     /// Get the entry data for a lemma
     pub fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
-        match lemma.chars().nth(0) {
-            Some(c) if c.to_ascii_lowercase() > 'a' && c.to_ascii_lowercase() < 'z' => {
-                let key = format!("{}", c.to_lowercase());
-                match self.entries.get(&key) {
-                    Some(v) => v.entry_by_lemma(lemma),
-                    None => {
-                        eprintln!("No entries for {}", key);
-                        Vec::new()
-                    }
-                }
-            },
-            Some(_) => {
-                match self.entries.get("0") {
-                    Some(v) => v.entry_by_lemma(lemma),
-                    None => Vec::new()
-                }
-            },
-            None => {
-                eprintln!("Query with empty string");
-                Vec::new()
-            }
+        match self.entries.get(&entry_key(lemma)) {
+            Some(v) => v.entry_by_lemma(lemma),
+            None => Vec::new()
         }
     }
 
@@ -560,6 +542,21 @@ impl Lexicon {
             None => {}
         }
     }
+
+    /// Get all the entries
+    pub fn entries(&self) -> impl Iterator<Item=(&String, &PosKey, &Entry)> {
+        self.entries.iter().flat_map(|(_,e)| {
+            e.entries()
+        })
+    }
+
+    /// Get all synsets
+    pub fn synsets(&self) -> impl Iterator<Item=(&SynsetId, &Synset)> {
+        self.synsets.iter().flat_map(|(_,e)| {
+            e.0.iter()
+        })
+    }
+                
 }
 
 fn add_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
@@ -615,7 +612,8 @@ lazy_static! {
 
 fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
 
-    let s2 : String = if !s.starts_with("'") && s.chars().any(|c| c > '~') {
+    let s2 : String = if !s.starts_with("'") && s.chars().any(|c| c > '~') ||
+        s.starts_with("Seen in this light, it is the spectrality of the figure") {
         format!("\"{}\"", s.chars().map(|c| {
             if c == '"' {
                 "\\\"".to_string()
@@ -632,7 +630,7 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
         || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
         || s.ends_with(" ") || s.contains(": ")
         || s == "No" || s == "off" || s == "on" 
-        || s.starts_with("`") {
+        || s.starts_with("`") || s.starts_with("...") {
         format!("'{}'", str::replace(s, "'", "''"))
     } else {
         s.to_owned()
@@ -997,9 +995,19 @@ impl Entries {
             None => {}
         }
     }
+
+    fn entries(&self) -> impl Iterator<Item=(&String, &PosKey, &Entry)> {
+        self.0.iter().flat_map(|(lemma, e)| {
+            let mut v = Vec::new();
+            for (pos, entry) in e.iter() {
+                v.push((lemma, pos, entry));
+            }
+            v
+        })
+    }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone,Default)]
 pub struct Entry {
     pub sense : Vec<Sense>,
     #[serde(default)]
@@ -1008,12 +1016,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new() -> Entry {
-        Entry {
-            sense: Vec::new(),
-            form: Vec::new()
-        }
-    }
+    pub fn new() -> Entry { Entry::default() }
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         if !self.form.is_empty() {
@@ -1162,7 +1165,7 @@ impl Sense {
         Ok(())
     }
 
-    fn sense_links_from(&self) -> Vec<(SenseRelType, SenseId)> {
+    pub fn sense_links_from(&self) -> Vec<(SenseRelType, SenseId)> {
         self.antonym.iter().map(|id| (SenseRelType::Antonym, id.clone())).chain(
         self.also.iter().map(|id| (SenseRelType::Also, id.clone())).chain(
         self.participle.iter().map(|id| (SenseRelType::Participle, id.clone())).chain(

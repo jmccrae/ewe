@@ -1,3 +1,5 @@
+use crate::wordnet::PartOfSpeech;
+
 #[derive(Clone,PartialEq,Debug,Eq,Hash)]
 pub enum SynsetRelType { 
 //  Agent,
@@ -407,23 +409,23 @@ pub enum SenseRelType {
 }
 
 impl SenseRelType {
-    //pub fn value(&self) -> &'static str {
-    //    match self { 
-    //        SenseRelType::Antonym => "antonym",
-    //        SenseRelType::Also => "also",
-    //        SenseRelType::Participle => "participle",
-    //        SenseRelType::Pertainym => "pertainym",
-    //        SenseRelType::Derivation => "derivation",
-    //        SenseRelType::DomainTopic => "domain_topic",
-    //        SenseRelType::HasDomainTopic => "has_domain_topic",
-    //        SenseRelType::DomainRegion => "domain_region",
-    //        SenseRelType::HasDomainRegion => "has_domain_region",
-    //        SenseRelType::Exemplifies => "exemplifies",
-    //        SenseRelType::IsExemplifiedBy => "is_exemplified_by",
-    //        SenseRelType::Similar => "similar",
-    //        SenseRelType::Other => "other"
-    //    }
-    //}
+    pub fn value(&self) -> &'static str {
+        match self { 
+            SenseRelType::Antonym => "antonym",
+            SenseRelType::Also => "also",
+            SenseRelType::Participle => "participle",
+            SenseRelType::Pertainym => "pertainym",
+            SenseRelType::Derivation => "derivation",
+            SenseRelType::DomainTopic => "domain_topic",
+            SenseRelType::HasDomainTopic => "has_domain_topic",
+            SenseRelType::DomainRegion => "domain_region",
+            SenseRelType::HasDomainRegion => "has_domain_region",
+            SenseRelType::Exemplifies => "exemplifies",
+            SenseRelType::IsExemplifiedBy => "is_exemplified_by",
+            SenseRelType::Similar => "similar",
+            SenseRelType::Other => "other"
+        }
+    }
 
     pub fn from(v : &str) -> Option<SenseRelType> {
         match v {
@@ -449,5 +451,23 @@ impl SenseRelType {
             *self == SenseRelType::Similar ||
             *self == SenseRelType::Also ||
             *self == SenseRelType::Derivation
+    }
+
+    pub fn pos(&self) -> Vec<&'static PartOfSpeech> {
+        match self {
+            SenseRelType::Antonym => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Also => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Participle => vec![&PartOfSpeech::a, &PartOfSpeech::s],
+            SenseRelType::Pertainym => vec![&PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Derivation => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::DomainTopic => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::HasDomainTopic => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::DomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::HasDomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Exemplifies => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::IsExemplifiedBy => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
+            SenseRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s]
+        }
     }
 }

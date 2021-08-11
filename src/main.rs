@@ -10,9 +10,11 @@ mod rels;
 mod change_manager;
 mod wordnet;
 mod sense_keys;
+mod validate;
 
 use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
 use crate::rels::{SenseRelType, SynsetRelType};
+use crate::validate::validate;
 use std::io;
 use std::io::Write;
 use crate::change_manager::{ChangeList};
@@ -401,8 +403,24 @@ fn change_relation(wn : &mut Lexicon,
     }
 }
 
-fn save(wn : &Lexicon) -> std::io::Result<()> {
-    wn.save("/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/")
+fn save(wn : &Lexicon, path : &str) -> std::io::Result<bool> {
+    let errors = validate(wn);
+    if !errors.is_empty() {
+        println!("There were validation errors");
+        for error in errors {
+            println!("{}", error);
+        }
+        let really_save = input("Do you really want to save [y/N]? ").to_lowercase();
+        if really_save == "y" {
+            wn.save(path)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    } else {
+        wn.save(path)?;
+        Ok(true)
+    }
 }
 
 fn input(prompt : &str) -> String {
@@ -413,7 +431,8 @@ fn input(prompt : &str) -> String {
     buffer.trim().to_string()
 }
 
-fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
+fn main_menu(wn : &mut Lexicon, path : &str,
+             ewe_changed : &mut ChangeList) -> bool {
     println!("Please choose an option:");
     println!("1. Add/delete/move entry");
     println!("2. Add/delete a synset");
@@ -434,17 +453,25 @@ fn main_menu(wn : &mut Lexicon, ewe_changed : &mut ChangeList) -> bool {
         "4" => change_example(wn, ewe_changed),
         "5" => change_relation(wn, ewe_changed),
         "6" => {
-            save(wn).expect("Could not save");
-            ewe_changed.reset();
+            let saved = save(wn, path).expect("Could not save");
+            if saved {
+                ewe_changed.reset();
+            }
         },
         "x" => {
             if ewe_changed.changed() {
                 if input("Save changes (Y/n)? ").to_lowercase() != "n" {
-                    save(wn).expect("Could not save");
-                    ewe_changed.reset();
+                    let saved = save(wn, path).expect("Could not save");
+                    if saved {
+                        ewe_changed.reset();
+                        return false;
+                    } 
+                } else {
+                    return false;
                 }
+            } else {
+                return false;
             }
-            return false;
         },
         _ => println!("Please enter a valid option")
     }
@@ -478,9 +505,9 @@ fn main() {
         }
     };
 
-    let mut wn = wordnet::Lexicon::load(path).unwrap();
+    let mut wn = wordnet::Lexicon::load(&path).unwrap();
 
     let mut ewe_changed = ChangeList::new();
 
-    while main_menu(&mut wn, &mut ewe_changed) {}
+    while main_menu(&mut wn, &path, &mut ewe_changed) {}
 }
