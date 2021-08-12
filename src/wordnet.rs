@@ -59,7 +59,7 @@ impl Lexicon {
         let folder_files = fs::read_dir(folder)
             .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
         println!("Loading WordNet");
-        let bar = ProgressBar::new(72);
+        let bar = ProgressBar::new(73);
         for file in folder_files {
             let file = file.map_err(|e|
                 WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
@@ -120,7 +120,7 @@ impl Lexicon {
     /// Save a lexicon to a set of files
     pub fn save<P: AsRef<Path>>(&self, folder : P) -> std::io::Result<()> {
         println!("Saving WordNet");
-        let bar = ProgressBar::new(72);
+        let bar = ProgressBar::new(73);
         for (ekey, entries) in self.entries.iter() {
             let mut w = File::create(folder.as_ref().join(
                 format!("entries-{}.yaml", ekey)))?;
@@ -247,10 +247,10 @@ impl Lexicon {
     //    self.synset_by_id(synset_id).is_some()
     //}
 
-    ///// Verifies if a sense is in the graph
-    //pub fn has_sense(&self, sense_id : &SenseId) -> bool {
-    //    self.sense_id_to_lemma_pos.get(sense_id).is_some()
-    //}
+    /// Verifies if a sense is in the graph
+    pub fn has_sense(&self, sense_id : &SenseId) -> bool {
+        self.sense_id_to_lemma_pos.get(sense_id).is_some()
+    }
 
     /// Get the list of lemmas associated with a synset
     pub fn members_by_id(&self, synset_id : &SynsetId) -> Vec<String> {
@@ -557,6 +557,34 @@ impl Lexicon {
         })
     }
                 
+    /// Get the part of speech from a lexicographer file
+    pub fn pos_for_lexfile(&self, lexfile : &str) -> Vec<PartOfSpeech> {
+        if self.synsets.contains_key(lexfile) {
+            if lexfile.starts_with("noun") {
+                vec![PartOfSpeech::n]
+            } else if lexfile.starts_with("verb") {
+                vec![PartOfSpeech::v]
+            } else if lexfile.starts_with("adv") {
+                vec![PartOfSpeech::r]
+            } else if lexfile.starts_with("adj") {
+                vec![PartOfSpeech::a, PartOfSpeech::s]
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Number of entries in the dictionary
+    pub fn n_entries(&self) -> usize {
+        self.entries.values().map(|v| v.n_entries()).sum()
+    }
+
+    /// Number of synsets in the dictionary
+    pub fn n_synsets(&self) -> usize {
+        self.synsets.values().map(|v| v.0.len()).sum()
+    }
 }
 
 fn add_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
@@ -1005,6 +1033,10 @@ impl Entries {
             v
         })
     }
+
+    fn n_entries(&self) -> usize {
+        self.0.values().map(|v| v.len()).sum()
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone,Default)]
@@ -1261,9 +1293,9 @@ pub struct Synset {
     #[serde(default)]
     entails : Vec<SynsetId>,
     #[serde(default)]
-    hypernym : Vec<SynsetId>,
+    pub hypernym : Vec<SynsetId>,
     #[serde(default)]
-    instance_hypernym : Vec<SynsetId>,
+    pub instance_hypernym : Vec<SynsetId>,
     #[serde(default)]
     mero_location : Vec<SynsetId>,
     #[serde(default)]

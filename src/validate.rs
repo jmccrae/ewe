@@ -2,17 +2,20 @@ use crate::wordnet::*;
 use crate::rels::*;
 use crate::sense_keys::{get_sense_key2};
 use std::fmt;
-use std::collections::HashSet;
-use indicatif::ProgressBar;
+use std::collections::{HashSet,HashMap};
+use indicatif::{ProgressBar,ProgressStyle};
 use lazy_static::lazy_static;
 use regex::Regex;
 
 pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     println!("Validating");
-    let bar = ProgressBar::new(1);
+    let bar = ProgressBar::new((wn.n_entries() + 2 * wn.n_synsets()) as u64);
+    bar.set_style(ProgressStyle::default_bar()
+                  .template("{wide_bar} {percent}%"));
     let mut sense_keys = HashSet::new();
     for (lemma, poskey, entry) in wn.entries() {
+        bar.inc(1);
         for sense in entry.sense.iter() {
            match get_sense_key2(wn, lemma, Some(&sense.id), &sense.synset) {
                Some(sense_key) => {
@@ -44,6 +47,14 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
            }
            let mut sr_items = HashSet::new();
            for (rel, target) in sense.sense_links_from() {
+               if !wn.has_sense(&target) {
+                   errors.push(ValidationError::SenseRelTargetMissing {
+                       id: sense.id.clone(),
+                       rel: rel.clone(),
+                       target: target.clone()
+                   });
+               }
+
                match poskey.to_part_of_speech() {
                    Some(pos) => {
                        if !rel.pos().iter().any(|p| **p == pos) {
@@ -55,6 +66,16 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                       }
                    },
                    None => {}
+               }
+               if rel.is_symmetric() {
+                   if !wn.sense_links_from_id(&target).iter().any(|(r2, t2)| {
+                       *r2 == rel && *t2 == sense.id }) {
+                       errors.push(ValidationError::SenseRelationSymmetry {
+                           source: sense.id.clone(),
+                           rel: rel.clone(),
+                           target: target.clone()
+                       });
+                   }
                }
                if sr_items.contains(&(rel.clone(), target.clone())) {
                    errors.push(ValidationError::DuplicateSenseRelation {
@@ -80,10 +101,15 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                 });
            }
         }
-        // Sense not empty
+        if entry.sense.is_empty() {
+            errors.push(ValidationError::NoSenses {
+                lemma: lemma.clone(),
+                poskey: poskey.clone()
+            });
+        }
     }
-    bar.inc(1);
     for (synset_id, synset) in wn.synsets() {
+        bar.inc(1);
         let ssid = synset_id.as_str();
         if ssid[(ssid.len() - 1)..ssid.len()] != *synset.part_of_speech.value() {
             errors.push(ValidationError::SynsetIdPos {
@@ -115,20 +141,157 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
             None => {}
         }
 
-        // Part of speech of relations
-        // Cross part of speech hypernyms
-        // Single similar for satellites
-        // Duplicate relations
-        // At least one hypernym for nouns
-        // Empty definitions
-        // Lex file matches POS
+        let mut sr_items = HashSet::new();
+        for (rel, target) in synset.links_from() {
+            if !rel.pos().iter().any(|p| **p == synset.part_of_speech) {
+                errors.push(ValidationError::SynsetRelationPOS {
+                    id: synset_id.clone(),
+                    pos: synset.part_of_speech.clone(),
+                    rel: rel.clone()
+                });
+            }
+            if rel == SynsetRelType::Hypernym || 
+                rel == SynsetRelType::InstanceHypernym {
+                match wn.synset_by_id(&target) {
+                    Some(target_synset) => {
+                        if synset.part_of_speech != target_synset.part_of_speech {
+                            errors.push(ValidationError::CrossPOSHyper {
+                                source: synset_id.clone(),
+                                target: target.clone()
+                            });
+                        }
+                    },
+                    None => {
+                        errors.push(ValidationError::SynsetRelTargetMissing {
+                            id: synset_id.clone(),
+                            rel: rel.clone(),
+                            target: target.clone()
+                        });
+                    }
+                }
+            }
+            if rel.is_symmetric() {
+                if !wn.links_from(&target).iter().any(|(r2, t2)| {
+                    *r2 == rel && t2 == synset_id }) {
+                    errors.push(ValidationError::SynsetRelationSymmetry {
+                        source: synset_id.clone(),
+                        rel: rel.clone(),
+                        target: target.clone()
+                    });
+                }
+            }
+             if sr_items.contains(&(rel.clone(), target.clone())) {
+                errors.push(ValidationError::DuplicateSynsetRelation {
+                    source: synset_id.clone(),
+                    rel, target });
+            } else {
+                sr_items.insert((rel, target));
+            }
+         }
+
+        if synset.part_of_speech == PartOfSpeech::s &&
+            synset.similar.len() != 1 {
+                errors.push(ValidationError::SatelliteSimilar {
+                    id: synset_id.clone(),
+                    n: synset.similar.len()
+                });
+        }
+
+        if synset.part_of_speech == PartOfSpeech::n &&
+            !synset_id.as_str().starts_with("00001740") &&
+            synset.hypernym.is_empty() &&
+            synset.instance_hypernym.is_empty() {
+            errors.push(ValidationError::NoHypernym {
+                id: synset_id.clone()
+            });
+        }
+
+        if synset.definition.is_empty() ||
+            synset.definition.iter().any(|def| def == "") {
+            errors.push(ValidationError::Definition {
+                id : synset_id.clone()
+            });
+        }
+
+        match wn.lex_name_for(&synset_id) {
+            Some(lex_name) => {
+                if !wn.pos_for_lexfile(&lex_name).iter().any(|pos| {
+                    *pos == synset.part_of_speech }) {
+                    errors.push(ValidationError::Lexfile {
+                        id: synset_id.clone(),
+                        lexfile: lex_name.clone()
+                    });
+                }
+            },
+            None => { // should never happen
+            }
+        }
+
+        check_transitive(wn, &mut errors, synset_id, synset);
     }
-    bar.inc(1);
-    // Symmetry errors
-    // Transitivity errors
-    // Loops in hypernym graph
+    check_no_loops(wn, &mut errors, &bar);
     bar.finish();
     errors
+}
+
+fn check_transitive(wn : &Lexicon, errors : &mut Vec<ValidationError>,
+                   synset_id : &SynsetId, synset : &Synset) {
+    for target in synset.hypernym.iter() {
+        match wn.synset_by_id(target) {
+            Some(synset2) => {
+                for target2 in synset2.hypernym.iter() {
+                    if synset.hypernym.iter().any(|t| t == target2) {
+                        errors.push(ValidationError::Transitivity {
+                            id1: synset_id.clone(),
+                            id2: target.clone(),
+                            id3: target2.clone()
+                        });
+                    }
+                }
+            },
+            None => {} // fails elsewhere
+        }
+    }
+}
+
+fn check_no_loops(wn : &Lexicon, errors : &mut Vec<ValidationError>,
+                  bar : &ProgressBar) {
+    let mut hypernyms = HashMap::new();
+    for (synset_id, synset) in wn.synsets() {
+        bar.inc(1);
+        hypernyms.insert(synset_id.clone(), HashSet::new());
+        for target in synset.hypernym.iter() {
+            match hypernyms.get_mut(synset_id) {
+                Some(h) => { h.insert(target.clone()); },
+                None => {}
+            }
+        }
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (synset_id, _) in wn.synsets() {
+            let n_size = hypernyms[synset_id].len();
+            for c in hypernyms[synset_id].clone() {
+                let extension : Vec<SynsetId> = 
+                    hypernyms.get(&c).iter().
+                    flat_map(|x| x.iter()).
+                    map(|x| x.clone()).collect();
+                match hypernyms.get_mut(synset_id) {
+                    Some(h) => h.extend(extension.into_iter()),
+                    None => {}
+                }
+            }
+            if hypernyms[synset_id].len() != n_size {
+                changed = true;
+            }
+            if hypernyms[synset_id].contains(synset_id) {
+                errors.push(ValidationError::Loop {
+                    id: synset_id.clone()
+                });
+            }
+        }
+    }
 }
 
 lazy_static! {
@@ -149,13 +312,27 @@ pub enum ValidationError {
     SenseSynsetNotExists { id : SenseId, synset : SynsetId },
     EntryPartOfSpeech { id : SenseId, pos : PosKey, synset_pos : PartOfSpeech },
     SenseRelationPOS { id : SenseId, pos : PartOfSpeech, rel : SenseRelType },
+    SynsetRelationPOS { id : SynsetId, pos : PartOfSpeech, rel : SynsetRelType },
     DuplicateSenseRelation { source : SenseId, rel : SenseRelType, target : SenseId },
+    DuplicateSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSenseKey { id : SenseId },
     DuplicateSyntacticBehaviour { id : SenseId },
     SynsetIdPos { id : SynsetId, pos : PartOfSpeech },
     InvalidSynsetId { id : SynsetId },
     EmptySynset { id : SynsetId },
-    InvalidILIId { id : SynsetId, ili: ILIID }
+    InvalidILIId { id : SynsetId, ili: ILIID },
+    NoSenses { lemma : String, poskey : PosKey },
+    CrossPOSHyper { source : SynsetId, target : SynsetId },
+    SenseRelTargetMissing { id : SenseId, rel : SenseRelType, target : SenseId },
+    SynsetRelTargetMissing { id : SynsetId, rel : SynsetRelType, target : SynsetId },
+    SatelliteSimilar { id: SynsetId, n: usize },
+    NoHypernym { id: SynsetId },
+    Definition { id: SynsetId },
+    Lexfile { id: SynsetId, lexfile : String },
+    SenseRelationSymmetry { source : SenseId, rel : SenseRelType, target : SenseId },
+    SynsetRelationSymmetry { source : SynsetId, rel : SynsetRelType, target : SynsetId },
+    Transitivity { id1 : SynsetId, id2 : SynsetId, id3 : SynsetId },
+    Loop { id: SynsetId }
 }
 
 impl fmt::Display for ValidationError {
@@ -173,7 +350,13 @@ impl fmt::Display for ValidationError {
             ValidationError::SenseRelationPOS { id, pos, rel } =>
                 write!(f, "Sense {} has a relation of type {} but this is not permitted for part of speech {}", 
                        id.as_str(), rel.value(), pos.value()),
+            ValidationError::SynsetRelationPOS { id, pos, rel } =>
+                write!(f, "Synset {} has a relation of type {} but this is not permitted for part of speech {}", 
+                       id.as_str(), rel.value(), pos.value()),
             ValidationError::DuplicateSenseRelation { source, rel, target } =>
+                write!(f, "Duplicate relation {} ={}=> {}", 
+                       source.as_str(), rel.value(), target.as_str()),
+            ValidationError::DuplicateSynsetRelation { source, rel, target } =>
                 write!(f, "Duplicate relation {} ={}=> {}", 
                        source.as_str(), rel.value(), target.as_str()),
             ValidationError::DuplicateSenseKey { id } =>
@@ -189,7 +372,39 @@ impl fmt::Display for ValidationError {
             ValidationError::EmptySynset { id } =>
                 write!(f, "Empty synset: {}", id.as_str()),
             ValidationError::InvalidILIId { id, ili } =>
-                write!(f, "Synset {} has an invalid ILI identifier {}", id.as_str(), ili.as_str())
+                write!(f, "Synset {} has an invalid ILI identifier {}", id.as_str(), ili.as_str()),
+            ValidationError::NoSenses { lemma, poskey } =>
+                write!(f, "Entry for {} ({}) has no senses", lemma, poskey.as_str()),
+            ValidationError::CrossPOSHyper { source, target } =>
+                write!(f, "Hypernym from {} to {} is across part of speech values",
+                       source.as_str(), target.as_str()),
+            ValidationError::SenseRelTargetMissing { id, rel, target } =>
+                write!(f, "Sense {} refers to {} with relation {}, but this does not exist",
+                       id.as_str(), target.as_str(), rel.value()),
+            ValidationError::SynsetRelTargetMissing { id, rel, target } =>
+                write!(f, "Sense {} refers to {} with relation {}, but this does not exist",
+                       id.as_str(), target.as_str(), rel.value()),
+           ValidationError::SatelliteSimilar { id, n } => 
+               write!(f, "Satellite adjective {} should have exactly one similar link but has {}",
+                      id.as_str(), n),
+            ValidationError::NoHypernym { id } =>
+                write!(f, "No hypernym for {}", id.as_str()),
+            ValidationError::Definition { id } =>
+                write!(f, "No definition or empty definition for {}", id.as_str()),
+            ValidationError::Lexfile { id, lexfile } =>
+                write!(f, "{} defined in wrong lexicographer file {}",
+                       id.as_str(), lexfile),
+            ValidationError::SenseRelationSymmetry { source, rel, target } =>
+                write!(f, "No symmetric relation from {} to ({}) {}",
+                       source.as_str(), rel.value(), target.as_str()),
+            ValidationError::SynsetRelationSymmetry { source, rel, target } =>
+                write!(f, "No symmetric relation from {} to ({}) {}",
+                       source.as_str(), rel.value(), target.as_str()),
+            ValidationError::Transitivity { id1, id2, id3 } => 
+                write!(f, "{} has direct link to {} but also indirect link through {}",
+                       id1.as_str(), id3.as_str(), id2.as_str()),
+            ValidationError::Loop { id } => 
+                write!(f, "{} is a hypernym of itself", id.as_str())
 
         }
     }

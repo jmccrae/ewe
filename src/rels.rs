@@ -270,6 +270,41 @@ impl SynsetRelType {
             _ => false
         }
     }
+
+    pub fn pos(&self) -> Vec<&'static PartOfSpeech> {
+        match self {
+            SynsetRelType::Also => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::Attribute => vec![&PartOfSpeech::n, &PartOfSpeech::a, &PartOfSpeech::s],
+            SynsetRelType::Causes => vec![&PartOfSpeech::v], 
+            SynsetRelType::DomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::DomainTopic => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::Exemplifies => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::Entails => vec![&PartOfSpeech::v],
+            SynsetRelType::HasDomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::HasDomainTopic => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::IsExemplifiedBy => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SynsetRelType::HoloLocation => vec![&PartOfSpeech::n],
+            SynsetRelType::HoloMember => vec![&PartOfSpeech::n],
+            SynsetRelType::HoloPart => vec![&PartOfSpeech::n],
+            SynsetRelType::HoloPortion => vec![&PartOfSpeech::n],
+            SynsetRelType::HoloSubstance => vec![&PartOfSpeech::n],
+            SynsetRelType::Holonym => vec![&PartOfSpeech::n],
+            SynsetRelType::Hypernym => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SynsetRelType::Hyponym => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SynsetRelType::InstanceHypernym => vec![&PartOfSpeech::n],
+            SynsetRelType::InstanceHyponym => vec![&PartOfSpeech::n],
+            SynsetRelType::IsCausedBy => vec![&PartOfSpeech::v],
+            SynsetRelType::IsEntailedBy => vec![&PartOfSpeech::v],
+            SynsetRelType::MeroLocation => vec![&PartOfSpeech::n],
+            SynsetRelType::MeroMember => vec![&PartOfSpeech::n],
+            SynsetRelType::MeroPart => vec![&PartOfSpeech::n],
+            SynsetRelType::MeroPortion => vec![&PartOfSpeech::n],
+            SynsetRelType::MeroSubstance => vec![&PartOfSpeech::n],
+            SynsetRelType::Meronym => vec![&PartOfSpeech::n],
+            SynsetRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
+            SynsetRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s]
+        }
+    }
 }
 
 pub enum YamlSynsetRelType {

@@ -235,9 +235,23 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
     } else /*if mode == "a"*/ {
         let definition = input("Definition: ");
         let lexfile = input("Lexicographer file: ");
+        let poses = wn.pos_for_lexfile(&lexfile);
+        if poses.is_empty() {
+            println!("Lexicographer file does not exist");
+            return;
+        }
         let pos = PosKey::new(input(
             "Part of speech (n)oun/(v)erb/(a)djective/adve(r)b/(s)atellite: ")
             .to_lowercase());
+        match pos.to_part_of_speech() {
+            Some(p) => if !poses.iter().any(|p2| p == *p2) {
+                println!("Wrong POS for lexicographer file");
+                return;
+            },
+            None => {
+                println!("POS value not valid");
+            }
+        }
         match change_manager::add_synset(
             wn, definition, lexfile, pos.clone(), None, change_list) {
             Ok(new_id) => {
@@ -433,14 +447,16 @@ fn input(prompt : &str) -> String {
 
 fn main_menu(wn : &mut Lexicon, path : &str,
              ewe_changed : &mut ChangeList) -> bool {
+    println!("");
     println!("Please choose an option:");
     println!("1. Add/delete/move entry");
     println!("2. Add/delete a synset");
     println!("3. Change a definition");
     println!("4. Change an example");
     println!("5. Change a relation");
+    println!("6. Validate");
     if ewe_changed.changed() {
-        println!("6. Save changes");
+        println!("7. Save changes");
     }
     println!("X. Exit EWE");
 
@@ -453,6 +469,17 @@ fn main_menu(wn : &mut Lexicon, path : &str,
         "4" => change_example(wn, ewe_changed),
         "5" => change_relation(wn, ewe_changed),
         "6" => {
+            let errors = validate(wn);
+            for error in errors.iter() {
+                println!("{}", error);
+            }
+            if errors.is_empty() {
+                println!("No validation errors!");
+            } else {
+                println!("{} validation errors", errors.len());
+            }
+        },
+        "7" => {
             let saved = save(wn, path).expect("Could not save");
             if saved {
                 ewe_changed.reset();

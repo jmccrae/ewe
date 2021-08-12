@@ -1,5 +1,5 @@
 [package]
-name = "ewe-rust"
+name = "ewe"
 version = "0.1.0"
 authors = ["John P. McCrae <john@mccr.ae>"]
 edition = "2018"
