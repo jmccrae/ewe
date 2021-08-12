@@ -1,0 +1,24 @@
+on: [push]
+
+name: cargo-wind
+
+jobs:
+  build_and_test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+      - name: Update Automatic Release
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN}}"
+          automatic_release_tag: "Windows-latest"
+          prerelease: true
+          title: "Windows Development Build"
+          files: ./target/release/ewe.exe
