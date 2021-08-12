@@ -1,10 +1,10 @@
 on: [push]
 
-name: cargo-win
+name: cargo-macos
 
 jobs:
   build_and_test:
-    runs-on: windows-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -18,7 +18,7 @@ jobs:
         uses: marvinpinto/action-automatic-releases@latest
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN}}"
-          automatic_release_tag: "Windows-latest"
+          automatic_release_tag: "macos-latest"
           prerelease: true
-          title: "Windows Development Build"
-          files: ./target/release/ewe.exe
+          title: "Mac OS Development Build"
+          files: ./target/release/ewe
