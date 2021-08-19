@@ -101,7 +101,7 @@ fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str,
     let sense_id = match sense_no.parse::<usize>() {
         Ok(i) => {
             if i >= 1 && i <= mems.len() {
-                wordnet.get_sense(&mems[i], &synset_id)
+                wordnet.get_sense(&mems[i - 1], &synset_id)
                     .iter()
                     .filter(|sense| sense.synset == synset_id)
                     .map(|sense| sense.id.clone())
@@ -126,7 +126,7 @@ fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
         match sense_no.parse::<usize>() {
             Ok(i) => {
                 if i >= 1 && i <= mems.len() {
-                    match wordnet.get_sense(&mems[i], &synset_id)
+                    match wordnet.get_sense(&mems[i-1], &synset_id)
                         .iter()
                         .filter(|sense| sense.synset == synset_id)
                         .map(|sense| sense.id.clone())
