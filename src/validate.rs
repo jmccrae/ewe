@@ -257,11 +257,31 @@ fn check_transitive(wn : &Lexicon, errors : &mut Vec<ValidationError>,
 fn check_no_loops(wn : &Lexicon, errors : &mut Vec<ValidationError>,
                   bar : &ProgressBar) {
     let mut hypernyms = HashMap::new();
+    let mut domains = HashMap::new();
     for (synset_id, synset) in wn.synsets() {
         bar.inc(1);
         hypernyms.insert(synset_id.clone(), HashSet::new());
         for target in synset.hypernym.iter() {
             match hypernyms.get_mut(synset_id) {
+                Some(h) => { h.insert(target.clone()); },
+                None => {}
+            }
+        }
+        domains.insert(synset_id.clone(), HashSet::new());
+        for target in synset.domain_region.iter() {
+            match domains.get_mut(synset_id) {
+                Some(h) => { h.insert(target.clone()); },
+                None => {}
+            }
+        }
+        for target in synset.domain_topic.iter() {
+            match domains.get_mut(synset_id) {
+                Some(h) => { h.insert(target.clone()); },
+                None => {}
+            }
+        }
+        for target in synset.exemplifies.iter() {
+            match domains.get_mut(synset_id) {
                 Some(h) => { h.insert(target.clone()); },
                 None => {}
             }
@@ -290,7 +310,26 @@ fn check_no_loops(wn : &Lexicon, errors : &mut Vec<ValidationError>,
                     id: synset_id.clone()
                 });
             }
-        }
+            let n_size_dom = domains[synset_id].len();
+            for c in domains[synset_id].clone() {
+                let extension : Vec<SynsetId> = 
+                    domains.get(&c).iter().
+                    flat_map(|x| x.iter()).
+                    map(|x| x.clone()).collect();
+                match domains.get_mut(synset_id) {
+                    Some(h) => h.extend(extension.into_iter()),
+                    None => {}
+                }
+            }
+            if domains[synset_id].len() != n_size_dom {
+                changed = true;
+            }
+            if domains[synset_id].contains(synset_id) {
+                errors.push(ValidationError::DomainLoop {
+                    id: synset_id.clone()
+                });
+            }
+         }
     }
 }
 
@@ -332,7 +371,8 @@ pub enum ValidationError {
     SenseRelationSymmetry { source : SenseId, rel : SenseRelType, target : SenseId },
     SynsetRelationSymmetry { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     Transitivity { id1 : SynsetId, id2 : SynsetId, id3 : SynsetId },
-    Loop { id: SynsetId }
+    Loop { id: SynsetId },
+    DomainLoop { id: SynsetId }
 }
 
 impl fmt::Display for ValidationError {
@@ -404,7 +444,9 @@ impl fmt::Display for ValidationError {
                 write!(f, "{} has direct link to {} but also indirect link through {}",
                        id1.as_str(), id3.as_str(), id2.as_str()),
             ValidationError::Loop { id } => 
-                write!(f, "{} is a hypernym of itself", id.as_str())
+                write!(f, "{} is a hypernym of itself", id.as_str()),
+            ValidationError::DomainLoop { id } => 
+                write!(f, "{} has a domain loop", id.as_str())
 
         }
     }

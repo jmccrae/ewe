@@ -1285,11 +1285,11 @@ pub struct Synset {
     #[serde(default)]
     causes : Vec<SynsetId>,
     #[serde(default)]
-    domain_region : Vec<SynsetId>,
+    pub domain_region : Vec<SynsetId>,
     #[serde(default)]
-    domain_topic : Vec<SynsetId>,
+    pub domain_topic : Vec<SynsetId>,
     #[serde(default)]
-    exemplifies : Vec<SynsetId>,
+    pub exemplifies : Vec<SynsetId>,
     #[serde(default)]
     entails : Vec<SynsetId>,
     #[serde(default)]
