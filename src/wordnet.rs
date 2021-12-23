@@ -640,17 +640,12 @@ lazy_static! {
 
 fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
 
-    let s2 : String = if !s.starts_with("'") && s.chars().any(|c| c > '~') ||
-        s.starts_with("Seen in this light, it is the spectrality of the figure") {
+    let s2 : String = if s.starts_with("Seen in this light, it is the spectrality of the figure") {
         format!("\"{}\"", s.chars().map(|c| {
             if c == '"' {
                 "\\\"".to_string()
-            } else if c <= '~' {
-                c.to_string()
-            } else if (c as u32) < 256 {
-                format!("\\x{:02X}", c as u32)
             } else {
-                format!("\\u{:04X}", c as u32)
+                c.to_string()
             }
         }).collect::<Vec<String>>().join(""))
     } else if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
@@ -1044,7 +1039,10 @@ pub struct Entry {
     pub sense : Vec<Sense>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub form : Vec<String>
+    pub form : Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pronunciation : Vec<Pronunciation>
 }
 
 impl Entry {
@@ -1055,6 +1053,13 @@ impl Entry {
             write!(w,"    form:")?;
             for f in self.form.iter() {
                 write!(w, "\n    - {}", f)?;
+            }
+            write!(w,"\n")?;
+        }
+        if !self.pronunciation.is_empty() {
+            write!(w,"    pronunciation:")?;
+            for p in self.pronunciation.iter() {
+                p.save(w)?;
             }
             write!(w,"\n")?;
         }
@@ -1117,6 +1122,9 @@ pub struct Sense {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub other: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    sent : Vec<String>
 }
 
 impl Sense {
@@ -1137,7 +1145,8 @@ impl Sense {
             is_exemplified_by: Vec::new(),
             similar: Vec::new(),
             other: Vec::new(),
-            adjposition: None
+            adjposition: None,
+            sent : Vec::new()
         }
     }
 
@@ -1185,6 +1194,12 @@ impl Sense {
         write_prop_sense(w, &self.other, "other", first)?;
         write_prop_sense(w, &self.participle, "participle", first)?;
         write_prop_sense(w, &self.pertainym, "pertainym", first)?;
+        if !self.sent.is_empty() {
+            write!(w, "\n      sent:")?;
+            for subcat_id in self.sent.iter() {
+                write!(w, "\n      - {}", subcat_id)?;
+            }
+        }
         write_prop_sense(w, &self.similar, "similar", first)?;
         if !self.subcat.is_empty() {
             write!(w, "\n      subcat:")?;
@@ -1233,6 +1248,26 @@ impl Sense {
     }
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+pub struct Pronunciation {
+    value : String,
+    variety : Option<String>
+}
+
+impl Pronunciation {
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        write!(w, "\n    - value: {}", escape_yaml_string(&self.value, 6, 6))?;
+        match &self.variety {
+            Some(v) => {
+                write!(w, "\n      variety: {}", v)?;
+            }
+            None => {}
+        }
+        Ok(())
+    }
+}
+
+
 fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, first : bool) -> std::io::Result<bool> {
     if senses.is_empty() {
         Ok(first)
@@ -1274,6 +1309,7 @@ pub struct Synset {
     #[serde(default)]
     pub example : Vec<Example>,
     pub ili : Option<ILIID>,
+    wikidata : Option<String>,
     pub source : Option<String>,
     pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]
@@ -1320,6 +1356,7 @@ impl Synset {
             definition : Vec::new(),
             example : Vec::new(),
             ili : None,
+            wikidata : None,
             source : None,
             members : Vec::new(),
             part_of_speech,
@@ -1504,6 +1541,13 @@ impl Synset {
             },
             None => {}
         };
+        match &self.wikidata {
+            Some(wd) => {
+                write!(w, "\n  wikidata: {}", wd)?;
+            },
+            None => {}
+        };
+
         Ok(())
     }
 
