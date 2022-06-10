@@ -169,7 +169,7 @@ impl Lexicon {
     /// Get the entry data (with the part of speech key) for a lemma
     pub fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
         match lemma.chars().nth(0) {
-            Some(c) if c.to_ascii_lowercase() > 'a' && c.to_ascii_lowercase() < 'z' => {
+            Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
                 let key = format!("{}", c.to_lowercase());
                 match self.entries.get(&key) {
                     Some(v) => v.entry_by_lemma_with_pos(lemma),
