@@ -77,6 +77,12 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                        });
                    }
                }
+               if sense.id == target {
+                   errors.push(ValidationError::SelfReferencingSenseRelation {
+                       source: sense.id.clone(),
+                       rel: rel.clone(), 
+                       target: target.clone() });
+               }
                if sr_items.contains(&(rel.clone(), target.clone())) {
                    errors.push(ValidationError::DuplicateSenseRelation {
                        source: sense.id.clone(),
@@ -179,6 +185,13 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                         target: target.clone()
                     });
                 }
+            }
+            if *synset_id == target {
+                errors.push(ValidationError::SelfReferencingSynsetRelation {
+                    source: synset_id.clone(),
+                    rel: rel.clone(),
+                    target: target.clone()
+                });
             }
              if sr_items.contains(&(rel.clone(), target.clone())) {
                 errors.push(ValidationError::DuplicateSynsetRelation {
@@ -353,6 +366,8 @@ pub enum ValidationError {
     SenseRelationPOS { id : SenseId, pos : PartOfSpeech, rel : SenseRelType },
     SynsetRelationPOS { id : SynsetId, pos : PartOfSpeech, rel : SynsetRelType },
     DuplicateSenseRelation { source : SenseId, rel : SenseRelType, target : SenseId },
+    SelfReferencingSenseRelation { source : SenseId, rel : SenseRelType, target : SenseId },
+    SelfReferencingSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSenseKey { id : SenseId },
     DuplicateSyntacticBehaviour { id : SenseId },
@@ -393,6 +408,12 @@ impl fmt::Display for ValidationError {
             ValidationError::SynsetRelationPOS { id, pos, rel } =>
                 write!(f, "Synset {} has a relation of type {} but this is not permitted for part of speech {}", 
                        id.as_str(), rel.value(), pos.value()),
+            ValidationError::SelfReferencingSenseRelation { source, rel, target } =>
+                write!(f, "Self-referencing relation {} ={}=> {}", 
+                       source.as_str(), rel.value(), target.as_str()),
+            ValidationError::SelfReferencingSynsetRelation { source, rel, target } =>
+                write!(f, "Self-referencing relation {} ={}=> {}", 
+                       source.as_str(), rel.value(), target.as_str()),
             ValidationError::DuplicateSenseRelation { source, rel, target } =>
                 write!(f, "Duplicate relation {} ={}=> {}", 
                        source.as_str(), rel.value(), target.as_str()),
