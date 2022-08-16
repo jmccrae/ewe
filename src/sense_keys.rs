@@ -230,6 +230,4 @@ mod tests {
                                  &synset2,
                                  &SynsetId::new("00000002-s")));
     }
-
-
 }
