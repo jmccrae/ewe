@@ -38,6 +38,13 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                             synset_pos: synset.part_of_speech.clone()
                         });
                    }
+
+                   if !synset.members.iter().any(|member| member == lemma) {
+                       errors.push(ValidationError::SenseNotInSynsetMembers {
+                           id: sense.synset.clone(),
+                           member: lemma.clone()
+                       });
+                   }
                }, None => {
                    errors.push(ValidationError::SenseSynsetNotExists {
                        id: sense.id.clone(),
@@ -240,7 +247,23 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
             }
         }
 
+        for member in synset.members.iter() {
+            if !wn.entry_by_lemma(member).iter().
+                any(|entry| {
+                    entry.sense.iter().any(
+                        |sense| {
+                            sense.synset == *synset_id
+                        })
+                }) {
+                errors.push(ValidationError::SynsetMemberNotInEntries {
+                    id: synset_id.clone(), 
+                    member: member.clone()
+                });
+            }
+        }
+
         check_transitive(wn, &mut errors, synset_id, synset);
+
     }
     check_no_loops(wn, &mut errors, &bar);
     bar.finish();
@@ -387,7 +410,9 @@ pub enum ValidationError {
     SynsetRelationSymmetry { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     Transitivity { id1 : SynsetId, id2 : SynsetId, id3 : SynsetId },
     Loop { id: SynsetId },
-    DomainLoop { id: SynsetId }
+    DomainLoop { id: SynsetId },
+    SynsetMemberNotInEntries { id: SynsetId, member: String },
+    SenseNotInSynsetMembers { id: SynsetId, member: String }
 }
 
 impl fmt::Display for ValidationError {
@@ -467,7 +492,12 @@ impl fmt::Display for ValidationError {
             ValidationError::Loop { id } => 
                 write!(f, "{} is a hypernym of itself", id.as_str()),
             ValidationError::DomainLoop { id } => 
-                write!(f, "{} has a domain loop", id.as_str())
+                write!(f, "{} has a domain loop", id.as_str()),
+            ValidationError::SynsetMemberNotInEntries { id, member } =>
+                write!(f, "{} has member {} but not listed as a sense", id.as_str(), member),
+            ValidationError::SenseNotInSynsetMembers { id, member } =>
+                write!(f, "{} does not contain {} in member list", id.as_str(), member)
+
 
         }
     }
