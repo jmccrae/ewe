@@ -31,7 +31,9 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
            match wn.synset_by_id(&sense.synset) {
                Some(synset) => {
                    if poskey.to_part_of_speech() == None ||
-                       synset.part_of_speech != poskey.to_part_of_speech().unwrap() {
+                       synset.part_of_speech != poskey.to_part_of_speech().unwrap() && 
+                       !(synset.part_of_speech == PartOfSpeech::s &&
+                         poskey.to_part_of_speech().unwrap() == PartOfSpeech::a) {
                         errors.push(ValidationError::EntryPartOfSpeech {
                             id: sense.id.clone(),
                             pos: poskey.clone(),
