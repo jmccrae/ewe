@@ -142,7 +142,7 @@ pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
 pub fn get_sense_key(wn : &Lexicon, lemma : &str,
                  entry : &Entry, sense_key : Option<&SenseId>,
                  synset : &Synset, synset_id : &SynsetId) -> SenseId {
-    let lemma = lemma.replace(" ", "_").replace("&apos", "'").replace("+", "-pl-").to_lowercase();
+    let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let ss_type = synset.part_of_speech.ss_type();
     let lex_filenum = wn.lex_name_for(synset_id).and_then(|lex_name|
             LEX_FILENUMS.get(lex_name.as_str()))
