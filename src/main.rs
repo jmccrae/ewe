@@ -11,6 +11,7 @@ mod change_manager;
 mod wordnet;
 mod sense_keys;
 mod validate;
+mod automaton;
 
 use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
 use crate::rels::{SenseRelType, SynsetRelType};
