@@ -22,6 +22,9 @@ use crate::change_manager::{ChangeList};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::path::Path;
+use std::env;
+use std::fs::File;
+use std::process::exit;
 
 /// Supports the user in choosing a synset
 fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Synset) {
@@ -508,34 +511,73 @@ fn main_menu(wn : &mut Lexicon, path : &str,
 
 
 fn main() {
-    println!("");
-    println!("         ,ww                             ");
-    println!("   wWWWWWWW_)  Welcome to EWE            ");
-    println!("   `WWWWWW'    - English WordNet Editor  ");
-    println!("    II  II                               ");
-    println!("");
-
-    let path = if Path::new("./src/yaml/entries-a.yaml").exists() {
-        "./src/yaml/".to_owned()
-    } else if Path::new("./entries-a.yaml").exists() {
-        "./".to_owned()
-    } else {
-        let mut s = input("WordNet Home Folder: ");
-        while !Path::new(&s).join("entries-a.yaml").exists() &&
-            !Path::new(&s).join("src/yaml/entries-a.yaml").exists() {
-            println!("Could not find WordNet at this path.");
-            s = input("WordNet Home Folder: ");
-        }
-        if Path::new(&s).join("entries-a.yaml").exists() {
+    if env::args().len() > 1 {
+        let automaton_file = env::args().nth(1).unwrap();
+        let f = File::open(&automaton_file).unwrap_or_else(|_| {
+            eprintln!("Could not open automaton file: {}", automaton_file);
+            exit(-1);
+        });
+        let actions : Vec<automaton::Action> = 
+        serde_yaml::from_reader(f).unwrap_or_else(|e| {
+            eprintln!("Could not parse automaton file: {}", e);
+            exit(-1);
+        });
+        let path = if Path::new("./src/yaml/entries-a.yaml").exists() {
+            "./src/yaml/".to_owned()
+        } else if Path::new("./entries-a.yaml").exists() {
+            "./".to_owned()
+        } else if env::args().len() > 2 {
+            let s = env::args().nth(2).unwrap();
+            if !Path::new(&s).join("entries-a.yaml").exists() &&
+                !Path::new(&s).join("src/yaml/entries-a.yaml").exists() {
+                eprintln!("WordNet home not found at {}", s);
+                exit(-1);
+            }
             s
         } else {
-            Path::new(&s).join("src/yaml/").to_string_lossy().to_string()
-        }
-    };
+            eprintln!("Please specify WordNet home as 2nd argument");
+            exit(-1);
+        };
+        let mut wn = wordnet::Lexicon::load(&path).unwrap();
 
-    let mut wn = wordnet::Lexicon::load(&path).unwrap();
+        let mut ewe_changed = ChangeList::new();
 
-    let mut ewe_changed = ChangeList::new();
+        automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
+            eprintln!("Could not apply automaton: {}", e);
+            exit(-1);
+        });
+        
+        save(&wn, &path).expect("Could not save");
+     } else {
+        println!("");
+        println!("         ,ww                             ");
+        println!("   wWWWWWWW_)  Welcome to EWE            ");
+        println!("   `WWWWWW'    - English WordNet Editor  ");
+        println!("    II  II                               ");
+        println!("");
 
-    while main_menu(&mut wn, &path, &mut ewe_changed) {}
+        let path = if Path::new("./src/yaml/entries-a.yaml").exists() {
+            "./src/yaml/".to_owned()
+        } else if Path::new("./entries-a.yaml").exists() {
+            "./".to_owned()
+        } else {
+            let mut s = input("WordNet Home Folder: ");
+            while !Path::new(&s).join("entries-a.yaml").exists() &&
+                !Path::new(&s).join("src/yaml/entries-a.yaml").exists() {
+                println!("Could not find WordNet at this path.");
+                s = input("WordNet Home Folder: ");
+            }
+            if Path::new(&s).join("entries-a.yaml").exists() {
+                s
+            } else {
+                Path::new(&s).join("src/yaml/").to_string_lossy().to_string()
+            }
+        };
+
+        let mut wn = wordnet::Lexicon::load(&path).unwrap();
+
+        let mut ewe_changed = ChangeList::new();
+
+        while main_menu(&mut wn, &path, &mut ewe_changed) {}
+    }
 }
