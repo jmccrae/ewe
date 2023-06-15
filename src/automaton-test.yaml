@@ -1,0 +1,7 @@
+- example:
+    synset: 00001740-n
+    action: 
+      add:
+        example: This is an example
+        source: Delete this test example
+- validate
