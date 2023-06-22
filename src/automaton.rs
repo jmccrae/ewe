@@ -11,9 +11,9 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
         match action {
             Action::Entry { synset, lemma, action  } => {
                 match action {
-                    EntryAction::Add { pos } => {
+                    EntryAction::Add { pos, subcat } => {
                         change_manager::add_entry(wn, synset, 
-                            lemma, pos, changes);
+                            lemma, pos, subcat, changes);
                     },
                     EntryAction::Delete => {
                         match wn.pos_for_entry_synset(&lemma, &synset) {
@@ -44,7 +44,7 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             },
             Action::Synset { action } => {
                 match action {
-                    SynsetAction::Add { definition, lexfile, pos, lemmas } => {
+                    SynsetAction::Add { definition, lexfile, pos, lemmas, subcats } => {
                         let poses = wn.pos_for_lexfile(&lexfile);
                         match pos.to_part_of_speech() {
                             Some(p) => if !poses.iter().any(|p2| p == *p2) {
@@ -58,15 +58,26 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                         match change_manager::add_synset(wn, 
                             definition, lexfile, pos.clone(), 
                             None, changes) {
-                            Ok(new_id) => {
-                                for lemma in lemmas {
-                                        change_manager::add_entry(wn, 
-                                            new_id.clone(), 
-                                            lemma, pos.clone(), 
-                                            changes);
-                                }
-                            },
-                            Err(e) => return Err(e)
+                                Ok(new_id) => {
+                                    if subcats.is_empty() {
+                                        for lemma in lemmas {
+                                            change_manager::add_entry(wn, 
+                                                new_id.clone(), 
+                                                lemma, pos.clone(), 
+                                                Vec::new(),
+                                                changes);
+                                        }
+                                    } else {
+                                        for (lemma, subcat) in lemmas.into_iter().zip(subcats.into_iter()) {
+                                            change_manager::add_entry(wn, 
+                                                new_id.clone(), 
+                                                lemma, pos.clone(), 
+                                                subcat,
+                                                changes);
+                                        }
+                                    }
+                                },
+                                Err(e) => return Err(e)
                         }
                     },
                     SynsetAction::Delete { synset, reason, superseded_by } => {
@@ -194,7 +205,12 @@ pub enum Action {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum EntryAction {
     #[serde(rename = "add")]
-    Add { pos : PosKey },
+    Add { 
+        pos : PosKey,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        subcat : Vec<String>,
+    },
     #[serde(rename = "delete")]
     Delete,
     #[serde(rename = "move")]
@@ -211,6 +227,9 @@ pub enum SynsetAction {
         lexfile : String,
         pos : PosKey,
         lemmas : Vec<String>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        subcats: Vec<Vec<String>>
     },
     #[serde(rename = "delete")]
     Delete {
@@ -284,7 +303,8 @@ mod tests {
                 synset: SynsetId::new("00001740-n"),
                 lemma: "bar".to_string(),
                 action: EntryAction::Add {
-                    pos: PosKey::new("n".to_string())
+                    pos: PosKey::new("n".to_string()),
+                    subcat: Vec::new()
                 }
             },
             Action::Entry {
@@ -304,7 +324,8 @@ mod tests {
                     definition: "something or someone".to_string(),
                     lexfile: "noun.animal".to_string(),
                     pos: PosKey::new("n".to_string()),
-                    lemmas: vec!["bar".to_string()]
+                    lemmas: vec!["bar".to_string()],
+                    subcats: vec![]
                 },
             },
             Action::Synset {

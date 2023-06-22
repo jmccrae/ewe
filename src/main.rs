@@ -185,8 +185,15 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
 
     if action == "A" {
         let pos = synset.part_of_speech.to_pos_key();
+        let subcat = if pos.as_str() == "v" {
+            input("Enter verb subcats as comma-separated list: ").split(",").
+                map(|s| s.to_string()).
+                collect()
+        } else {
+            Vec::new()
+        };
         change_manager::add_entry(wn, synset_id, 
-                                  lemma, pos, change_list); 
+                                  lemma, pos, subcat, change_list); 
     } else if action == "D" {
         match wn.pos_for_entry_synset(&lemma, &synset_id) {
             Some(pos) => {
@@ -261,9 +268,16 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
             Ok(new_id) => {
                 loop {
                     let lemma = input("Add Lemma (blank to stop): ");
+                    let subcat = if pos == PosKey::new("v".to_string()) {
+                        input("Enter verb subcats as comma-separated list: ").split(",").
+                                map(|s| s.to_string()).
+                                collect()
+                    } else {
+                        Vec::new()
+                    };
                     if lemma.len() > 0 {
                         change_manager::add_entry(wn, new_id.clone(),
-                            lemma, pos.clone(), change_list);
+                            lemma, pos.clone(), subcat, change_list);
                     } else {
                         break;
                     }

@@ -74,6 +74,7 @@ pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
 pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId, 
                  lemma : String, 
                  synset_pos : PosKey,
+                 subcat : Vec<String>,
                  change_list : &mut ChangeList) -> Option<SenseId> {
     println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
@@ -96,8 +97,9 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
                 Some(synset) => {
                     let sense_id = 
                             get_sense_key(wn, &lemma, e, None, synset, &synset_id);
-                    let sense = Sense::new(sense_id.clone(),
+                    let mut sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
+                    sense.subcat = subcat;
                     wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
                     change_list.mark();
                     Some(sense_id)
@@ -110,8 +112,9 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
                 Some(synset) => {
                     let e = Entry::new();
                     let sense_id = get_sense_key(wn, &lemma, &e, None, synset, &synset_id);
-                    let sense = Sense::new(sense_id.clone(),
+                    let mut sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
+                    sense.subcat = subcat;
                     wn.insert_entry(lemma.clone(), synset_pos.clone(), e);
                     wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
                     change_list.mark();
@@ -167,9 +170,12 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
     let links_from = wn.sense_links_from(&lemma, &pos, &synset_id);
     let links_to   = wn.sense_links_to(&lemma, &pos, &synset_id);
     let forms = wn.get_forms(&lemma, &pos);
+    let subcat : Vec<String> = wn.get_sense(&lemma, &synset_id).get(0)
+        .map(|s| s.subcat.clone())
+        .unwrap_or(Vec::new());
     delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
     match add_entry(wn, target_synset_id, 
-                    lemma.clone(), pos.clone(), change_list) {
+                    lemma.clone(), pos.clone(), subcat, change_list) {
         Some(sense_id) => {
             for (rel, target) in links_from {
                 wn.add_sense_rel(&sense_id, rel, &target);
