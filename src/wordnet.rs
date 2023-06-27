@@ -973,7 +973,9 @@ impl Entries {
         match self.0.get_mut(lemma) {
             Some(m) => match m.get_mut(pos) {
                 Some(e) => {
-                    e.form.push(form);
+                    if !e.form.contains(&form) {
+                        e.form.push(form);
+                    }
                 },
                 None => {}
             },
