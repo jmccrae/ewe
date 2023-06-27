@@ -241,14 +241,14 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
         }
     }
 
-    wn.remove_synset(synset_id);
-    
     match supersede_id {
         Some(ss_id) => {
             wn.deprecate(synset_id, ss_id, reason);
         },
         None => {}
     }
+
+    wn.remove_synset(synset_id);
 
     change_list.mark();
 }
