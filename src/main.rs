@@ -32,7 +32,10 @@ fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Syns
     while synset.is_none() {
         let synset_id = input(&format!("Enter {}synset ID : ewn-", spec_string));
         while synset_id == "" {
-            let lemma = input("Search by lemma: ");
+            let mut lemma = String::new();
+            while lemma == "" {
+                lemma = input("Search by lemma: ");
+            }
             let entries = wn.entry_by_lemma(&lemma);
             if !entries.is_empty() {
                 let senses : Vec<&Sense> = 
