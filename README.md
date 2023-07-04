@@ -57,67 +57,48 @@ An example of the usage of the automaton file is given below
 
 ```yaml
 ---
-- entry:
+- add_entry:
     synset: 00001740-n
     lemma: bar
-    action:
-      add:
-        pos: n
-- entry:
+    pos: n
+- delete_entry:
     synset: 00001740-n
     lemma: bar
-    action: delete
-- entry:
+- move_entry:
     synset: 00001740-n
     lemma: bar
-    action:
-      move:
-        target_synset: 00001741-n
-- synset:
-    action:
-      add:
-        definition: something or someone
-        lexfile: noun.animal
-        pos: n
-        lemmas:
-          - bar
-- synset:
-    action:
-      delete:
-        synset: 00001740-n
-        reason: "Duplicate (#123)"
-        superseded_by: 00001741-n
-- definition:
+    target_synset: 00001741-n
+- add_synset:
+    definition: something or someone
+    lexfile: noun.animal
+    pos: n
+    lemmas:
+      - bar
+- delete_synset:
+    synset: 00001740-n
+    reason: "Duplicate (#123)"
+    superseded_by: 00001741-n
+- change_definition:
     synset: 00001740-n
     definition: This is a definition
-- example:
+- add_example:
     synset: 00001740-n
-    action:
-      add:
-        example: This is an example
-        source: This is a source
-- example:
+    example: This is an example
+    source: This is a source
+- delete_example:
     synset: 00001740-n
-    action:
-      delete:
-        number: 1
-- relation:
-    action:
-      add:
-        source: 00001740-n
-        relation: hypernym
-        target: 00001741-n
-- relation:
-    action:
-      delete:
-        source: 00001740-n
-        source_sense: "example%1:09:00::"
-        target: 00001741-n
-        target_sense: "target%1:10:00::'"
-- relation:
-    action:
-      reverse:
-        source: 00001740-n
-        target: 00001741-n
+    number: 1
+- add_relation:
+    source: 00001740-n
+    relation: hypernym
+    target: 00001741-n
+- delete_relation:
+    source: 00001740-n
+    source_sense: "example%1:09:00::"
+    target: 00001741-n
+    target_sense: "target%1:10:00::'"
+- reverse_relation:
+    source: 00001740-n
+    target: 00001741-n
 - validate
 ```
