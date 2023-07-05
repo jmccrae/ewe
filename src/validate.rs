@@ -56,7 +56,7 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
            }
            let mut sr_items = HashSet::new();
            for (rel, target) in sense.sense_links_from() {
-               if !wn.has_sense(&target) {
+               if !wn.has_sense(&target) && wn.synset_by_id(&SynsetId::new(target.as_str())).is_none() {
                    errors.push(ValidationError::SenseRelTargetMissing {
                        id: sense.id.clone(),
                        rel: rel.clone(),
@@ -114,6 +114,15 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
                 errors.push(ValidationError::DuplicateSyntacticBehaviour {
                     id: sense.id.clone()
                 });
+           }
+
+           for sense2 in entry.sense.iter() {
+               if sense.id != sense2.id && sense.synset == sense2.synset {
+                   errors.push(ValidationError::DuplicateSense { 
+                       id1: sense.id.clone(), id2: sense2.id.clone(), 
+                       synset: sense.synset.clone() 
+                   });
+               }
            }
         }
         if entry.sense.is_empty() {
@@ -264,6 +273,17 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
             }
         }
 
+        for (i, mem1) in synset.members.iter().enumerate() {
+            for (j, mem2) in synset.members.iter().enumerate() {
+                if i > j && mem1 == mem2 {
+                    errors.push(ValidationError::DuplicateMember {
+                        id: synset_id.clone(),
+                        member: mem1.clone()
+                    });
+                }
+            }
+        }
+
         check_transitive(wn, &mut errors, synset_id, synset);
 
     }
@@ -396,6 +416,7 @@ pub enum ValidationError {
     DuplicateSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSenseKey { id : SenseId },
     DuplicateSyntacticBehaviour { id : SenseId },
+    DuplicateSense { id1 : SenseId, id2 : SenseId, synset : SynsetId },
     SynsetIdPos { id : SynsetId, pos : PartOfSpeech },
     InvalidSynsetId { id : SynsetId },
     EmptySynset { id : SynsetId },
@@ -414,6 +435,7 @@ pub enum ValidationError {
     Loop { id: SynsetId },
     DomainLoop { id: SynsetId },
     SynsetMemberNotInEntries { id: SynsetId, member: String },
+    DuplicateMember { id: SynsetId, member : String },
     SenseNotInSynsetMembers { id: SynsetId, member: String }
 }
 
@@ -452,6 +474,9 @@ impl fmt::Display for ValidationError {
             ValidationError::DuplicateSyntacticBehaviour { id } =>
                 write!(f, "Duplicate syntactic behaviour for sense {}", 
                        id.as_str()),
+            ValidationError::DuplicateSense { id1, id2, synset } => 
+                write!(f, "Duplicate senses {} & {} referring to {}", 
+                       id1.as_str(), id2.as_str(), synset.as_str()),
             ValidationError::SynsetIdPos { id, pos } =>
                 write!(f, "Synset {} is not valid for a synset with POS {}",
                        id.as_str(), pos.value()),
@@ -497,6 +522,8 @@ impl fmt::Display for ValidationError {
                 write!(f, "{} has a domain loop", id.as_str()),
             ValidationError::SynsetMemberNotInEntries { id, member } =>
                 write!(f, "{} has member {} but not listed as a sense", id.as_str(), member),
+            ValidationError::DuplicateMember { id, member } =>
+                write!(f, "{} has duplicate member {}", id.as_str(), member),
             ValidationError::SenseNotInSynsetMembers { id, member } =>
                 write!(f, "{} does not contain {} in member list", id.as_str(), member)
 
