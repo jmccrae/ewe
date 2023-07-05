@@ -93,18 +93,23 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
 
     let sense_id = match entry {
         Some(e) => {
-            match wn.synset_by_id(&synset_id) {
-                Some(synset) => {
-                    let sense_id = 
-                            get_sense_key(wn, &lemma, e, None, synset, &synset_id);
-                    let mut sense = Sense::new(sense_id.clone(),
-                            synset_id.clone());
-                    sense.subcat = subcat;
-                    wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
-                    change_list.mark();
-                    Some(sense_id)
-                },
-                None => None
+            match e.sense.iter().filter(|s| s.synset == synset_id).next() {
+                Some(sense) => Some(sense.id.clone()),
+                None => {
+                    match wn.synset_by_id(&synset_id) {
+                        Some(synset) => {
+                            let sense_id = 
+                                    get_sense_key(wn, &lemma, e, None, synset, &synset_id);
+                            let mut sense = Sense::new(sense_id.clone(),
+                                    synset_id.clone());
+                            sense.subcat = subcat;
+                            wn.insert_sense(lemma.clone(), synset_pos.clone(), sense);
+                            change_list.mark();
+                            Some(sense_id)
+                        },
+                        None => None
+                    }
+                }
             }
         },
         None => { 
@@ -126,7 +131,9 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
     };
     match wn.synset_by_id_mut(&synset_id) {
         Some(ref mut synset) => {
-            synset.members.push(lemma.clone());
+            if !synset.members.contains(&lemma) {
+                synset.members.push(lemma.clone());
+            }
             change_list.mark();
         },
         None => {
