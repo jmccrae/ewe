@@ -122,10 +122,13 @@ fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str,
     (synset_id, sense_id)
 }
 
-fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
+fn enter_sense(wordnet : &Lexicon, spec_string : &str, allow_none : bool) -> SenseId {
     let synset_id = enter_synset(wordnet, spec_string).0;
     let mems = wordnet.members_by_id(&synset_id);
     loop {
+        if allow_none {
+            println!("0. None");
+        }
         for (i, m) in mems.iter().enumerate() {
             println!("{}. {}", i + 1, m);
         }
@@ -141,7 +144,9 @@ fn enter_sense(wordnet : &Lexicon, spec_string : &str) -> SenseId {
                         Some(ssid) => { return ssid; },
                         None => {}
                     }
-                } 
+                } else if i == 0 {
+                    return SenseId::new(synset_id.as_str().to_string())
+                }
             },
             Err(_) => {}
         }
@@ -370,7 +375,7 @@ fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
                 relation = input("Enter new relation: ");
             }
             let rel = SenseRelType::from(&relation).unwrap();
-            let target_sense_id = enter_sense(wn, "target ");
+            let target_sense_id = enter_sense(wn, "target ", true);
             change_manager::insert_sense_relation(wn, source_sense_id,
                                                rel, target_sense_id,
                                                change_list);
@@ -395,7 +400,7 @@ fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
-            let target_sense_id = enter_sense(wn, "target ");
+            let target_sense_id = enter_sense(wn, "target ", false);
             change_manager::delete_sense_rel(wn, &source_sense_id,
                                              &target_sense_id, change_list);
         },
@@ -411,7 +416,7 @@ fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
-            let target_sense_id = enter_sense(wn, "target ");
+            let target_sense_id = enter_sense(wn, "target ", false);
             change_manager::reverse_sense_rel(wn, &source_sense_id,
                                              &target_sense_id, change_list);
         },
