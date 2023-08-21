@@ -585,6 +585,12 @@ impl Lexicon {
     pub fn n_synsets(&self) -> usize {
         self.synsets.values().map(|v| v.0.len()).sum()
     }
+
+    #[allow(dead_code)]
+    pub fn add_lexfile(&mut self, lexfile : &str) {
+        self.synsets.insert(lexfile.to_owned(), Synsets::new());
+    }
+
 }
 
 fn add_sense_link_to(map : &mut HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,

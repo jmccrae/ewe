@@ -3,21 +3,23 @@ use crate::wordnet::{Lexicon,SynsetId,PosKey,SenseId};
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::change_manager::ChangeList;
 use crate::validate;
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                     changes : &mut ChangeList) -> Result<(), String> {
+    let mut last_synset_id : Option<SynsetId> = None;
+    let mut last_sense_id : Option<SenseId> = None;
     for action in actions {
         match action {
             Action::AddEntry { synset, lemma, pos, subcat } => {
-                change_manager::add_entry(wn, synset, 
+                last_sense_id = change_manager::add_entry(wn, synset.resolve(&last_synset_id)?, 
                     lemma, pos, subcat, changes);
             },
             Action::DeleteEntry { synset, lemma } => {
-                match wn.pos_for_entry_synset(&lemma, &synset) {
+                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?) {
                     Some(pos) => {
                         change_manager::delete_entry(wn, 
-                            &synset, 
+                            &synset.resolve(&last_synset_id)?, 
                             &lemma, &pos, 
                             true, changes);
                     },
@@ -27,11 +29,11 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                 }
             },
             Action::MoveEntry { synset, lemma, target_synset } => {
-                match wn.pos_for_entry_synset(&lemma, &synset) {
+                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?) {
                     Some(pos) => {
                         change_manager::move_entry(wn, 
-                            synset, 
-                            target_synset, 
+                            synset.resolve(&last_synset_id)?, 
+                            target_synset.resolve(&last_synset_id)?, 
                             lemma, pos, changes);
                     },
                     None => return Err(format!("Entry {} not found in synset {}", lemma, synset.as_str()))
@@ -69,71 +71,76 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                                         changes);
                                 }
                             }
+                            last_synset_id = Some(new_id);
                         },
                         Err(e) => return Err(e)
                 }
             },
             Action::DeleteSynset { synset, reason, superseded_by } => {
                 change_manager::delete_synset(wn, 
-                    &synset, Some(&superseded_by), 
+                    &synset.resolve(&last_synset_id)?, Some(&superseded_by.resolve(&last_synset_id)?), 
                     reason, true, changes);
             },
             Action::Definition { synset, definition } => {
                 change_manager::update_def(wn, 
-                    &synset, definition, false);
+                    &synset.resolve(&last_synset_id)?, definition, false);
             },
             Action::AddExample { synset, example, source } => {
                 change_manager::add_ex(wn, 
-                    &synset, example, source, changes);
+                    &synset.resolve(&last_synset_id)?, example, source, changes);
             },
             Action::DeleteExample { synset, number } => {
                 change_manager::delete_ex(wn, 
-                    &synset, number - 1, changes);
+                    &synset.resolve(&last_synset_id)?, number - 1, changes);
             },
             Action::AddRelation { source, source_sense, relation, target, target_sense } => {
                 match source_sense {
                     Some(sense) => {
+                        let sense = sense.resolve(&last_sense_id)?;
 
                         change_manager::insert_sense_relation(wn, 
                             sense.clone(), 
                             SenseRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}", relation))?,
-                            target_sense.ok_or(format!("Source sense {} with target sense", sense.as_str()))?, changes);
+                            target_sense.ok_or(format!("Source sense {} with target sense", sense.as_str()))?.resolve(&last_sense_id)?, changes);
                     },
                     None => {
                         change_manager::insert_rel(wn, 
-                            &source,
+                            &source.resolve(&last_synset_id)?,
                             &SynsetRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}", relation))?,
-                            &target, changes);
+                            &target.resolve(&last_synset_id)?, changes);
                     }
                 }
             },
             Action::DeleteRelation { source, source_sense, target, target_sense } => {
                 match source_sense {
                     Some(source_sense) => {
+                        let source_sense = source_sense.resolve(&last_sense_id)?;
                         change_manager::delete_sense_rel(wn, 
-                            &source_sense, 
-                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?, changes);
+                            &source_sense,
+                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id)?, changes);
                     },
                     None => {
                         change_manager::delete_rel(wn, 
-                            &source, 
-                            &target, changes);
+                            &source.resolve(&last_synset_id)?, 
+                            &target.resolve(&last_synset_id)?, changes);
                     }
                 }
             },
             Action::ReverseRelation { source, source_sense, target, target_sense } => {
                 match source_sense {
                     Some(source_sense) => {
+                        let source_sense = source_sense.resolve(&last_sense_id)?;
+                        
                         change_manager::reverse_sense_rel(wn, 
-                            &source_sense, 
-                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?, changes);
+                            &source_sense,
+                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id)?, changes);
                     },
                     None => {
                         change_manager::reverse_rel(wn, 
-                            &source, 
-                            &target, changes);
+                            &source.resolve(&last_synset_id)?, 
+                            &target.resolve(&last_synset_id)?, changes);
                     }
                 }
             },
@@ -154,12 +161,99 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
     Ok(())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum SynsetRef {
+    Id(SynsetId),
+    Last
+}
+
+impl SynsetRef {
+    fn resolve(self, last : &Option<SynsetId>) -> Result<SynsetId, String> {
+        match self {
+            SynsetRef::Id(id) => Ok(id),
+            SynsetRef::Last => last.clone().ok_or("No last synset id".to_string())
+        }
+    }
+
+    #[allow(dead_code)]
+    fn id(s : &str) -> SynsetRef {
+        SynsetRef::Id(SynsetId::new(s))
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            SynsetRef::Id(id) => id.as_str(),
+            SynsetRef::Last => "last"
+        }
+    }
+}
+
+impl Serialize for SynsetRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        match self {
+            SynsetRef::Id(id) => id.serialize(serializer),
+            SynsetRef::Last => serializer.serialize_str("last")
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SynsetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "last" => Ok(SynsetRef::Last),
+            _ => Ok(SynsetRef::Id(SynsetId::new_owned(s)))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SenseRef {
+    Id(SenseId),
+    Last
+}
+
+impl SenseRef {
+    fn resolve(self, last : &Option<SenseId>) -> Result<SenseId, String> {
+        match self {
+            SenseRef::Id(id) => Ok(id),
+            SenseRef::Last => last.clone().ok_or("No last sense id".to_string())
+        }
+    }
+    #[allow(dead_code)]
+    fn id(s : &str) -> SenseRef {
+        SenseRef::Id(SenseId::new(s.to_owned()))
+    }
+}
+
+impl Serialize for SenseRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        match self {
+            SenseRef::Id(id) => id.serialize(serializer),
+            SenseRef::Last => serializer.serialize_str("last")
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SenseRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: Deserializer<'de> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "last" => Ok(SenseRef::Last),
+            _ => Ok(SenseRef::Id(SenseId::new(s)))
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     #[serde(rename = "add_entry")]
     AddEntry { 
-        synset : SynsetId,
+        synset : SynsetRef,
         lemma : String,
         pos : PosKey,
         #[serde(default)]
@@ -168,14 +262,14 @@ pub enum Action {
     },
     #[serde(rename = "delete_entry")]
     DeleteEntry {
-        synset : SynsetId,
+        synset : SynsetRef,
         lemma : String,
     },
     #[serde(rename = "move_entry")]
     MoveEntry {
-        synset : SynsetId,
+        synset : SynsetRef,
         lemma : String,
-        target_synset : SynsetId
+        target_synset : SynsetRef
     },
     #[serde(rename = "add_synset")]
     AddSynset {
@@ -189,18 +283,18 @@ pub enum Action {
     },
     #[serde(rename = "delete_synset")]
     DeleteSynset {
-        synset : SynsetId,
+        synset : SynsetRef,
         reason : String,
-        superseded_by : SynsetId
+        superseded_by : SynsetRef
     },
     #[serde(rename = "change_definition")]
     Definition {
-        synset : SynsetId,
+        synset : SynsetRef,
         definition : String
     },
     #[serde(rename = "add_example")]
     AddExample {
-        synset : SynsetId,
+        synset : SynsetRef,
         example : String,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,42 +302,42 @@ pub enum Action {
     },
     #[serde(rename = "delete_example")]
     DeleteExample {
-        synset : SynsetId,
+        synset : SynsetRef,
         number : usize
     },
     #[serde(rename = "add_relation")]
     AddRelation {
-        source : SynsetId,
+        source : SynsetRef,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        source_sense : Option<SenseId>,
+        source_sense : Option<SenseRef>,
         relation : String,
-        target : SynsetId,
+        target : SynsetRef,
         #[serde(default)]    
         #[serde(skip_serializing_if = "Option::is_none")]
-        target_sense : Option<SenseId>
+        target_sense : Option<SenseRef>
     },
     #[serde(rename = "delete_relation")]
     DeleteRelation {
-        source : SynsetId,
+        source : SynsetRef,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        source_sense : Option<SenseId>,
-        target : SynsetId,
+        source_sense : Option<SenseRef>,
+        target : SynsetRef,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        target_sense : Option<SenseId>
+        target_sense : Option<SenseRef>
     },
     #[serde(rename = "reverse_relation")]
     ReverseRelation {
-        source : SynsetId,
+        source : SynsetRef,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        source_sense : Option<SenseId>,
-        target : SynsetId,
+        source_sense : Option<SenseRef>,
+        target : SynsetRef,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
-        target_sense : Option<SenseId>
+        target_sense : Option<SenseRef>
     },
     #[serde(rename = "validate")]
     Validate
@@ -255,21 +349,21 @@ mod tests {
 
     #[test]
     fn test_serialize() {
-        let test_str = "---\n- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n      - bar\n- delete_synset:\n    synset: 00001740-n\n    reason: \"Duplicate (#123)\"\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: \"example%1:09:00::\"\n    target: 00001741-n\n    target_sense: \"target%1:10:00::'\"\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
+        let test_str = "---\n- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n      - bar\n- delete_synset:\n    synset: last\n    reason: \"Duplicate (#123)\"\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: \"example%1:09:00::\"\n    target: 00001741-n\n    target_sense: \"target%1:10:00::'\"\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
         let data = vec![Action::AddEntry {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                 lemma: "bar".to_string(),
                 pos: PosKey::new("n".to_string()),
                 subcat: Vec::new()
             },
             Action::DeleteEntry {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                 lemma: "bar".to_string(),
             },
             Action::MoveEntry {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                 lemma: "bar".to_string(),
-                target_synset: SynsetId::new("00001741-n")
+                target_synset: SynsetRef::id("00001741-n")
             },
             Action::AddSynset {
                     definition: "something or someone".to_string(),
@@ -279,40 +373,40 @@ mod tests {
                     subcats: vec![]
             },
             Action::DeleteSynset {
-                    synset: SynsetId::new("00001740-n"),
+                    synset: SynsetRef::Last,
                     reason: "Duplicate (#123)".to_string(),
-                    superseded_by: SynsetId::new("00001741-n")
+                    superseded_by: SynsetRef::id("00001741-n")
             },
             Action::Definition {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                 definition: "This is a definition".to_string()
             },
             Action::AddExample {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                     example: "This is an example".to_string(),
                     source: Some("This is a source".to_string())
             },
             Action::DeleteExample {
-                synset: SynsetId::new("00001740-n"),
+                synset: SynsetRef::id("00001740-n"),
                     number: 1
             },
             Action::AddRelation {
-                    source: SynsetId::new("00001740-n"),
+                    source: SynsetRef::id("00001740-n"),
                     source_sense: None,
                     relation: "hypernym".to_string(),
-                    target: SynsetId::new("00001741-n"),
+                    target: SynsetRef::id("00001741-n"),
                     target_sense: None
             },
             Action::DeleteRelation {
-                    source: SynsetId::new("00001740-n"),
-                    source_sense: Some(SenseId::new("example%1:09:00::".to_string())),
-                    target: SynsetId::new("00001741-n"),
-                    target_sense: Some(SenseId::new("target%1:10:00::'".to_string()))
+                    source: SynsetRef::id("00001740-n"),
+                    source_sense: Some(SenseRef::id("example%1:09:00::")),
+                    target: SynsetRef::id("00001741-n"),
+                    target_sense: Some(SenseRef::id("target%1:10:00::'"))
             },
             Action::ReverseRelation {
-                    source: SynsetId::new("00001740-n"),
+                    source: SynsetRef::id("00001740-n"),
                     source_sense: None,
-                    target: SynsetId::new("00001741-n"),
+                    target: SynsetRef::id("00001741-n"),
                     target_sense: None
             },
             Action::Validate
@@ -322,4 +416,28 @@ mod tests {
 
         assert_eq!(test_str, gen_str);
     }
+
+    #[test]
+    fn test_last() {
+        let actions = vec![
+            Action::AddSynset {
+                definition: "something or someone".to_string(),
+                lexfile: "noun.animal".to_string(),
+                pos: PosKey::new("n".to_string()),
+                lemmas: vec!["bar".to_string()],
+                subcats: vec![]
+            },
+            Action::AddRelation {
+                source: SynsetRef::Last,
+                source_sense: None,
+                relation: "hypernym".to_string(),
+                target: SynsetRef::id("00001741-n"),
+                target_sense: None
+            }];
+        let mut lexicon = Lexicon::new();
+        lexicon.add_lexfile("noun.animal");
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+    }
+
 }
