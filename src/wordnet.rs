@@ -586,7 +586,7 @@ impl Lexicon {
         self.synsets.values().map(|v| v.0.len()).sum()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn add_lexfile(&mut self, lexfile : &str) {
         self.synsets.insert(lexfile.to_owned(), Synsets::new());
     }
@@ -1132,6 +1132,49 @@ pub struct Sense {
     pub other: Vec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub material: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub event: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub instrument: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub location: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_means_of: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub undergoer: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub property: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub result: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub state: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub destination: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub body_part: Vec<SenseId>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vehicle: Vec<SenseId>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     sent : Vec<String>
 }
 
@@ -1153,6 +1196,20 @@ impl Sense {
             is_exemplified_by: Vec::new(),
             similar: Vec::new(),
             other: Vec::new(),
+            agent : Vec::new(),
+            material : Vec::new(),
+            event : Vec::new(),
+            instrument : Vec::new(),
+            location : Vec::new(),
+            by_means_of : Vec::new(),
+            undergoer : Vec::new(),
+            property : Vec::new(),
+            result : Vec::new(),
+            state : Vec::new(),
+            uses : Vec::new(),
+            destination : Vec::new(),
+            body_part : Vec::new(),
+            vehicle : Vec::new(),
             adjposition: None,
             sent : Vec::new()
         }
@@ -1171,6 +1228,20 @@ impl Sense {
         self.exemplifies.retain(|x| x != target);
         self.is_exemplified_by.retain(|x| x != target);
         self.similar.retain(|x| x != target);
+        self.agent.retain(|x| x != target);
+        self.material.retain(|x| x != target);
+        self.event.retain(|x| x != target);
+        self.instrument.retain(|x| x != target);
+        self.location.retain(|x| x != target);
+        self.by_means_of.retain(|x| x != target);
+        self.undergoer.retain(|x| x != target);
+        self.property.retain(|x| x != target);
+        self.result.retain(|x| x != target);
+        self.state.retain(|x| x != target);
+        self.uses.retain(|x| x != target);
+        self.destination.retain(|x| x != target);
+        self.body_part.retain(|x| x != target);
+        self.vehicle.retain(|x| x != target);
         self.other.retain(|x| x != target);
     }
 
@@ -1184,14 +1255,20 @@ impl Sense {
             },
             None => {}
         };
+        first = write_prop_sense(w, &self.agent, "agent", first)?;
         first = write_prop_sense(w, &self.also, "also", first)?;
         first = write_prop_sense(w, &self.antonym, "antonym", first)?;
+        first = write_prop_sense(w, &self.body_part, "body_part", first)?;
+        first = write_prop_sense(w, &self.by_means_of, "by_means_of", first)?;
         first = write_prop_sense(w, &self.derivation, "derivation", first)?;
+        first = write_prop_sense(w, &self.destination, "destination", first)?;
         first = write_prop_sense(w, &self.domain_region, "domain_region", first)?;
         first = write_prop_sense(w, &self.domain_topic, "domain_topic", first)?;
+        first = write_prop_sense(w, &self.event, "event", first)?;
         first = write_prop_sense(w, &self.exemplifies, "exemplifies", first)?;
         first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
         first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
+        first = write_prop_sense(w, &self.instrument, "instrument", first)?;
         if first {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
@@ -1199,9 +1276,13 @@ impl Sense {
             write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
         }
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
+        write_prop_sense(w, &self.location, "location", first)?;
+        write_prop_sense(w, &self.material, "material", first)?;
         write_prop_sense(w, &self.other, "other", first)?;
         write_prop_sense(w, &self.participle, "participle", first)?;
         write_prop_sense(w, &self.pertainym, "pertainym", first)?;
+        write_prop_sense(w, &self.property, "property", first)?;
+        write_prop_sense(w, &self.result, "result", first)?;
         if !self.sent.is_empty() {
             write!(w, "\n      sent:")?;
             for subcat_id in self.sent.iter() {
@@ -1209,6 +1290,7 @@ impl Sense {
             }
         }
         write_prop_sense(w, &self.similar, "similar", first)?;
+        write_prop_sense(w, &self.state, "state", first)?;
         if !self.subcat.is_empty() {
             write!(w, "\n      subcat:")?;
             for subcat_id in self.subcat.iter() {
@@ -1216,6 +1298,9 @@ impl Sense {
             }
         }
         write!(w, "\n      synset: {}", self.synset.as_str())?;
+        write_prop_sense(w, &self.pertainym, "undergoer", first)?;
+        write_prop_sense(w, &self.uses, "uses", first)?;
+        write_prop_sense(w, &self.vehicle, "vehicle", first)?;
      
         Ok(())
     }
@@ -1233,7 +1318,22 @@ impl Sense {
         self.exemplifies.iter().map(|id| (SenseRelType::Exemplifies, id.clone())).chain(
         self.is_exemplified_by.iter().map(|id| (SenseRelType::IsExemplifiedBy, id.clone())).chain(
         self.similar.iter().map(|id| (SenseRelType::Similar, id.clone())).chain(
-        self.other.iter().map(|id| (SenseRelType::Antonym, id.clone())))))))))))))).collect()
+        self.other.iter().map(|id| (SenseRelType::Antonym, id.clone())).chain(
+        self.agent.iter().map(|id| (SenseRelType::Agent, id.clone())).chain(
+        self.material.iter().map(|id| (SenseRelType::Material, id.clone())).chain(
+        self.event.iter().map(|id| (SenseRelType::Event, id.clone())).chain(
+        self.instrument.iter().map(|id| (SenseRelType::Instrument, id.clone())).chain(
+        self.location.iter().map(|id| (SenseRelType::Location, id.clone())).chain(
+        self.by_means_of.iter().map(|id| (SenseRelType::ByMeansOf, id.clone())).chain(
+        self.undergoer.iter().map(|id| (SenseRelType::Undergoer, id.clone())).chain(
+        self.property.iter().map(|id| (SenseRelType::Property, id.clone())).chain(
+        self.result.iter().map(|id| (SenseRelType::Result, id.clone())).chain(
+        self.state.iter().map(|id| (SenseRelType::State, id.clone())).chain(
+        self.uses.iter().map(|id| (SenseRelType::Uses, id.clone())).chain(
+        self.destination.iter().map(|id| (SenseRelType::Destination, id.clone())).chain(
+        self.body_part.iter().map(|id| (SenseRelType::BodyPart, id.clone())).chain(
+        self.vehicle.iter().map(|id| (SenseRelType::Vehicle, id.clone()))
+                                                    )))))))))))))))))))))))))).collect()
     }
  
     
@@ -1251,6 +1351,21 @@ impl Sense {
             SenseRelType::Exemplifies => self.exemplifies.push(target),
             SenseRelType::IsExemplifiedBy => self.is_exemplified_by.push(target),
             SenseRelType::Similar => self.similar.push(target),
+            SenseRelType::Agent => self.agent.push(target),
+            SenseRelType::Material => self.material.push(target),
+            SenseRelType::Event => self.event.push(target),
+            SenseRelType::Instrument => self.instrument.push(target),
+            SenseRelType::Location => self.location.push(target),
+            SenseRelType::ByMeansOf => self.by_means_of.push(target),
+            SenseRelType::Undergoer => self.undergoer.push(target),
+            SenseRelType::Property => self.property.push(target),
+            SenseRelType::Result => self.result.push(target),
+            SenseRelType::State => self.state.push(target),
+            SenseRelType::Uses => self.uses.push(target),
+            SenseRelType::Destination => self.destination.push(target),
+            SenseRelType::BodyPart => self.body_part.push(target),
+            SenseRelType::Vehicle => self.vehicle.push(target),
+
             SenseRelType::Other => self.other.push(target)
         };
     }

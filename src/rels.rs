@@ -440,6 +440,20 @@ pub enum SenseRelType {
     Exemplifies,
     IsExemplifiedBy,
     Similar,
+    Agent,
+    Material,
+    Event,
+    Instrument,
+    Location,
+    ByMeansOf,
+    Undergoer,
+    Property,
+    Result,
+    State,
+    Uses,
+    Destination,
+    BodyPart,
+    Vehicle,
     Other
 }
 
@@ -458,8 +472,22 @@ impl SenseRelType {
             SenseRelType::Exemplifies => "exemplifies",
             SenseRelType::IsExemplifiedBy => "is_exemplified_by",
             SenseRelType::Similar => "similar",
-            SenseRelType::Other => "other"
-        }
+            SenseRelType::Other => "other",
+            SenseRelType::Agent => "agent",
+            SenseRelType::Material => "material",
+            SenseRelType::Event => "event",
+            SenseRelType::Instrument => "instrument",
+            SenseRelType::Location => "location",
+            SenseRelType::ByMeansOf => "by_means_of",
+            SenseRelType::Undergoer => "undergoer",
+            SenseRelType::Property => "property",
+            SenseRelType::Result => "result",
+            SenseRelType::State => "state",
+            SenseRelType::Uses => "uses",
+            SenseRelType::Destination => "destination",
+            SenseRelType::BodyPart => "body_part",
+            SenseRelType::Vehicle => "vehicle"
+         }
     }
 
     pub fn from(v : &str) -> Option<SenseRelType> {
@@ -477,6 +505,20 @@ impl SenseRelType {
             "is_exemplified_by" => Some(SenseRelType::IsExemplifiedBy),
             "similar" => Some(SenseRelType::Similar),
             "other" => Some(SenseRelType::Other),
+            "agent" => Some(SenseRelType::Agent),
+            "material" => Some(SenseRelType::Material),
+            "event" => Some(SenseRelType::Event),
+            "instrument" => Some(SenseRelType::Instrument),
+            "location" => Some(SenseRelType::Location),
+            "by_means_of" => Some(SenseRelType::ByMeansOf),
+            "undergoer" => Some(SenseRelType::Undergoer),
+            "property" => Some(SenseRelType::Property),
+            "result" => Some(SenseRelType::Result),
+            "state" => Some(SenseRelType::State),
+            "uses" => Some(SenseRelType::Uses),
+            "destination" => Some(SenseRelType::Destination),
+            "body_part" => Some(SenseRelType::BodyPart),
+            "vehicle" => Some(SenseRelType::Vehicle),
             _ => None
         }
     }
@@ -502,7 +544,22 @@ impl SenseRelType {
             SenseRelType::Exemplifies => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::IsExemplifiedBy => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
-            SenseRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s]
+            SenseRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::Agent => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Material => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Event => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Instrument => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Location => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::ByMeansOf => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Undergoer => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Property => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Result => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::State => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Uses => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Destination => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::BodyPart => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+            SenseRelType::Vehicle => vec![&PartOfSpeech::n, &PartOfSpeech::v],
+
         }
     }
 }

@@ -96,13 +96,15 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             Action::AddRelation { source, source_sense, relation, target, target_sense } => {
                 match source_sense {
                     Some(sense) => {
-                        let sense = sense.resolve(&last_sense_id)?;
+                        let sense = sense.resolve(&last_sense_id, wn, 
+                            &source.resolve(&last_synset_id)?)?;
 
                         change_manager::insert_sense_relation(wn, 
                             sense.clone(), 
                             SenseRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}", relation))?,
-                            target_sense.ok_or(format!("Source sense {} with target sense", sense.as_str()))?.resolve(&last_sense_id)?, changes);
+                            target_sense.ok_or(format!("Source sense {} with target sense", sense.as_str()))?.resolve(&last_sense_id,
+                            wn, &target.resolve(&last_synset_id)?)?, changes);
                     },
                     None => {
                         change_manager::insert_rel(wn, 
@@ -116,10 +118,12 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             Action::DeleteRelation { source, source_sense, target, target_sense } => {
                 match source_sense {
                     Some(source_sense) => {
-                        let source_sense = source_sense.resolve(&last_sense_id)?;
+                        let source_sense = source_sense.resolve(&last_sense_id, wn, 
+                            &source.resolve(&last_synset_id)?)?;
+
                         change_manager::delete_sense_rel(wn, 
                             &source_sense,
-                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id)?, changes);
+                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id, wn, &target.resolve(&last_synset_id)?)?, changes);
                     },
                     None => {
                         change_manager::delete_rel(wn, 
@@ -131,11 +135,13 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             Action::ReverseRelation { source, source_sense, target, target_sense } => {
                 match source_sense {
                     Some(source_sense) => {
-                        let source_sense = source_sense.resolve(&last_sense_id)?;
+                        let source_sense = source_sense.resolve(&last_sense_id, wn, 
+                            &source.resolve(&last_synset_id)?)?;
+
                         
                         change_manager::reverse_sense_rel(wn, 
                             &source_sense,
-                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id)?, changes);
+                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id, wn, &target.resolve(&last_synset_id)?)?, changes);
                     },
                     None => {
                         change_manager::reverse_rel(wn, 
@@ -175,7 +181,7 @@ impl SynsetRef {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn id(s : &str) -> SynsetRef {
         SynsetRef::Id(SynsetId::new(s))
     }
@@ -212,19 +218,32 @@ impl<'de> Deserialize<'de> for SynsetRef {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SenseRef {
     Id(SenseId),
+    Lemma(String),
     Last
 }
 
 impl SenseRef {
-    fn resolve(self, last : &Option<SenseId>) -> Result<SenseId, String> {
+    fn resolve(self, last : &Option<SenseId>, wn : &Lexicon, synset : &SynsetId) -> Result<SenseId, String> {
         match self {
             SenseRef::Id(id) => Ok(id),
+            SenseRef::Lemma(lemma) => {
+                wn.entry_by_lemma(&lemma).iter().flat_map(|entry| entry.sense.iter())
+                    .filter(|sense| sense.synset == *synset)
+                    .map(|sense| sense.id.clone())
+                    .next()
+                    .ok_or(format!("No sense with lemma {} in {}", lemma, synset.as_str()))
+            }   
             SenseRef::Last => last.clone().ok_or("No last sense id".to_string())
         }
     }
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn id(s : &str) -> SenseRef {
         SenseRef::Id(SenseId::new(s.to_owned()))
+    }
+
+    #[cfg(test)]
+    fn lemma(s : &str) -> SenseRef {
+        SenseRef::Lemma(s.to_owned())
     }
 }
 
@@ -233,6 +252,9 @@ impl Serialize for SenseRef {
     where S: Serializer {
         match self {
             SenseRef::Id(id) => id.serialize(serializer),
+            SenseRef::Lemma(lemma) => {
+                serializer.serialize_str(&format!("lemma={}", lemma))
+            },
             SenseRef::Last => serializer.serialize_str("last")
         }
     }
@@ -244,7 +266,13 @@ impl<'de> Deserialize<'de> for SenseRef {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
             "last" => Ok(SenseRef::Last),
-            _ => Ok(SenseRef::Id(SenseId::new(s)))
+            _ => {
+                if s.starts_with("lemma=") {
+                    Ok(SenseRef::Lemma(s[6..].to_owned()))
+                } else {
+                    Ok(SenseRef::Id(SenseId::new(s)))
+                }
+            }
         }
     }
 }
@@ -440,4 +468,41 @@ mod tests {
 
     }
 
+    #[test]
+    fn test_sense_by_lemma() {
+                let mut lexicon = Lexicon::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal");
+        let ssid1 = change_manager::add_synset(&mut lexicon, 
+            "def 1".to_string(), 
+            "noun.animal".to_string(), 
+            PosKey::new("n".to_string()), 
+            None, 
+            &mut change_list).expect("Could not create synset");
+        change_manager::add_entry(&mut lexicon, 
+            ssid1.clone(), 
+            "bar".to_owned(), 
+            PosKey::new("n".to_string()), 
+            Vec::new(), &mut change_list);
+        let ssid2 = change_manager::add_synset(&mut lexicon, 
+            "def 2".to_string(), 
+            "noun.animal".to_string(), 
+            PosKey::new("n".to_string()), 
+            None, 
+            &mut change_list).expect("Could not create synset");
+        change_manager::add_entry(&mut lexicon, 
+            ssid2.clone(), 
+            "baz".to_owned(), 
+            PosKey::new("n".to_string()), 
+            Vec::new(), &mut change_list);
+        let actions = vec![
+            Action::AddRelation {
+                source: SynsetRef::Id(ssid1),
+                target: SynsetRef::Id(ssid2),
+                relation: "antonym".to_string(),
+                source_sense: Some(SenseRef::lemma("bar")),
+                target_sense: Some(SenseRef::lemma("baz"))
+        }];
+    apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+    }
 }
