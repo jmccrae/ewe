@@ -98,13 +98,16 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                     Some(sense) => {
                         let sense = sense.resolve(&last_sense_id, wn, 
                             &source.resolve(&last_synset_id)?)?;
+                        let target_sense = target_sense
+                            .ok_or(format!("Source sense {} with target sense", sense.as_str()))?
+                            .resolve(&last_sense_id, wn, 
+                                &target.resolve(&last_synset_id)?)?;
 
                         change_manager::insert_sense_relation(wn, 
                             sense.clone(), 
                             SenseRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}", relation))?,
-                            target_sense.ok_or(format!("Source sense {} with target sense", sense.as_str()))?.resolve(&last_sense_id,
-                            wn, &target.resolve(&last_synset_id)?)?, changes);
+                            target_sense, changes);
                     },
                     None => {
                         change_manager::insert_rel(wn, 

@@ -1298,7 +1298,7 @@ impl Sense {
             }
         }
         write!(w, "\n      synset: {}", self.synset.as_str())?;
-        write_prop_sense(w, &self.pertainym, "undergoer", first)?;
+        write_prop_sense(w, &self.undergoer, "undergoer", first)?;
         write_prop_sense(w, &self.uses, "uses", first)?;
         write_prop_sense(w, &self.vehicle, "vehicle", first)?;
      
