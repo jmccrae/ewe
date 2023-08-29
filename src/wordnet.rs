@@ -1470,6 +1470,10 @@ pub struct Synset {
     #[serde(default)]
     pub similar : Vec<SynsetId>,
     #[serde(default)]
+    pub feminine : Vec<SynsetId>,
+    #[serde(default)]
+    pub masculine : Vec<SynsetId>,
+    #[serde(default)]
     other : Vec<SynsetId>
 }
 
@@ -1499,6 +1503,8 @@ impl Synset {
             mero_substance : Vec::new(),
             meronym : Vec::new(),
             similar : Vec::new(),
+            feminine : Vec::new(),
+            masculine : Vec::new(),
             other : Vec::new()
         }
     }
@@ -1520,6 +1526,8 @@ impl Synset {
         self.mero_substance.retain(|x| x != target);
         self.meronym.retain(|x| x != target);
         self.similar.retain(|x| x != target);
+        self.feminine.retain(|x| x != target);
+        self.masculine.retain(|x| x != target);
         self.other.retain(|x| x != target);
     }
 
@@ -1606,6 +1614,16 @@ impl Synset {
                     self.similar.push(target_id.clone());
                 }
             },
+            YamlSynsetRelType::Feminine => {
+                if !self.feminine.iter().any(|id| id == target_id) {
+                    self.feminine.push(target_id.clone());
+                }
+            },
+            YamlSynsetRelType::Masculine => {
+                if !self.masculine.iter().any(|id| id == target_id) {
+                    self.masculine.push(target_id.clone());
+                }
+            },
             YamlSynsetRelType::Other => {
                 if !self.other.iter().any(|id| id == target_id) {
                     self.other.push(target_id.clone());
@@ -1634,6 +1652,7 @@ impl Synset {
             }
         }
         write_prop_synset(w, &self.exemplifies, "exemplifies")?;
+        write_prop_synset(w, &self.feminine, "feminine")?;
         write_prop_synset(w, &self.hypernym, "hypernym")?;
         match &self.ili {
             Some(s) => { 
@@ -1649,6 +1668,7 @@ impl Synset {
         if self.members.is_empty() {
             write!(w, " []")?;
         }
+        write_prop_synset(w, &self.masculine, "masculine")?;
         write_prop_synset(w, &self.mero_location, "mero_location")?;
         write_prop_synset(w, &self.mero_member, "mero_member")?;
         write_prop_synset(w, &self.mero_part, "mero_part")?;
@@ -1723,6 +1743,12 @@ impl Synset {
         }
         for s in self.similar.iter() {
             links_from.push((SynsetRelType::Similar, s.clone()));
+        }
+        for s in self.feminine.iter() {
+            links_from.push((SynsetRelType::Feminine, s.clone()));
+        }
+        for s in self.masculine.iter() {
+            links_from.push((SynsetRelType::Masculine, s.clone()));
         }
         for s in self.other.iter() {
             links_from.push((SynsetRelType::Other, s.clone()));

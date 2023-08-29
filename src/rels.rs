@@ -61,6 +61,8 @@ pub enum SynsetRelType {
     MeroSubstance,
     Meronym,
     Similar,
+    Feminine,
+    Masculine,
     Other
 //    Patient,
 //    RestrictedBy,
@@ -138,6 +140,8 @@ impl SynsetRelType {
             SynsetRelType::Meronym => "meronym",
             SynsetRelType::Similar => "similar",
             SynsetRelType::Other => "other",
+            SynsetRelType::Feminine => "feminine",
+            SynsetRelType::Masculine => "masculine",
             //SynsetRelType::Patient => "patient",
             //SynsetRelType::RestrictedBy => "restricted_by",
             //SynsetRelType::Restricts => "restricts",
@@ -225,6 +229,8 @@ impl SynsetRelType {
             //"subevent" => Some(SynsetRelType::Subevent),
             //"is_subevent_of" => Some(SynsetRelType::IsSubeventOf),
             //"antonym" => Some(SynsetRelType::Antonym),
+            "feminine" => Some(SynsetRelType::Feminine),
+            "masculine" => Some(SynsetRelType::Masculine),
             _ => None
         }
     }
@@ -260,6 +266,8 @@ impl SynsetRelType {
             SynsetRelType::MeroSubstance => (true, YamlSynsetRelType::MeroSubstance),
             SynsetRelType::Meronym => (true, YamlSynsetRelType::Meronym),
             SynsetRelType::Similar => (true, YamlSynsetRelType::Similar),
+            SynsetRelType::Feminine => (true, YamlSynsetRelType::Feminine),
+            SynsetRelType::Masculine => (true, YamlSynsetRelType::Masculine),
             SynsetRelType::Other => (true, YamlSynsetRelType::Other),
         }
     }
@@ -302,6 +310,8 @@ impl SynsetRelType {
             SynsetRelType::MeroSubstance => vec![&PartOfSpeech::n],
             SynsetRelType::Meronym => vec![&PartOfSpeech::n],
             SynsetRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
+            SynsetRelType::Feminine => vec![&PartOfSpeech::n],
+            SynsetRelType::Masculine => vec![&PartOfSpeech::n],
             SynsetRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s]
         }
     }
@@ -338,6 +348,8 @@ pub enum YamlSynsetRelType {
     MeroSubstance,
     Meronym,
     Similar,
+    Feminine,
+    Masculine,
     Other
     //Patient,
     //Restricts,
