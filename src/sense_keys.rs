@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use crate::wordnet::{Lexicon, Synset, SynsetId, Entry, Sense, SenseId, PartOfSpeech};
+use crate::wordnet::{Lexicon, Synset, SynsetId, Sense, SenseId, PartOfSpeech};
 use regex::Regex;
 use std::cmp::max;
 
@@ -62,16 +62,18 @@ lazy_static! {
     static ref SENSE_ID_LEX_ID : Regex = Regex::new("^.*%\\d:\\d\\d:(\\d\\d):.*$").unwrap();
 }
 
-fn gen_lex_id(e : &Entry) -> i32 {
+fn gen_lex_id(wn : &Lexicon, lemma : &str) -> i32 {
     let mut max_id = 0;
-    for s2 in e.sense.iter() {
-        for m in SENSE_ID_LEX_ID.captures_iter(s2.id.as_str()) {
-            match m[1].parse() {
-                Ok(id2) => {
-                    max_id = max(max_id, id2);
-                },
-                Err(_) => {
-                    eprintln!("cannot parse sense id {}", s2.id.as_str());
+    for e in wn.entry_by_lemma_ignore_case(lemma) {
+        for s2 in e.sense.iter() {
+            for m in SENSE_ID_LEX_ID.captures_iter(s2.id.as_str()) {
+                match m[1].parse() {
+                    Ok(id2) => {
+                        max_id = max(max_id, id2);
+                    },
+                    Err(_) => {
+                        eprintln!("cannot parse sense id {}", s2.id.as_str());
+                    }
                 }
             }
         }
@@ -127,7 +129,7 @@ pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
         Some(synset) => {
             for entry in wn.entry_by_lemma(lemma) {
                 if entry.sense.iter().any(|sense| sense.synset == *synset_id) {
-                    return Some(get_sense_key(wn, lemma, entry, sense_key,
+                    return Some(get_sense_key(wn, lemma, sense_key,
                                               synset, synset_id));
                 }
             }
@@ -140,7 +142,7 @@ pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
 /// Calculate the sense key of an entry
 /// Pass `None` for `sense_key` for new senses
 pub fn get_sense_key(wn : &Lexicon, lemma : &str,
-                 entry : &Entry, sense_key : Option<&SenseId>,
+                 sense_key : Option<&SenseId>,
                  synset : &Synset, synset_id : &SynsetId) -> SenseId {
     let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let ss_type = synset.part_of_speech.ss_type();
@@ -150,7 +152,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
         .unwrap_or(99);
     let lex_id = match sense_key {
         Some(sense_key) => extract_lex_id(sense_key),
-        None => gen_lex_id(entry)
+        None => gen_lex_id(wn, &lemma)
     };
     let (head_word, head_id) = if synset.part_of_speech == PartOfSpeech::s {
         get_head_word(wn, synset)
@@ -166,6 +168,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
 mod tests {
     use super::*;
     use crate::wordnet::PosKey;
+    use crate::change_manager::{add_entry, ChangeList};
 
     #[test]
     fn test_sense_key_1() {
@@ -177,7 +180,7 @@ mod tests {
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
         assert_eq!(SenseId::new("foot%1:08:01::".to_owned()),
-                   get_sense_key(&lexicon, "foot", &entry, None, &synset,
+                   get_sense_key(&lexicon, "foot", None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
 
@@ -195,7 +198,7 @@ mod tests {
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
         assert_eq!(SenseId::new("foot%1:08:02::".to_owned()),
-                   get_sense_key(&lexicon, "foot", &entry, None, &synset,
+                   get_sense_key(&lexicon, "foot", None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
 
@@ -225,9 +228,37 @@ mod tests {
         lexicon.insert_synset("adj.all".to_string(),
             SynsetId::new("00000002-s"), synset2.clone());
         assert_eq!(SenseId::new("scorching%5:00:01:hot:01".to_owned()),
-                   get_sense_key(&lexicon, "scorching", &entry2, 
+                   get_sense_key(&lexicon, "scorching", 
                                  Some(&SenseId::new("scorching%5:00:01:???:".to_owned())),
                                  &synset2,
                                  &SynsetId::new("00000002-s")));
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn test_gen_id() {
+        let mut lexicon = Lexicon::new();
+        let synset1 = Synset::new(PartOfSpeech::n);
+        let synset2 = Synset::new(PartOfSpeech::n);
+        let ssid1 = SynsetId::new("00000001-n");
+        let ssid2 = SynsetId::new("00000002-n");
+        lexicon.insert_synset("adj.all".to_string(),
+            ssid1.clone(), synset1.clone());
+        lexicon.insert_synset("adj.all".to_string(),
+            ssid2.clone(), synset2.clone());
+    
+        let mut change_list = ChangeList::new();
+        add_entry(&mut lexicon,
+            ssid1, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+        add_entry(&mut lexicon,
+            ssid2.clone(), "Hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+        add_entry(&mut lexicon,
+            ssid2, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+
+        let entry_hot = lexicon.entry_by_lemma("hot");
+        let entry_Hot = lexicon.entry_by_lemma("Hot");
+        
+        assert_ne!(entry_hot[0].sense[0].id, entry_Hot[0].sense[0].id);
+        assert_ne!(entry_hot[0].sense[1].id, entry_Hot[0].sense[0].id);
     }
 }

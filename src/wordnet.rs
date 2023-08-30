@@ -166,6 +166,13 @@ impl Lexicon {
         }
     }
 
+    /// Get the entry data for a lemma, ignoring case 
+    pub fn entry_by_lemma_ignore_case(&self, lemma : &str) -> Vec<&Entry> {
+        self.entries.iter()
+            .flat_map(|(_,v)| v.entry_by_lemma_ignore_case(lemma))
+            .collect()
+    }
+
     /// Get the entry data (with the part of speech key) for a lemma
     pub fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
         match lemma.chars().nth(0) {
@@ -811,6 +818,11 @@ impl Entries {
 
     fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
         self.0.get(lemma).iter().flat_map(|x| x.iter()).collect()
+    }
+
+    fn entry_by_lemma_ignore_case(&self, lemma : &str) -> Vec<&Entry> {
+        self.0.iter().filter(|(k,_)| k.to_lowercase() == lemma.to_lowercase()).
+            flat_map(|(_,v)| v.values()).collect()
     }
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {

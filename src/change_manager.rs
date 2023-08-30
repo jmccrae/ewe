@@ -99,7 +99,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
                     match wn.synset_by_id(&synset_id) {
                         Some(synset) => {
                             let sense_id = 
-                                    get_sense_key(wn, &lemma, e, None, synset, &synset_id);
+                                    get_sense_key(wn, &lemma, None, synset, &synset_id);
                             let mut sense = Sense::new(sense_id.clone(),
                                     synset_id.clone());
                             sense.subcat = subcat;
@@ -116,7 +116,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
             match wn.synset_by_id(&synset_id) {
                 Some(synset) => {
                     let e = Entry::new();
-                    let sense_id = get_sense_key(wn, &lemma, &e, None, synset, &synset_id);
+                    let sense_id = get_sense_key(wn, &lemma, None, synset, &synset_id);
                     let mut sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
                     sense.subcat = subcat;
@@ -268,7 +268,7 @@ fn new_id(wn : &Lexicon, pos : &PartOfSpeech, definition : &str) -> Result<Synse
     }
     let nid = SynsetId::new_owned(format!("8{:07}-{}", key, pos.value()));
     match wn.synset_by_id(&nid) {
-        Some(_) => Err(format!("Duplicate Synset ID. This is likely due to a duplicate definition")),
+        Some(ss) => Err(format!("Duplicate Synset ID. This is likely due to a duplicate definition ({} \"{}\"/\"{}\")", nid.as_str(), ss.definition[0], definition)),
         None => Ok(nid)
     }
 }
