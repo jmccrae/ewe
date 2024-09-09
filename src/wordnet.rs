@@ -653,15 +653,7 @@ lazy_static! {
 
 fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
 
-    let s2 : String = if s.starts_with("Seen in this light, it is the spectrality of the figure") {
-        format!("\"{}\"", s.chars().map(|c| {
-            if c == '"' {
-                "\\\"".to_string()
-            } else {
-                c.to_string()
-            }
-        }).collect::<Vec<String>>().join(""))
-    } else if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
+    let s2 : String = if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
         || s.starts_with("'") || s == "true" || s == "false" 
         || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
         || s.ends_with(" ") || s.contains(": ")
@@ -671,40 +663,17 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
     } else {
         s.to_owned()
     }; 
-    if s2.len() + indent > YAML_LINE_LENGTH {
+    if s2.chars().count() + indent > YAML_LINE_LENGTH {
         let mut s3 = String::new();
         let mut size = initial_indent;
         for s4 in s2.split(" ") {
-            if size > indent && s3.len() > 0 {
+            if size > indent && s3.chars().count() > 0 {
                 s3.push_str(" ");
                 size += 1;
             }
-            // Super hacks for Python compat
-            if s4 == "B\\xE1n\\xE1thy," {
-                s3.push_str("B\\xE1n\\xE1\\\n");
-                for _ in 0..indent {
-                    s3.push_str(" ");
-                }
-                s3.push_str("thy,");
-                size = indent + 4;
-            } else if s4 == "Djarkatch\\xE9" {
-                s3.push_str("Djarkatch\\xE9\\\n");
-                for _ in 0..indent {
-                    s3.push_str(" ");
-                }
-                s3.push_str("\\");
-                size = indent + 2;
-            } else if s4 == "b\\xE9chamel\\\".\"" {
-                s3.push_str("b\\xE9chamel\\\"\\\n");
-                for _ in 0..indent {
-                    s3.push_str(" ");
-                }
-                s3.push_str(".\"");
-                size = indent +2;
-            }
             // Very odd rule in the Python line splitting algorithm
-            else if s2.starts_with("\"") &&
-                s4.len() + size > YAML_LINE_LENGTH &&
+            if s2.starts_with("\"") &&
+                s4.chars().count() + size > YAML_LINE_LENGTH &&
                 (s4.contains("\\x") || s4.contains("\\u")
                  || s4.contains("\\\"")) {
                 let mut indices : Vec<usize> =s4.find("\\x").iter().chain(
@@ -721,7 +690,8 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                     } else /*s7.starts_with("\\\"")*/ {
                         2
                     };
-                    if s6.len() + n + size > YAML_LINE_LENGTH {
+                    let s6_len = s6.chars().count();
+                    if s6_len + n + size > YAML_LINE_LENGTH {
                         s3.push_str(s6);
                         if n == 2 {
                             s3.push_str("\n\\");
@@ -742,15 +712,15 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                         }
                     } else {
                         s3.push_str(s6);
-                        size += s6.len();
+                        size += s6.chars().count();
                         s5 = s7;
                     }
                 }
                 s3.push_str(s5);
-                size += s5.len();
+                size += s5.chars().count();
             } else {
                 s3.push_str(&s4);
-                size += s4.len();
+                size += s4.chars().count();
                 if size > YAML_LINE_LENGTH {
                     if s3.starts_with("\"") {
                         s3.push_str("\\\n");
@@ -1280,13 +1250,13 @@ impl Sense {
         first = write_prop_sense(w, &self.exemplifies, "exemplifies", first)?;
         first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
         first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
-        first = write_prop_sense(w, &self.instrument, "instrument", first)?;
         if first {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
         } else {
             write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
         }
+        write_prop_sense(w, &self.instrument, "instrument", first)?;
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
         write_prop_sense(w, &self.location, "location", first)?;
         write_prop_sense(w, &self.material, "material", first)?;
@@ -2140,6 +2110,48 @@ partOfSpeech: n";
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
+
+    #[test]
+    fn test_line_align() {
+        let input = "00001740-a:
+  attribute:
+  - 05207437-n
+  - 05624029-n
+  definition:
+  - (usually followed by ‘to’) having the necessary means or skill or know-how
+    or authority to do something
+  example:
+  - able to swim
+  - she was able to program her computer
+  - we were at last able to buy a car
+  - able to get a grant for the project
+  ili: i1
+  members:
+  - able
+  partOfSpeech: a";
+        let output = "00001740-a:
+  attribute:
+  - 05207437-n
+  - 05624029-n
+  definition:
+  - (usually followed by ‘to’) having the necessary means or skill or know-how or
+    authority to do something
+  example:
+  - able to swim
+  - she was able to program her computer
+  - we were at last able to buy a car
+  - able to get a grant for the project
+  ili: i1
+  members:
+  - able
+  partOfSpeech: a
+";
+        let synsets = serde_yaml::from_str::<Synsets>(input).unwrap();
+        let mut buf = Vec::new();
+        synsets.save(&mut buf).unwrap();
+        assert_eq!(output, String::from_utf8(buf).unwrap());
+    }
+
 
 //    #[test]
 //    fn test_unicode_convert() {

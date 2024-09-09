@@ -167,7 +167,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wordnet::PosKey;
+    use crate::wordnet::{PosKey, Entry};
     use crate::change_manager::{add_entry, ChangeList};
 
     #[test]
