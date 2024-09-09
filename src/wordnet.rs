@@ -1925,6 +1925,14 @@ impl PartOfSpeech {
     //    }
     //}
 
+    pub fn equals_pos(&self, pos2 : &PartOfSpeech) -> bool {
+        match self {
+            PartOfSpeech::a => pos2 == &PartOfSpeech::a || pos2 == &PartOfSpeech::s,
+            PartOfSpeech::s => pos2 == &PartOfSpeech::a || pos2 == &PartOfSpeech::s,
+            _ => self == pos2
+        }
+    }
+
     pub fn ss_type(&self) -> u32 {
         match self {
             PartOfSpeech::n => 1,

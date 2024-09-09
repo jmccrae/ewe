@@ -215,7 +215,7 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
         let (target_synset_id, target_synset) = enter_synset(wn, "target ");
         match wn.pos_for_entry_synset(&lemma, &synset_id) {
             Some(pos) => {
-                if synset.part_of_speech == target_synset.part_of_speech {
+                if synset.part_of_speech.equals_pos(&target_synset.part_of_speech) {
                     change_manager::move_entry(wn, synset_id, target_synset_id,
                                                lemma, pos, change_list);
                 } else {
