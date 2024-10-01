@@ -201,7 +201,7 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
             Vec::new()
         };
         change_manager::add_entry(wn, synset_id, 
-                                  lemma, pos, subcat, change_list); 
+                                  lemma, pos, subcat, None, change_list); 
     } else if action == "D" {
         match wn.pos_for_entry_synset(&lemma, &synset_id) {
             Some(pos) => {
@@ -285,7 +285,7 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
                     };
                     if lemma.len() > 0 {
                         change_manager::add_entry(wn, new_id.clone(),
-                            lemma, pos.clone(), subcat, change_list);
+                            lemma, pos.clone(), subcat, None, change_list);
                     } else {
                         break;
                     }

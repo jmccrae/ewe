@@ -13,7 +13,7 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
         match action {
             Action::AddEntry { synset, lemma, pos, subcat } => {
                 last_sense_id = change_manager::add_entry(wn, synset.resolve(&last_synset_id)?, 
-                    lemma, pos, subcat, changes);
+                    lemma, pos, subcat, None, changes);
             },
             Action::DeleteEntry { synset, lemma } => {
                 match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?) {
@@ -60,6 +60,7 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                                         new_id.clone(), 
                                         lemma, pos.clone(), 
                                         Vec::new(),
+                                        None,
                                         changes);
                                 }
                             } else {
@@ -68,6 +69,7 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                                         new_id.clone(), 
                                         lemma, pos.clone(), 
                                         subcat,
+                                        None,
                                         changes);
                                 }
                             }
@@ -164,6 +166,9 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                     println!("{} validation errors", errors.len());
                 }
 
+            },
+            Action::FixTransitivity => {
+                change_manager::fix_indirect_relations(wn, changes);
             }
         }
     }
@@ -371,7 +376,9 @@ pub enum Action {
         target_sense : Option<SenseRef>
     },
     #[serde(rename = "validate")]
-    Validate
+    Validate,
+    #[serde(rename = "fix_transitivity")]
+    FixTransitivity
 }
 
 #[cfg(test)]
@@ -486,7 +493,7 @@ mod tests {
             ssid1.clone(), 
             "bar".to_owned(), 
             PosKey::new("n".to_string()), 
-            Vec::new(), &mut change_list);
+            Vec::new(), None, &mut change_list);
         let ssid2 = change_manager::add_synset(&mut lexicon, 
             "def 2".to_string(), 
             "noun.animal".to_string(), 
@@ -497,7 +504,7 @@ mod tests {
             ssid2.clone(), 
             "baz".to_owned(), 
             PosKey::new("n".to_string()), 
-            Vec::new(), &mut change_list);
+            Vec::new(), None, &mut change_list);
         let actions = vec![
             Action::AddRelation {
                 source: SynsetRef::Id(ssid1),

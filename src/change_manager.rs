@@ -75,6 +75,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
                  lemma : String, 
                  synset_pos : PosKey,
                  subcat : Vec<String>,
+                 old_sense_id : Option<&SenseId>,
                  change_list : &mut ChangeList) -> Option<SenseId> {
     println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
@@ -99,7 +100,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
                     match wn.synset_by_id(&synset_id) {
                         Some(synset) => {
                             let sense_id = 
-                                    get_sense_key(wn, &lemma, None, synset, &synset_id);
+                                    get_sense_key(wn, &lemma, old_sense_id, synset, &synset_id);
                             let mut sense = Sense::new(sense_id.clone(),
                                     synset_id.clone());
                             sense.subcat = subcat;
@@ -116,7 +117,7 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
             match wn.synset_by_id(&synset_id) {
                 Some(synset) => {
                     let e = Entry::new();
-                    let sense_id = get_sense_key(wn, &lemma, None, synset, &synset_id);
+                    let sense_id = get_sense_key(wn, &lemma, old_sense_id, synset, &synset_id);
                     let mut sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
                     sense.subcat = subcat;
@@ -180,9 +181,18 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
     let subcat : Vec<String> = wn.get_sense(&lemma, &synset_id).get(0)
         .map(|s| s.subcat.clone())
         .unwrap_or(Vec::new());
+    let old_sense_id = match wn.get_sense(&lemma, &synset_id).iter().next() {
+        Some(sense) => if wn.lex_name_for(&synset_id) == wn.lex_name_for(&target_synset_id) {
+                Some(sense.id.clone())
+        } else {
+            None
+        },
+        None => None
+    };
     delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
     match add_entry(wn, target_synset_id, 
-                    lemma.clone(), pos.clone(), subcat, change_list) {
+                    lemma.clone(), pos.clone(), subcat, 
+                    old_sense_id.as_ref(), change_list) {
         Some(sense_id) => {
             for (rel, target) in links_from {
                 wn.add_sense_rel(&sense_id, rel, &target);
@@ -383,5 +393,54 @@ pub fn delete_ex(wn : &mut Lexicon, synset_id : &SynsetId, idx : usize,
         None => {
             eprintln!("Adding example to non-existant synset");
         }
+    }
+}
+
+/// Remove all indirect relations
+pub fn fix_indirect_relations(wn : &mut Lexicon, change_list : &mut ChangeList) {
+    let mut to_delete = Vec::new();
+    for (synset_id, synset) in wn.synsets() {
+        for target in synset.hypernym.iter() {
+            match wn.synset_by_id(target) {
+                Some(synset2) => {
+                    for target2 in synset2.hypernym.iter() {
+                        if synset.hypernym.iter().any(|t| t == target2) {
+                            to_delete.push((synset_id.clone(), target2.clone()));
+                        }
+                    }
+                },
+                None => {}
+            }
+        }
+    }
+    for (source, target2) in to_delete {
+        delete_rel(wn, &source, &target2, change_list);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_move_entry() {
+        let mut wn = Lexicon::new();
+        let mut change_list = ChangeList::new();
+        let synset_id = add_synset(&mut wn, "test".to_owned(), "noun.object".to_owned(), 
+            PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
+        let target_synset_id = add_synset(&mut wn, "another test".to_owned(), "noun.object".to_owned(), 
+            PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
+        let synset3 = add_synset(&mut wn, "third test".to_owned(), "noun.object".to_owned(), 
+            PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
+        let lemma = "test".to_owned();
+        let pos = PosKey::new("n".to_owned());
+        add_entry(&mut wn, synset_id.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list);
+        add_entry(&mut wn, synset3.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list);
+        let sense = wn.entry_by_lemma("test").iter().next().unwrap().sense.iter().next().unwrap(); 
+        assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
+        move_entry(&mut wn, synset_id.clone(), target_synset_id.clone(), lemma.clone(), pos.clone(), &mut change_list);
+        let sense = wn.entry_by_lemma("test").iter().next().unwrap().sense.iter()
+            .filter(|sense| sense.synset == target_synset_id).next().unwrap();
+        assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
     }
 }

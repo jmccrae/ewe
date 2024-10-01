@@ -63,7 +63,7 @@ lazy_static! {
 }
 
 fn gen_lex_id(wn : &Lexicon, lemma : &str) -> i32 {
-    let mut max_id = 0;
+    let mut max_id = -1;
     for e in wn.entry_by_lemma_ignore_case(lemma) {
         for s2 in e.sense.iter() {
             for m in SENSE_ID_LEX_ID.captures_iter(s2.id.as_str()) {
@@ -78,6 +78,7 @@ fn gen_lex_id(wn : &Lexicon, lemma : &str) -> i32 {
             }
         }
     }
+    println!("gen_lex_id {} = {}", lemma, max_id + 1);
     max_id + 1
 }
         
@@ -144,7 +145,6 @@ pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
 pub fn get_sense_key(wn : &Lexicon, lemma : &str,
                  sense_key : Option<&SenseId>,
                  synset : &Synset, synset_id : &SynsetId) -> SenseId {
-    let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let ss_type = synset.part_of_speech.ss_type();
     let lex_filenum = wn.lex_name_for(synset_id).and_then(|lex_name|
             LEX_FILENUMS.get(lex_name.as_str()))
@@ -154,6 +154,7 @@ pub fn get_sense_key(wn : &Lexicon, lemma : &str,
         Some(sense_key) => extract_lex_id(sense_key),
         None => gen_lex_id(wn, &lemma)
     };
+    let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let (head_word, head_id) = if synset.part_of_speech == PartOfSpeech::s {
         get_head_word(wn, synset)
     } else {
@@ -179,7 +180,7 @@ mod tests {
             PosKey::new("n".to_string()), entry.clone());
         lexicon.insert_synset("noun.body".to_string(),
             SynsetId::new("00001740-n"), synset.clone());
-        assert_eq!(SenseId::new("foot%1:08:01::".to_owned()),
+        assert_eq!(SenseId::new("foot%1:08:00::".to_owned()),
                    get_sense_key(&lexicon, "foot", None, &synset,
                                  &SynsetId::new("00001740-n")));
     }
@@ -249,11 +250,11 @@ mod tests {
     
         let mut change_list = ChangeList::new();
         add_entry(&mut lexicon,
-            ssid1, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+            ssid1, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
         add_entry(&mut lexicon,
-            ssid2.clone(), "Hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+            ssid2.clone(), "Hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
         add_entry(&mut lexicon,
-            ssid2, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), &mut change_list);
+            ssid2, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
 
         let entry_hot = lexicon.entry_by_lemma("hot");
         let entry_Hot = lexicon.entry_by_lemma("Hot");
