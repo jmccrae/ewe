@@ -502,6 +502,22 @@ impl Lexicon {
         }
     }
 
+    /// Get the list of pronunications of an entry
+    pub fn get_pronunciations(&self, lemma : &str, pos : &PosKey) -> Vec<Pronunciation> {
+        match self.entries.get(&entry_key(&lemma)) {
+            Some(e) => e.get_pronunciations(lemma, pos),
+            None => Vec::new()
+        }
+    }
+
+    /// Add a pronunciation to an entry
+    pub fn add_pronunciation(&mut self, lemma : &str, pos : &PosKey, pronunciation : Pronunciation) {
+        match self.entries.get_mut(&entry_key(&lemma)) {
+            Some(e) => e.add_pronunciation(lemma, pos, pronunciation),
+            None => {}
+        }
+    }
+
     /// Add a deprecation note
     pub fn deprecate(&mut self, synset : &SynsetId, supersede : &SynsetId, 
                      reason : String) {
@@ -963,6 +979,30 @@ impl Entries {
                 Some(e) => {
                     if !e.form.contains(&form) {
                         e.form.push(form);
+                    }
+                },
+                None => {}
+            },
+            None => {}
+        }
+    }
+
+    pub fn get_pronunciations(&self, lemma : &str, pos : &PosKey) -> Vec<Pronunciation> {
+        match self.0.get(lemma) {
+            Some(m) => match m.get(pos) {
+                Some(e) => e.pronunciation.iter().map(|x| x.clone()).collect(),
+                None => Vec::new()
+            },
+            None => Vec::new()
+        }
+    }
+
+    pub fn add_pronunciation(&mut self, lemma : &str, pos : &PosKey, pronunciation : Pronunciation) {
+        match self.0.get_mut(lemma) {
+            Some(m) => match m.get_mut(pos) {
+                Some(e) => {
+                    if !e.pronunciation.iter().any(|x| *x == pronunciation) {
+                        e.pronunciation.push(pronunciation);
                     }
                 },
                 None => {}

@@ -178,6 +178,7 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
     let links_from = wn.sense_links_from(&lemma, &pos, &synset_id);
     let links_to   = wn.sense_links_to(&lemma, &pos, &synset_id);
     let forms = wn.get_forms(&lemma, &pos);
+    let pronunciations = wn.get_pronunciations(&lemma, &pos);
     let subcat : Vec<String> = wn.get_sense(&lemma, &synset_id).get(0)
         .map(|s| s.subcat.clone())
         .unwrap_or(Vec::new());
@@ -208,6 +209,9 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
     for form in forms {
         wn.add_form(&lemma, &pos, form);
     }
+    for pron in pronunciations {
+        wn.add_pronunciation(&lemma, &pos, pron);
+    }
 }
 
 /// Delete a synset
@@ -231,13 +235,28 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
         Some(supersede_id) => {
             match wn.synset_by_id(synset_id) {
                 Some(ss) => {
+                    let mut hyp_targets = Vec::new();
                     for (rel, target) in ss.links_from() {
                         delete_rel(wn, synset_id, &target, change_list);
-                        wn.add_rel(supersede_id, rel, &target);
+                        if rel == SynsetRelType::Hypernym {
+                            hyp_targets.push(target.clone());
+                        } else {
+                            wn.add_rel(supersede_id, rel, &target);
+                        }
                     }
+                    let mut hyp_sources = Vec::new();
                     for (rel, source) in wn.links_to(synset_id) {
                         delete_rel(wn, &source, synset_id, change_list);
-                        wn.add_rel(&source, rel, supersede_id);
+                        if rel == SynsetRelType::Hypernym {
+                            hyp_sources.push(source.clone());
+                        } else {
+                            wn.add_rel(&source, rel, supersede_id);
+                        }
+                    }
+                    for source in hyp_sources {
+                        for target in hyp_targets.iter() {
+                            wn.add_rel(&source, SynsetRelType::Hypernym, target);
+                        }
                     }
                 },
                 None => {}
