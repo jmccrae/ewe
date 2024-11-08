@@ -4,3 +4,7 @@ src/.wordnet.rs.swp
 wn.xml
 wn2.xml
 *.swp
+yaml
+yaml2
+apply_python_yaml.py
+deprecations.csv

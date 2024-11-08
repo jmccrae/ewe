@@ -248,9 +248,10 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
         }
         let (supersede_synset_id, _) = 
             enter_synset(wn, "superseding ");
+        
         change_manager::delete_synset(wn, 
                                       &synset_id, Some(&supersede_synset_id),
-                                      reason, true, change_list);
+                                      reason, change_list);
     } else /*if mode == "a"*/ {
         let definition = input("Definition: ");
         let lexfile = input("Lexicographer file: ");

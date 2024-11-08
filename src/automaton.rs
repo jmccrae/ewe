@@ -81,7 +81,7 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             Action::DeleteSynset { synset, reason, superseded_by } => {
                 change_manager::delete_synset(wn, 
                     &synset.resolve(&last_synset_id)?, Some(&superseded_by.resolve(&last_synset_id)?), 
-                    reason, true, changes);
+                    reason, changes);
             },
             Action::Definition { synset, definition } => {
                 change_manager::update_def(wn, 

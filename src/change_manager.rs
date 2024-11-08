@@ -217,20 +217,37 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 /// Delete a synset
 pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
                  supersede_id : Option<&SynsetId>,
-                 reason : String, delent : bool, change_list: &mut ChangeList) {
+                 reason : String, change_list: &mut ChangeList) {
     println!("Deleting synset {}", synset_id.as_str());
 
-    if delent {
+    if let Some(supersede_id) = supersede_id {
         let entries = wn.members_by_id(synset_id);
         for entry in entries {
-            match wn.pos_for_entry_synset(&entry, synset_id) {
-                Some(pos) =>
-                    delete_entry(wn, synset_id, &entry, &pos, false, change_list),
-                    None => {}
+                if let Some(pos) = wn.pos_for_entry_synset(&entry, synset_id) {
+                    move_entry(wn, synset_id.clone(), supersede_id.clone(),
+                        entry, pos, change_list);
+
+                }
+        }
+
+        let mut examples = Vec::new();
+        for example in wn.synset_by_id(synset_id).iter().flat_map(|ss| ss.example.iter()) {
+            examples.push(example.clone());
+        }
+        for example in examples {
+            if let Some(ss_synset) = wn.synset_by_id_mut(supersede_id) {
+                ss_synset.example.push(example.clone());
+            }
+        }
+    } else {
+        let entries = wn.members_by_id(synset_id);
+        for entry in entries {
+            if let Some(pos) = wn.pos_for_entry_synset(&entry, synset_id) {
+                delete_entry(wn, synset_id, &entry, &pos, false, change_list);
             }
         }
     }
-
+ 
     match supersede_id {
         Some(supersede_id) => {
             match wn.synset_by_id(synset_id) {
