@@ -415,6 +415,15 @@ impl Lexicon {
         }
     }
 
+    // Get a sense ID for a lemma and synset
+    pub fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> 
+        Option<&'a SenseId> {
+        match self.entries.get(&entry_key(lemma)) {
+            Some(e) => e.get_sense_id2(lemma, synset_id),
+            None => None
+        }
+    }
+
     /// Add a relation between two senses
     pub fn add_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                    target : &SenseId) {
@@ -922,6 +931,23 @@ impl Entries {
                     },
                     None => None
                 }
+            },
+            None => None
+        }
+    }
+
+    fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> 
+        Option<&'a SenseId> {
+     match self.0.get(lemma) {
+            Some(m) => {
+                for (_, e) in m.iter() {
+                    for sense in e.sense.iter() {
+                        if sense.synset == *synset_id {
+                            return Some(&sense.id);
+                        }
+                    }
+                }
+                None
             },
             None => None
         }
@@ -1454,7 +1480,7 @@ pub struct Synset {
     #[serde(default)]
     pub example : Vec<Example>,
     pub ili : Option<ILIID>,
-    wikidata : Option<String>,
+    pub wikidata : Option<String>,
     pub source : Option<String>,
     pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]

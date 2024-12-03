@@ -169,6 +169,38 @@ pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str,
 
 }
 
+/// Change the order of members in a synset
+pub fn change_members(wn : &mut Lexicon, synset_id : &SynsetId, members : Vec<String>,
+                  change_list : &mut ChangeList) {
+    let mut to_add = Vec::new();
+    let mut to_delete = Vec::new();
+    match wn.synset_by_id_mut(synset_id) {
+        Some(ref mut synset) => {
+            for member in synset.members.iter() {
+                if !members.contains(member) {
+                    to_delete.push(member.clone());
+                }
+            }
+            for member in members.iter() {
+                if !synset.members.contains(member) {
+                    to_add.push(member.clone());
+                }
+            }
+            synset.members = members;
+            change_list.mark();
+        },
+        None => {
+            eprintln!("Changing members of non-existant synset");
+        }
+    }
+    for member in to_delete {
+        delete_entry(wn, synset_id, &member, &wn.pos_for_entry_synset(&member, synset_id).unwrap(), false, change_list);
+    }
+    for member in to_add {
+        add_entry(wn, synset_id.clone(), member.clone(), wn.pos_for_entry_synset(&member, synset_id).unwrap(), Vec::new(), None, change_list);
+    }
+}
+
 /// Move an entry to another synset
 pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId, 
               target_synset_id : SynsetId,
