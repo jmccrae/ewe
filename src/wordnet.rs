@@ -13,6 +13,15 @@ use indicatif::ProgressBar;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+#[cfg(windows)]
+const LINE_ENDING: &'static str = "\r\n";
+#[cfg(not(windows))]
+const LINE_ENDING: &'static str = "\n";
+#[cfg(windows)]
+const LE_SIZE: usize = 2;
+#[cfg(not(windows))]
+const LE_SIZE: usize = 1;
+
 /// The Lexicon contains the whole WordNet graph
 pub struct Lexicon {
     entries : HashMap<String, Entries>,
@@ -719,7 +728,8 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                     if s6_len + n + size > YAML_LINE_LENGTH {
                         s3.push_str(s6);
                         if n == 2 {
-                            s3.push_str("\n\\");
+                            s3.push_str(LINE_ENDING);
+                            s3.push_str("\\");
                             s3.push_str(&s7[0..n]);
                             for _ in 0..indent {
                                 s3.push_str(" ");
@@ -728,7 +738,8 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                             s5 = &s7[n..];
                         } else {
                             s3.push_str(&s7[0..n]);
-                            s3.push_str("\\\n");
+                            s3.push_str("\\");
+                            s3.push_str(LINE_ENDING);
                             for _ in 0..indent {
                                 s3.push_str(" ");
                             }
@@ -748,14 +759,15 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
                 size += s4.chars().count();
                 if size > YAML_LINE_LENGTH {
                     if s3.starts_with("\"") {
-                        s3.push_str("\\\n");
+                        s3.push_str("\\");
+                        s3.push_str(LINE_ENDING);
                         for _ in 0..indent {
                             s3.push_str(" ");
                         }
                         s3.push_str("\\");
                         size = indent + 1;
                     } else {
-                        s3.push_str("\n");
+                        s3.push_str(LINE_ENDING);
                         for _ in 0..indent {
                             s3.push_str(" ");
                         }
@@ -765,10 +777,10 @@ fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> Strin
             }
         } 
         if size == indent {
-            s3.truncate(s3.len() - indent - 1);
+            s3.truncate(s3.len() - indent - LE_SIZE);
         }
         if size == indent + 1 && s3.starts_with("\"") {
-            s3.truncate(s3.len() - indent - 3);
+            s3.truncate(s3.len() - indent - 2 - LE_SIZE);
         }
         s3
     } else {
@@ -822,9 +834,9 @@ impl Entries {
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
         for (lemma, by_pos) in self.0.iter() {
-            write!(w, "{}:\n", escape_yaml_string(lemma,0,0))?;
+            write!(w, "{}:{}", escape_yaml_string(lemma,0,0), LINE_ENDING)?;
             for (pos, entry) in by_pos.iter() {
-                write!(w, "  {}:\n", pos.as_str())?;
+                write!(w, "  {}:{}", pos.as_str(), LINE_ENDING)?;
                 entry.save(w)?;
             }
         }
@@ -1108,22 +1120,22 @@ impl Entry {
         if !self.form.is_empty() {
             write!(w,"    form:")?;
             for f in self.form.iter() {
-                write!(w, "\n    - {}", f)?;
+                write!(w, "{}    - {}", LINE_ENDING, f)?;
             }
-            write!(w,"\n")?;
+            write!(w,"{}", LINE_ENDING)?;
         }
         if !self.pronunciation.is_empty() {
             write!(w,"    pronunciation:")?;
             for p in self.pronunciation.iter() {
                 p.save(w)?;
             }
-            write!(w,"\n")?;
+            write!(w,"{}", LINE_ENDING)?;
         }
         write!(w,"    sense:")?;
         for s in self.sense.iter() {
             s.save(w)?;
         }
-        write!(w, "\n")?;
+        write!(w, "{}", LINE_ENDING)?;
         Ok(())
     }
 }
@@ -1294,7 +1306,7 @@ impl Sense {
     }
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        write!(w, "\n    - ")?;
+        write!(w, "{}    - ", LINE_ENDING)?;
         let mut first = true;
         match self.adjposition {
             Some(ref adjposition) => { 
@@ -1320,7 +1332,7 @@ impl Sense {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
         } else {
-            write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
+            write!(w, "{}      id: {}", LINE_ENDING, escape_yaml_string(self.id.as_str(), 8, 8))?;
         }
         write_prop_sense(w, &self.instrument, "instrument", first)?;
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
@@ -1332,20 +1344,20 @@ impl Sense {
         write_prop_sense(w, &self.property, "property", first)?;
         write_prop_sense(w, &self.result, "result", first)?;
         if !self.sent.is_empty() {
-            write!(w, "\n      sent:")?;
+            write!(w, "{}      sent:", LINE_ENDING)?;
             for subcat_id in self.sent.iter() {
-                write!(w, "\n      - {}", subcat_id)?;
+                write!(w, "{}      - {}", LINE_ENDING, subcat_id)?;
             }
         }
         write_prop_sense(w, &self.similar, "similar", first)?;
         write_prop_sense(w, &self.state, "state", first)?;
         if !self.subcat.is_empty() {
-            write!(w, "\n      subcat:")?;
+            write!(w, "{}      subcat:", LINE_ENDING)?;
             for subcat_id in self.subcat.iter() {
-                write!(w, "\n      - {}", subcat_id)?;
+                write!(w, "{}      - {}", LINE_ENDING, subcat_id)?;
             }
         }
-        write!(w, "\n      synset: {}", self.synset.as_str())?;
+        write!(w, "{}      synset: {}", LINE_ENDING, self.synset.as_str())?;
         write_prop_sense(w, &self.undergoer, "undergoer", first)?;
         write_prop_sense(w, &self.uses, "uses", first)?;
         write_prop_sense(w, &self.vehicle, "vehicle", first)?;
@@ -1427,10 +1439,10 @@ pub struct Pronunciation {
 
 impl Pronunciation {
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        write!(w, "\n    - value: {}", escape_yaml_string(&self.value, 6, 6))?;
+        write!(w, "{}    - value: {}", LINE_ENDING, escape_yaml_string(&self.value, 6, 6))?;
         match &self.variety {
             Some(v) => {
-                write!(w, "\n      variety: {}", v)?;
+                write!(w, "{}      variety: {}", LINE_ENDING, v)?;
             }
             None => {}
         }
@@ -1443,15 +1455,15 @@ fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, 
     if senses.is_empty() {
         Ok(first)
     } else if !first {
-        write!(w, "\n      {}:", name)?; 
+        write!(w, "{}      {}:", LINE_ENDING, name)?; 
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
+            write!(w, "{}      - {}", LINE_ENDING, escape_yaml_string(sense_id.as_str(), 8, 8))?;
         }
         Ok(false)
     } else {
         write!(w, "{}:", name)?; 
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
+            write!(w, "{}      - {}", LINE_ENDING, escape_yaml_string(sense_id.as_str(), 8, 8))?;
         }
         Ok(false)
     }
@@ -1467,7 +1479,7 @@ impl Synsets {
         for (key, ss) in self.0.iter() {
             write!(w, "{}:", key.as_str())?;
             ss.save(w)?;
-            write!(w, "\n")?;
+            write!(w, "{}", LINE_ENDING)?;
         }
         Ok(())
     }
@@ -1685,16 +1697,16 @@ impl Synset {
         write_prop_synset(w, &self.attribute, "attribute")?;
         write_prop_synset(w, &self.causes, "causes")?;
         if !self.definition.is_empty() {
-            write!(w, "\n  definition:")?;
+            write!(w, "{}  definition:", LINE_ENDING)?;
             for defn in self.definition.iter() {
-                write!(w, "\n  - {}", escape_yaml_string(defn,4,4))?;
+                write!(w, "{}  - {}", LINE_ENDING, escape_yaml_string(defn,4,4))?;
             }
         }
         write_prop_synset(w, &self.domain_region, "domain_region")?;
         write_prop_synset(w, &self.domain_topic, "domain_topic")?;
         write_prop_synset(w, &self.entails, "entails")?;
         if !self.example.is_empty() {
-            write!(w, "\n  example:")?;
+            write!(w, "{}  example:", LINE_ENDING)?;
             for example in self.example.iter() {
                 example.save(w)?;
             }
@@ -1704,14 +1716,14 @@ impl Synset {
         write_prop_synset(w, &self.hypernym, "hypernym")?;
         match &self.ili {
             Some(s) => { 
-                write!(w, "\n  ili: {}", s.as_str())?;
+                write!(w, "{}  ili: {}", LINE_ENDING, s.as_str())?;
             },
             None => {}
         }
         write_prop_synset(w, &self.instance_hypernym, "instance_hypernym")?;
-        write!(w, "\n  members:")?;
+        write!(w, "{}  members:", LINE_ENDING)?;
         for m in self.members.iter() {
-            write!(w, "\n  - {}", escape_yaml_string(m, 4,4))?;
+            write!(w, "{}  - {}", LINE_ENDING, escape_yaml_string(m, 4,4))?;
         }
         if self.members.is_empty() {
             write!(w, " []")?;
@@ -1724,17 +1736,17 @@ impl Synset {
         write_prop_synset(w, &self.mero_substance, "mero_substance")?;
         write_prop_synset(w, &self.meronym, "meronym")?;
         write_prop_synset(w, &self.other, "other")?;
-        write!(w, "\n  partOfSpeech: {}", self.part_of_speech.value())?;
+        write!(w, "{}  partOfSpeech: {}", LINE_ENDING, self.part_of_speech.value())?;
         write_prop_synset(w, &self.similar, "similar")?;
         match &self.source {
             Some(s) => { 
-                write!(w, "\n  source: {}", escape_yaml_string(s, 4, 4))?;
+                write!(w, "{}  source: {}", LINE_ENDING, escape_yaml_string(s, 4, 4))?;
             },
             None => {}
         };
         match &self.wikidata {
             Some(wd) => {
-                write!(w, "\n  wikidata: {}", wd)?;
+                write!(w, "{}  wikidata: {}", LINE_ENDING, wd)?;
             },
             None => {}
         };
@@ -1810,9 +1822,9 @@ fn write_prop_synset<W : Write>(w : &mut W, synsets : &Vec<SynsetId>, name : &st
     if synsets.is_empty() {
         Ok(())
     } else {
-        write!(w, "\n  {}:", name)?;
+        write!(w, "{}  {}:", LINE_ENDING, name)?;
         for sense_id in synsets.iter() {
-            write!(w, "\n  - {}", sense_id.as_str())?;
+            write!(w, "{}  - {}", LINE_ENDING, sense_id.as_str())?;
         }
         Ok(())
     }
@@ -1834,11 +1846,12 @@ impl Example {
     }
 
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        write!(w, "\n  - ")?;
+        write!(w, "{}  - ", LINE_ENDING)?;
         match &self.source {
             Some(s) => {
-                write!(w, "source: {}\n    text: {}", 
+                write!(w, "source: {}{}    text: {}", 
                        escape_yaml_string(s, 6, 10),
+                       LINE_ENDING,
                        escape_yaml_string(&self.text, 6, 10))?;
             },
             None => {
@@ -2038,6 +2051,7 @@ mod tests {
     - id: 'foo%1:01:00::'
       synset: 00001740-n
 ";
+        let entry_str = entry_str.replace("\n", LINE_ENDING);
         let mut gen_str : Vec<u8> = Vec::new();
 
         Entry {
@@ -2111,6 +2125,7 @@ partOfSpeech: n";
   members:
   - course
   partOfSpeech: n";
+        let synset_str = synset_str.replace("\n", LINE_ENDING);
         let mut ss = Synset::new(PartOfSpeech::n);
         ss.definition.push("part of a meal served at one time".to_owned());
         ss.example.push(Example::new(
@@ -2126,32 +2141,32 @@ partOfSpeech: n";
     #[test]
     fn test_split_line() {
         let string = "especially of muscles; drawing away from the midline of the body or from an adjacent part";
-        assert_eq!("especially of muscles; drawing away from the midline of the body or from an adjacent\n    part", escape_yaml_string(string, 4, 4));
+        assert_eq!(format!("especially of muscles; drawing away from the midline of the body or from an adjacent{}    part", LINE_ENDING), escape_yaml_string(string, 4, 4));
     }
 
 
     #[test]
     fn test_split_line2() {
         let string = "(usually followed by `to') having the necessary means or skill or know-how or authority to do something";
-        assert_eq!("(usually followed by `to') having the necessary means or skill or know-how or\n    authority to do something", escape_yaml_string(string, 4, 4));
+        assert_eq!(format!("(usually followed by `to') having the necessary means or skill or know-how or{}    authority to do something", LINE_ENDING), escape_yaml_string(string, 4, 4));
     }
 
     #[test]
     fn test_split_line3() {
         let string = "\"the abaxial surface of a leaf is the underside or side facing away from the stem\"";
-        assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4, 4));
+        assert_eq!(format!("'\"the abaxial surface of a leaf is the underside or side facing away from the{}    stem\"'", LINE_ENDING), escape_yaml_string(string, 4, 4));
     }
 
 //    #[test]
 //    fn test_split_line4() {
 //        let string = "Canned cream of mushroom soup has been described as \"America's béchamel\"";
-//        assert_eq!("\"Canned cream of mushroom soup has been described as \\\"America's b\\xE9chamel\\\n\\\"", escape_yaml_string(string, 6, 6));
+//        assert_eq!(format!("\"Canned cream of mushroom soup has been described as \\\"America's b\\xE9chamel\\{}\\\"", LINE_ENDING), escape_yaml_string(string, 6, 6));
 //    }
 //
 //    #[test]
 //    fn test_split_line5() {
 //        let string = "If you consider a point on a radius of the rolling curve in generating a cardioid that is not on its circumference, the result is a conchoid called the limaçon of Pascal.";
-//        assert_eq!("\"If you consider a point on a radius of the rolling curve in generating a cardioid\\\n    \\ that is not on its circumference, the result is a conchoid called the lima\\xE7\\\n    on of Pascal.\"", escape_yaml_string(string, 4, 4));
+//        assert_eq!(format!("\"If you consider a point on a radius of the rolling curve in generating a cardioid\\{}    \\ that is not on its circumference, the result is a conchoid called the lima\\xE7\\{}    on of Pascal.\"", LINE_ENDING, LINE_ENDING), escape_yaml_string(string, 4, 4));
 //    }
 
     #[test]
@@ -2162,6 +2177,7 @@ partOfSpeech: n";
       id: 'foo%1:01:00::'
       synset: 00001740-n
 ";
+        let entry_str = entry_str.replace("\n", LINE_ENDING);
         let mut gen_str : Vec<u8> = Vec::new();
         let mut sense = Sense::new(
                 SenseId("foo%1:01:00::".to_string()),
@@ -2212,6 +2228,7 @@ partOfSpeech: n";
   - able
   partOfSpeech: a
 ";
+        let output = output.replace("\n", LINE_ENDING);
         let synsets = serde_yaml::from_str::<Synsets>(input).unwrap();
         let mut buf = Vec::new();
         synsets.save(&mut buf).unwrap();
