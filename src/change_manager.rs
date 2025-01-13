@@ -194,10 +194,21 @@ pub fn change_members(wn : &mut Lexicon, synset_id : &SynsetId, members : Vec<St
         }
     }
     for member in to_delete {
-        delete_entry(wn, synset_id, &member, &wn.pos_for_entry_synset(&member, synset_id).unwrap(), false, change_list);
+        if let Some(pos_key) = wn.pos_for_entry_synset(&member, synset_id) { 
+            delete_entry(wn, synset_id, &member, 
+                &pos_key,
+                false, change_list);
+        } else {
+            eprintln!("Member {} not found in synset {} (skipping)", member, synset_id.as_str());
+        }
     }
     for member in to_add {
-        add_entry(wn, synset_id.clone(), member.clone(), wn.pos_for_entry_synset(&member, synset_id).unwrap(), Vec::new(), None, change_list);
+        add_entry(wn, synset_id.clone(), member.clone(), 
+            wn.pos_for_entry_synset(&member, synset_id).unwrap_or_else(|| {
+            let synset = wn.synset_by_id(synset_id).unwrap();
+            synset.part_of_speech.to_pos_key()
+        }),
+            Vec::new(), None, change_list);
     }
 }
 

@@ -41,14 +41,20 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             },
             Action::AddSynset { definition, lexfile, pos, lemmas, subcats } => {
                 let poses = wn.pos_for_lexfile(&lexfile);
-                match pos.to_part_of_speech() {
-                    Some(p) => if !poses.iter().any(|p2| p == *p2) {
-                        return Err(format!("Wrong POS for lexicographer file {} : {}", lexfile, pos.as_str()));
-                    },
-                    None => {
-                        return Err(format!("POS value not valid : {}", pos.as_str()));
+                let pos = if let Some(pos) = pos {
+                    match pos.to_part_of_speech() {
+                        Some(p) => if !poses.iter().any(|p2| p == *p2) {
+                            return Err(format!("Wrong POS for lexicographer file {} : {}", lexfile, pos.as_str()));
+                        } else {
+                            pos
+                        },
+                        None => {
+                            return Err(format!("POS value not valid : {}", pos.as_str()));
+                        }
                     }
-                }
+                } else {
+                    poses.iter().next().unwrap().to_pos_key()
+                };
 
                 match change_manager::add_synset(wn, 
                     definition, lexfile, pos.clone(), 
@@ -365,7 +371,9 @@ pub enum Action {
     AddSynset {
         definition : String,
         lexfile : String,
-        pos : PosKey,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pos : Option<PosKey>,
         lemmas : Vec<String>,
         #[serde(default)]
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -487,7 +495,7 @@ mod tests {
             Action::AddSynset {
                     definition: "something or someone".to_string(),
                     lexfile: "noun.animal".to_string(),
-                    pos: PosKey::new("n".to_string()),
+                    pos: Some(PosKey::new("n".to_string())),
                     lemmas: vec!["bar".to_string()],
                     subcats: vec![]
             },
@@ -546,7 +554,7 @@ mod tests {
             Action::AddSynset {
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
-                pos: PosKey::new("n".to_string()),
+                pos: Some(PosKey::new("n".to_string())),
                 lemmas: vec!["bar".to_string()],
                 subcats: vec![]
             },
