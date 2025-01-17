@@ -514,7 +514,9 @@ impl SenseRelType {
             "domain_region" => Some(SenseRelType::DomainRegion),
             "has_domain_region" => Some(SenseRelType::HasDomainRegion),
             "exemplifies" => Some(SenseRelType::Exemplifies),
+            "exemplifies_sense" => Some(SenseRelType::Exemplifies),
             "is_exemplified_by" => Some(SenseRelType::IsExemplifiedBy),
+            "is_exemplified_by_sense" => Some(SenseRelType::IsExemplifiedBy),
             "similar" => Some(SenseRelType::Similar),
             "other" => Some(SenseRelType::Other),
             "agent" => Some(SenseRelType::Agent),
@@ -531,7 +533,9 @@ impl SenseRelType {
             "destination" => Some(SenseRelType::Destination),
             "body_part" => Some(SenseRelType::BodyPart),
             "vehicle" => Some(SenseRelType::Vehicle),
-            _ => None
+            _ => {
+                None
+            }
         }
     }
     

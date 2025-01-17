@@ -126,14 +126,14 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                         change_manager::insert_sense_relation(wn, 
                             sense.clone(), 
                             SenseRelType::from(&relation)
-                                .ok_or(format!("Bad relation {}", relation))?,
+                                .ok_or(format!("Bad relation {}.", relation))?,
                             target_sense, changes);
                     },
                     None => {
                         change_manager::insert_rel(wn, 
                             &source,
                             &SynsetRelType::from(&relation)
-                                .ok_or(format!("Bad relation {}", relation))?,
+                                .ok_or(format!("Bad relation {}.", relation))?,
                             &target, changes);
                     }
                 }

@@ -476,8 +476,8 @@ impl Lexicon {
                 None => {}
             }
         } else {
-            match self.synset_by_id_mut(source) {
-                Some(ss) => ss.insert_rel(&rel, target),
+            match self.synset_by_id_mut(target) {
+                Some(ss) => ss.insert_rel(&rel, source),
                 None => {}
             }
         }
