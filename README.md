@@ -107,10 +107,10 @@ An example of the usage of the automaton file is given below
     source: 00001740-n
     relations:
         - relation: hypernym
-            target: 00001741-n
+          target: 00001741-n
         - relation: hyponym
-            target: 00001742-n
-            source_lemma: test
-            target_lemma: test
+          target: 00001742-n
+          source_lemma: test
+          target_lemma: test
 - validate
 ```

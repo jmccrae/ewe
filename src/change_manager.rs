@@ -439,6 +439,7 @@ pub fn reverse_rel(wn : &mut Lexicon, source : &SynsetId,
 /// Add a relation between senses
 pub fn insert_sense_relation(wn : &mut Lexicon, source : SenseId, rel : SenseRelType,
                       target : SenseId, change_list : &mut ChangeList) {
+    println!("Insert {} ={}=> {}", source.as_str(), rel.value(), target.as_str());
     if rel.is_symmetric() {
         wn.add_sense_rel(&target, rel.clone(), &source);
     }
