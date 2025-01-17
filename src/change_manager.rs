@@ -70,6 +70,39 @@ pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
     change_list.mark();
 }
 
+pub enum RelationUpdate {
+    Synset(SynsetId, SynsetRelType, SynsetId),
+    Sense(SenseId, SenseRelType, SenseId)
+}
+
+pub fn update_rels(wn : &mut Lexicon, 
+    source : &SynsetId,
+    relations : Vec<RelationUpdate>,
+    change_list : &mut ChangeList) {
+    // First remove all links referring to and from this synset
+    for (_, target_id) in wn.links_from(source) {
+        delete_rel(wn, source, &target_id, change_list);
+    }
+    for (_, source_id) in wn.links_to(source) {
+        delete_rel(wn, &source_id, source, change_list);
+    }
+    for (source_id, _, target_id) in wn.all_sense_links(source) {
+        delete_sense_rel(wn, &source_id, &target_id, change_list);
+    }
+    
+    // Now add the relations
+    for rel in relations {
+        match rel {
+            RelationUpdate::Synset(source_id, rel_type, target_id) => {
+                insert_rel(wn, &source_id, &rel_type, &target_id, change_list);
+            },
+            RelationUpdate::Sense(source_id, rel_type, target_id) => {
+                insert_sense_relation(wn, source_id, rel_type, target_id, change_list);
+            }
+        }
+    }
+}
+
 /// Add a new entry
 pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId, 
                  lemma : String, 

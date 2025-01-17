@@ -68,6 +68,9 @@ An example of the usage of the automaton file is given below
     synset: 00001740-n
     lemma: bar
     target_synset: 00001741-n
+- change_members:
+    synset: 00001740-n
+    members: ["entity", "thing"]
 - add_synset:
     definition: something or someone
     lexfile: noun.animal
@@ -100,5 +103,14 @@ An example of the usage of the automaton file is given below
 - reverse_relation:
     source: 00001740-n
     target: 00001741-n
+- update_relations:
+    source: 00001740-n
+    relations:
+        - relation: hypernym
+            target: 00001741-n
+        - relation: hyponym
+            target: 00001742-n
+            source_lemma: test
+            target_lemma: test
 - validate
 ```

@@ -380,6 +380,25 @@ impl Lexicon {
         }
     }
 
+    /// For a given synset, find all sense links to and from all senses of this synset
+    pub fn all_sense_links(&self, synset_id : &SynsetId) -> Vec<(SenseId, SenseRelType, SenseId)> {
+        let mut links = Vec::new();
+        for member in self.members_by_id(synset_id) {
+            for sense in self.get_sense(&member, synset_id) {
+                for (sense_rel_type, target) in sense.sense_links_from() {
+                    links.push((sense.id.clone(), sense_rel_type, target));
+                }
+                if let Some(links_to) = self.sense_links_to.get(&sense.id) {
+                    for (sense_rel_type, source) in links_to.iter() {
+                        links.push((source.clone(), sense_rel_type.clone(), sense.id.clone()));
+                    }
+                }
+            }
+        }
+        links
+    }
+
+
     ///// For a given sense, find all backlinks referring to this sense
     //pub fn sense_links_to_id(&self, sense_id : &SenseId) -> 
     //    Vec<(SenseRelType, SenseId)> {
@@ -902,7 +921,6 @@ impl Entries {
             None => Vec::new()
         }
     }
-
 
     pub fn sense_links_from_id(&self, lemma : &str, pos : &PosKey, 
                                sense_id : &SenseId) -> Vec<(SenseRelType, SenseId)> {

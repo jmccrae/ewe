@@ -1,7 +1,7 @@
 use crate::change_manager;
 use crate::wordnet::{Lexicon,SynsetId,PosKey,SenseId,ILIID};
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::change_manager::ChangeList;
+use crate::change_manager::{ChangeList, RelationUpdate};
 use crate::validate;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
@@ -188,6 +188,16 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
                             &target.resolve(&last_synset_id)?, changes);
                     }
                 }
+            },
+            Action::UpdateRelations { synset, relations } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                let mut relations2 = Vec::new();
+                for item in relations.iter() {
+                    relations2.push(item.resolve(wn, &synset, &last_synset_id, &last_sense_id)?);
+                }
+                change_manager::update_rels(wn, 
+                    &synset,
+                    relations2, changes);
             },
             Action::Validate => {
                 let errors = validate(wn);
@@ -464,10 +474,73 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         target_sense : Option<SenseRef>
     },
+    #[serde(rename = "update_relations")]
+    UpdateRelations {
+        synset : SynsetRef,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        relations : Vec<UpdateRelationItem>
+    },
     #[serde(rename = "validate")]
     Validate,
     #[serde(rename = "fix_transitivity")]
     FixTransitivity
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct UpdateRelationItem {
+    relation : String,
+    target : SynsetRef,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_sense : Option<SenseRef>,
+    #[serde(default)]    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_sense : Option<SenseRef>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_lemma : Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_lemma : Option<String>
+}
+
+impl UpdateRelationItem {
+    fn resolve(&self, wn : &mut Lexicon, source : &SynsetId, 
+        last_synset_id : &Option<SynsetId>,
+        last_sense_id : &Option<SenseId>) -> Result<RelationUpdate, String> {
+        let source_sense = if let Some(ref source_sense) = self.source_sense {
+            Some(source_sense.clone().resolve(&last_sense_id, wn, &source)?)
+        } else if let Some(lemma) = self.source_lemma.as_ref() {
+            Some(wn.get_sense_id2(&lemma, &source).ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
+        } else {
+            None
+        };
+        let target = self.target.clone().resolve(&last_synset_id)?;
+        let target_sense = if let Some(ref target_sense) = self.target_sense {
+            Some(target_sense.clone().resolve(&last_sense_id, wn, &target)?)
+        } else if let Some(lemma) = self.target_lemma.as_ref() {
+            Some(wn.get_sense_id2(&lemma, &target).ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
+        } else {
+            None
+        };
+        match source_sense {
+            Some(sense) => {
+                let target_sense = target_sense
+                    .ok_or(format!("Source sense {} with target sense", sense.as_str()))?;
+                Ok(RelationUpdate::Sense(sense,
+                        SenseRelType::from(&self.relation)
+                            .ok_or(format!("Bad relation {}.", self.relation))?,
+                        target_sense))
+            },
+            None => {
+                Ok(RelationUpdate::Synset(source.clone(), 
+                        SynsetRelType::from(&self.relation)
+                            .ok_or(format!("Bad relation {}.", self.relation))?,
+                        target))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
