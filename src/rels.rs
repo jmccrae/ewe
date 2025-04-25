@@ -275,6 +275,7 @@ impl SynsetRelType {
     pub fn is_symmetric(&self) -> bool {
         match self {
             SynsetRelType::Similar => true,
+            SynsetRelType::Also => true,
             _ => false
         }
     }
@@ -451,6 +452,7 @@ pub enum SenseRelType {
     HasDomainRegion,
     Exemplifies,
     IsExemplifiedBy,
+    IsPertainymOf,
     Similar,
     Agent,
     Material,
@@ -483,6 +485,7 @@ impl SenseRelType {
             SenseRelType::HasDomainRegion => "has_domain_region",
             SenseRelType::Exemplifies => "exemplifies",
             SenseRelType::IsExemplifiedBy => "is_exemplified_by",
+            SenseRelType::IsPertainymOf => "is_pertainym_of",
             SenseRelType::Similar => "similar",
             SenseRelType::Other => "other",
             SenseRelType::Agent => "agent",
@@ -517,6 +520,7 @@ impl SenseRelType {
             "exemplifies_sense" => Some(SenseRelType::Exemplifies),
             "is_exemplified_by" => Some(SenseRelType::IsExemplifiedBy),
             "is_exemplified_by_sense" => Some(SenseRelType::IsExemplifiedBy),
+            "is_pertainym_of" => Some(SenseRelType::IsPertainymOf),
             "similar" => Some(SenseRelType::Similar),
             "other" => Some(SenseRelType::Other),
             "agent" => Some(SenseRelType::Agent),
@@ -559,6 +563,7 @@ impl SenseRelType {
             SenseRelType::HasDomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::Exemplifies => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::IsExemplifiedBy => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
+            SenseRelType::IsPertainymOf => vec![&PartOfSpeech::n],
             SenseRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
             SenseRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::Agent => vec![&PartOfSpeech::n, &PartOfSpeech::v],
@@ -576,6 +581,15 @@ impl SenseRelType {
             SenseRelType::BodyPart => vec![&PartOfSpeech::n, &PartOfSpeech::v],
             SenseRelType::Vehicle => vec![&PartOfSpeech::n, &PartOfSpeech::v],
 
+        }
+    }
+
+    /// Get the inverse of the relation, for relations that are 
+    /// not directly stored
+    pub fn inverse(&self) -> Option<SenseRelType> {
+        match self {
+            SenseRelType::IsPertainymOf => Some(SenseRelType::Pertainym),
+            _ => None
         }
     }
 }

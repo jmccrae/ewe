@@ -446,18 +446,22 @@ impl Lexicon {
     /// Add a relation between two senses
     pub fn add_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                    target : &SenseId) {
-        self.sense_links_to.entry(target.clone()).or_insert_with(|| Vec::new()).
-            push((rel.clone(), source.clone()));
-        match self.sense_id_to_lemma_pos.get(source) {
-            Some((lemma, pos)) => {
-                match self.entries.get_mut(&entry_key(lemma)) {
-                    Some(e) => e.add_rel(lemma, pos, source, rel, target),
-                    None => {
+        if let Some(inv) = rel.inverse() {
+            self.add_sense_rel(target, inv, source);
+        } else {
+            self.sense_links_to.entry(target.clone()).or_insert_with(|| Vec::new()).
+                push((rel.clone(), source.clone()));
+            match self.sense_id_to_lemma_pos.get(source) {
+                Some((lemma, pos)) => {
+                    match self.entries.get_mut(&entry_key(lemma)) {
+                        Some(e) => e.add_rel(lemma, pos, source, rel, target),
+                        None => {
+                        }
                     }
+                },
+                None => {
+                    eprintln!("Could not map sense id to lemma, pos")
                 }
-            },
-            None => {
-                eprintln!("Could not map sense id to lemma, pos")
             }
         }
     }
@@ -1416,6 +1420,7 @@ impl Sense {
             SenseRelType::HasDomainRegion => if !self.has_domain_region.iter().any(|x| *x == target) { self.has_domain_region.push(target) },
             SenseRelType::Exemplifies => if !self.exemplifies.iter().any(|x| *x == target) { self.exemplifies.push(target) },
             SenseRelType::IsExemplifiedBy => if !self.is_exemplified_by.iter().any(|x| *x == target) { self.is_exemplified_by.push(target) },
+            SenseRelType::IsPertainymOf => {},
             SenseRelType::Similar => if !self.similar.iter().any(|x| *x == target) { self.similar.push(target) },
             SenseRelType::Agent => if !self.agent.iter().any(|x| *x == target) { self.agent.push(target) },
             SenseRelType::Material => if !self.material.iter().any(|x| *x == target) { self.material.push(target) },
