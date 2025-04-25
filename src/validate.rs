@@ -6,6 +6,7 @@ use std::collections::{HashSet,HashMap};
 use indicatif::{ProgressBar,ProgressStyle};
 use lazy_static::lazy_static;
 use regex::Regex;
+use crate::change_manager;
 
 pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
     let mut errors = Vec::new();
@@ -532,3 +533,79 @@ impl fmt::Display for ValidationError {
     }
 }
 
+/// Fix the validation error if possible
+///
+/// This function is used to fix the validation error if possible.
+///
+/// # Arguments
+/// 
+/// * `error` - The validation error to fix
+///
+/// # Returns
+///
+/// * `true` if the error was fixed, `false` otherwise
+pub fn fix(wn : &mut Lexicon, error : &ValidationError, change_list : &mut change_manager::ChangeList) -> bool {
+    match error {
+        ValidationError::InvalidSenseId { id, expected } => {
+            wn.update_sense_key(id, expected);
+            true
+        },
+        ValidationError::SenseSynsetNotExists { .. } => false,
+        ValidationError::EntryPartOfSpeech { .. } => false,
+        ValidationError::SenseRelationPOS { .. } => false,
+        ValidationError::SynsetRelationPOS { .. } => false,
+        ValidationError::SelfReferencingSenseRelation { source, target, .. } => {
+            change_manager::delete_sense_rel(wn, source, target, change_list);
+            true
+        },
+        ValidationError::SelfReferencingSynsetRelation { source, target, .. } => {
+            change_manager::delete_rel(wn, source, target, change_list);
+            true
+        },
+        ValidationError::DuplicateSenseRelation { source:_, rel:_, target:_ } => {
+            // TODO
+            false
+        },
+        ValidationError::DuplicateSynsetRelation { source:_, rel:_, target:_ } => {
+            // TODO
+            false
+        },
+        ValidationError::DuplicateSenseKey { .. } => false,
+        ValidationError::DuplicateSyntacticBehaviour { .. } => false,
+        ValidationError::DuplicateSense { .. } =>  false,
+        ValidationError::SynsetIdPos { .. } => false,
+        ValidationError::InvalidSynsetId { .. } => false,
+        ValidationError::EmptySynset { .. } => false,
+        ValidationError::InvalidILIId { .. } => false,
+        ValidationError::NoSenses { .. } => false,
+        ValidationError::CrossPOSHyper { .. } => false,
+        ValidationError::SenseRelTargetMissing { .. } => false,
+        ValidationError::SynsetRelTargetMissing { .. } => false,
+        ValidationError::SatelliteSimilar { .. } =>  false,
+        ValidationError::NoHypernym { .. } => false,
+        ValidationError::Definition { .. } => false,
+        ValidationError::Lexfile { .. } => false,
+        ValidationError::SenseRelationSymmetry { source, rel, target } => {
+            change_manager::insert_sense_relation(wn, source.clone(), rel.clone(), target.clone(), change_list);
+            true
+        },
+        ValidationError::SynsetRelationSymmetry { source, rel, target } => {
+
+            change_manager::insert_rel(wn, target, rel, source, change_list);
+            true
+        },
+        ValidationError::Transitivity { id1, id2, id3 } =>  {
+            change_manager::delete_rel(wn, id1, id2, change_list);
+            change_manager::delete_rel(wn, id2, id3, change_list);
+            true
+        },
+        ValidationError::Loop { .. } =>  false,
+        ValidationError::DomainLoop { .. } =>  false,
+        ValidationError::SynsetMemberNotInEntries { .. } => false,
+        ValidationError::DuplicateMember { .. } => {
+            // TODO
+            false
+        },
+        ValidationError::SenseNotInSynsetMembers { .. } => false,
+    }
+}

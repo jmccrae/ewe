@@ -15,7 +15,7 @@ mod automaton;
 
 use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::validate::validate;
+use crate::validate::{validate, fix};
 use std::io;
 use std::io::Write;
 use crate::change_manager::{ChangeList};
@@ -482,8 +482,9 @@ fn main_menu(wn : &mut Lexicon, path : &str,
     println!("4. Change an example");
     println!("5. Change a relation");
     println!("6. Validate");
+    println!("7. Fix validation errors");
     if ewe_changed.changed() {
-        println!("7. Save changes");
+        println!("8. Save changes");
     }
     println!("X. Exit EWE");
 
@@ -507,6 +508,16 @@ fn main_menu(wn : &mut Lexicon, path : &str,
             }
         },
         "7" => {
+            let errors = validate(wn);
+            let mut fixed = 0;
+            for error in errors.iter() {
+                if fix(wn, error, ewe_changed) {
+                    fixed += 1;
+                }
+            }
+            println!("{}/{} validation errors fixed", fixed, errors.len());
+        },
+        "8" => {
             let saved = save(wn, path).expect("Could not save");
             if saved {
                 ewe_changed.reset();
