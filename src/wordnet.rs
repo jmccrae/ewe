@@ -1503,7 +1503,8 @@ pub struct Synset {
     #[serde(default)]
     pub example : Vec<Example>,
     pub ili : Option<ILIID>,
-    pub wikidata : Option<String>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    pub wikidata : Vec<String>,
     pub source : Option<String>,
     pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]
@@ -1554,7 +1555,7 @@ impl Synset {
             definition : Vec::new(),
             example : Vec::new(),
             ili : None,
-            wikidata : None,
+            wikidata : Vec::new(),
             source : None,
             members : Vec::new(),
             part_of_speech,
@@ -1755,12 +1756,14 @@ impl Synset {
             },
             None => {}
         };
-        match &self.wikidata {
-            Some(wd) => {
-                write!(w, "\n  wikidata: {}", wd)?;
-            },
-            None => {}
-        };
+        if self.wikidata.len() == 1 {
+            write!(w, "\n  wikidata: {}", self.wikidata[0])?;
+        } else if self.wikidata.len() > 1 {
+            write!(w, "\n  wikidata:")?;
+            for wd in self.wikidata.iter() {
+                write!(w, "\n  - {}", wd)?;
+            }
+        }
 
         Ok(())
     }
@@ -2033,6 +2036,50 @@ pub enum WordNetYAMLIOError {
     Csv(String)
 }
 
+/// Deserialize a string or a vector of strings
+pub(crate) fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StringOrVec;
+
+    impl<'de> Visitor<'de> for StringOrVec {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string or a list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(vec![value.to_string()])
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(vec![value])
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                vec.push(value);
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec)
+}
+
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {
@@ -2241,6 +2288,44 @@ partOfSpeech: n";
         assert_eq!(output, String::from_utf8(buf).unwrap());
     }
 
+    #[test]
+    fn test_string_or_vec() {
+        let input = "00001740-n:
+  wikidata: Q1
+  definition:
+  - foobar
+  members:
+  - foo
+  partOfSpeech: n
+00001741-a:
+  wikidata:
+  - Q2
+  - Q3
+  definition:
+  - foobar
+  members:
+  - foo
+  partOfSpeech: a
+00001742-a:
+  definition:
+  - foobar
+  members:
+  - foo
+  partOfSpeech: a";
+    let synsets = serde_yaml::from_str::<Synsets>(input).unwrap();
+    synsets.0.iter().for_each(|(key, ss)| {
+        if key.as_str() == "00001740-n" {
+            assert_eq!(ss.wikidata.len(), 1);
+            assert_eq!(ss.wikidata[0], "Q1");
+        } else if key.as_str() == "00001741-a" {
+            assert_eq!(ss.wikidata.len(), 2);
+            assert_eq!(ss.wikidata[0], "Q2");
+            assert_eq!(ss.wikidata[1], "Q3");
+        } else if key.as_str() == "00001742-a" {
+            assert_eq!(ss.wikidata.len(), 0);
+        }
+    });
+    }
 
 //    #[test]
 //    fn test_unicode_convert() {

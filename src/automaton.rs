@@ -222,9 +222,10 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             },
             Action::ChangeWikidata { synset, wikidata } => {
                 let synset = synset.resolve(&last_synset_id)?;
+                let wikidata = wikidata.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
                 wn.synset_by_id_mut(&synset)
                     .ok_or(format!("Synset {} not found", synset.as_str()))?
-                    .wikidata = Some(wikidata);
+                    .wikidata = wikidata
             },
             Action::ChangeSource { synset, source } => {
                 let synset = synset.resolve(&last_synset_id)?;
@@ -408,7 +409,8 @@ pub enum Action {
     #[serde(rename = "change_wikidata")]
     ChangeWikidata {
         synset : SynsetRef,
-        wikidata : String
+        #[serde(deserialize_with = "crate::wordnet::string_or_vec")]
+        wikidata : Vec<String>
     },
     #[serde(rename = "change_source")]
     ChangeSource {
