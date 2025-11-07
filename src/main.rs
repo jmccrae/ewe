@@ -28,69 +28,64 @@ use std::process::exit;
 
 /// Supports the user in choosing a synset
 fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Synset) {
-    let mut synset = None;
-    while synset.is_none() {
-        let synset_id = input(&format!("Enter {}synset ID : ewn-", spec_string));
-        while synset_id == "" {
-            let mut lemma = String::new();
-            while lemma == "" {
-                lemma = input("Search by lemma: ");
-            }
-            let entries = wn.entry_by_lemma(&lemma);
-            if !entries.is_empty() {
-                let senses : Vec<&Sense> = 
-                    entries.iter().flat_map(|entry|
-                                entry.sense.iter()).collect();
-                println!("0. Search again");
-                for (i, sense) in senses.iter().enumerate() {
-                    let ss = wn.synset_by_id(&sense.synset);
-                    match ss {
-                        Some(ss) => {
-                            let ex_text = if ss.example.is_empty() {
-                                String::new()
-                            } else {
-                                "(".to_owned() + &ss.example.iter().map(
-                                        |ex| ex.text.clone()).collect::<Vec<String>>().
-                                    join("; ") + ")"
-                            };
-                            println!("{}. {} - {} {}", i + 1, 
-                                     sense.synset.as_str(), ss.definition[0], 
-                                     ex_text);
-                        },
-                        None => {}
-                    }
-                }
-                match input("Enter synset no: ").parse::<usize>() {
-                    Ok(synset_no) => {
-                        if synset_no > 0 && synset_no <= senses.len() {
-                            let ssid = senses[synset_no - 1].synset.clone();
-                            match wn.synset_by_id(&ssid) {
-                                Some(ss) => return (ssid, ss),
+    loop {
+        let input_str = input(&format!("Enter {}synset : ", spec_string));
+        let ssid = SynsetId::new(&input_str);
+        match wn.synset_by_id(&ssid) {
+            Some(ss) => {
+                return (ssid, ss);
+            },
+            None => {
+                let entries = wn.entry_by_lemma(&input_str);
+                if !entries.is_empty() {
+                    let senses : Vec<&Sense> = 
+                        entries.iter().flat_map(|entry|
+                                    entry.sense.iter()).collect();
+                    if senses.len() == 1 {
+                        let ssid = senses[0].synset.clone();
+                        match wn.synset_by_id(&ssid) {
+                            Some(ss) => return (ssid, ss),
+                            None => {}
+                        }
+                    } else {
+                        println!("0. Search again");
+                        for (i, sense) in senses.iter().enumerate() {
+                            let ss = wn.synset_by_id(&sense.synset);
+                            match ss {
+                                Some(ss) => {
+                                    let ex_text = if ss.example.is_empty() {
+                                        String::new()
+                                    } else {
+                                        "(".to_owned() + &ss.example.iter().map(
+                                                |ex| ex.text.clone()).collect::<Vec<String>>().
+                                            join("; ") + ")"
+                                    };
+                                    println!("{}. {} - {} {}", i + 1, 
+                                             sense.synset.as_str(), ss.definition[0], 
+                                             ex_text);
+                                },
                                 None => {}
                             }
                         }
-                    },
-                    Err(_) => {
-                        println!("Invalid input");
+                        match input("Enter synset no: ").parse::<usize>() {
+                            Ok(synset_no) => {
+                                if synset_no > 0 && synset_no <= senses.len() {
+                                    let ssid = senses[synset_no - 1].synset.clone();
+                                    match wn.synset_by_id(&ssid) {
+                                        Some(ss) => return (ssid, ss),
+                                        None => {}
+                                    }
+                                }
+                            },
+                            Err(_) => {
+                                println!("Invalid input");
+                            }
+                        }
                     }
-                }
-            } else {
-                println!("Not found");
+                } 
             }
         }
-        
-        let ssid = SynsetId::new(&synset_id);
-        match wn.synset_by_id(&ssid) {
-            Some(ss) => {
-                synset = Some((ssid, ss));
-            },
-            None => {}
-        }
-        if synset.is_none() {
-            println!("Synset not found");
-        }
     }
-    synset.unwrap()
 }
 
 fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str, 
@@ -167,10 +162,10 @@ fn check_text(defn : &str) -> bool {
 }
 
 fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
-    let mut action = input("[A]dd/[D]elete/[M]ove> ").to_uppercase();
-    while action != "A" && action != "D" && action != "M" {
+    let mut action = input("[A]dd/[D]elete/[M]ove/[C]hange> ").to_uppercase();
+    while action != "A" && action != "D" && action != "M" && action != "C" {
         println!("Bad action");
-        action = input("[A]dd/[D]elete/[M]ove> ").to_uppercase();
+        action = input("[A]dd/[D]elete/[M]ove/[C]hange> ").to_uppercase();
     }
 
     let (synset_id, synset) = enter_synset(wn, "");
@@ -187,8 +182,10 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
         input("New entry: ")
     } else if action == "D" {
         input("Entry to remove: ")
-    } else /* action == "M" */ {
+    } else if action == "M"  {
         input("Entry to move: ")
+    } else /* action == "C" */ {
+        input("Entry to change: ")
     };
 
     if action == "A" {
@@ -226,7 +223,28 @@ fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
                 println!("Could not find entry, skipping change")
             }
         }
+    } else if action == "C" {
+        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+            Some(pos) => {
+                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
+                let new_lemma = input("New lemma: ");
+                let subcat = if pos.as_str() == "v" {
+                    input("Enter verb subcats as comma-separated list: ").split(",").
+                        map(|s| s.to_string()).
+                        collect()
+                } else {
+                    Vec::new()
+                };
+                change_manager::add_entry(wn, synset_id, 
+                                          new_lemma, pos, subcat, None, change_list); 
+
+            },
+            None => {
+                println!("Could not find entry, skipping change")
+            }
+        }
     }
+
 }
 
 lazy_static! {
