@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
 
-pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
+pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     println!("Validating");
     let bar = ProgressBar::new((wn.n_entries() + 2 * wn.n_synsets()) as u64);
@@ -293,7 +293,8 @@ pub fn validate(wn : &Lexicon) -> Vec<ValidationError> {
     errors
 }
 
-fn check_transitive(wn : &Lexicon, errors : &mut Vec<ValidationError>,
+fn check_transitive<L : Lexicon>(wn : &L,
+                   errors : &mut Vec<ValidationError>,
                    synset_id : &SynsetId, synset : &Synset) {
     for target in synset.hypernym.iter() {
         match wn.synset_by_id(target) {
@@ -313,7 +314,8 @@ fn check_transitive(wn : &Lexicon, errors : &mut Vec<ValidationError>,
     }
 }
 
-fn check_no_loops(wn : &Lexicon, errors : &mut Vec<ValidationError>,
+fn check_no_loops<L : Lexicon>(wn : &L,
+                  errors : &mut Vec<ValidationError>,
                   bar : &ProgressBar) {
     let mut hypernyms = HashMap::new();
     let mut domains = HashMap::new();
@@ -544,7 +546,8 @@ impl fmt::Display for ValidationError {
 /// # Returns
 ///
 /// * `true` if the error was fixed, `false` otherwise
-pub fn fix(wn : &mut Lexicon, error : &ValidationError, change_list : &mut change_manager::ChangeList) -> bool {
+pub fn fix<L : Lexicon>(wn : &mut L,
+           error : &ValidationError, change_list : &mut change_manager::ChangeList) -> bool {
     match error {
         ValidationError::InvalidSenseId { id, expected } => {
             wn.update_sense_key(id, expected);

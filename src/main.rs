@@ -13,7 +13,7 @@ mod sense_keys;
 mod validate;
 mod automaton;
 
-use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey};
+use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey,LexiconHashMapBackend};
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::validate::{validate, fix};
 use std::io;
@@ -27,9 +27,9 @@ use std::fs::File;
 use std::process::exit;
 
 /// Supports the user in choosing a synset
-fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Synset) {
+fn enter_synset<'a, L : Lexicon>(wn : &'a L, spec_string : &str) -> (SynsetId, &'a Synset) {
     loop {
-        let input_str = input(&format!("Enter {}synset : ", spec_string));
+        let input_str = input(&format!("Enter {}synset: ", spec_string));
         let ssid = SynsetId::new(&input_str);
         match wn.synset_by_id(&ssid) {
             Some(ss) => {
@@ -82,13 +82,16 @@ fn enter_synset<'a>(wn : &'a Lexicon, spec_string : &str) -> (SynsetId, &'a Syns
                             }
                         }
                     }
-                } 
+                } else {
+                    println!("No such synset or entry for '{}'", input_str);
+                }
             }
         }
     }
 }
 
-fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str, 
+fn enter_sense_synset<L : Lexicon>(wordnet : &L,
+                      spec_string : &str, 
                       synset_id : Option<SynsetId>) -> (SynsetId, Option<SenseId>) {
     let synset_id = match synset_id {
         Some(ssid) => ssid,
@@ -117,7 +120,8 @@ fn enter_sense_synset(wordnet : &Lexicon, spec_string : &str,
     (synset_id, sense_id)
 }
 
-fn enter_sense(wordnet : &Lexicon, spec_string : &str, allow_none : bool) -> SenseId {
+fn enter_sense<L : Lexicon>(wordnet : &L,
+               spec_string : &str, allow_none : bool) -> SenseId {
     let synset_id = enter_synset(wordnet, spec_string).0;
     let mems = wordnet.members_by_id(&synset_id);
     loop {
@@ -161,7 +165,8 @@ fn check_text(defn : &str) -> bool {
     }
 }
 
-fn change_entry(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn change_entry<L : Lexicon>(wn : &mut L,
+                change_list : &mut ChangeList) {
     let mut action = input("[A]dd/[D]elete/[M]ove/[C]hange> ").to_uppercase();
     while action != "A" && action != "D" && action != "M" && action != "C" {
         println!("Bad action");
@@ -251,7 +256,8 @@ lazy_static! {
     static ref REASON_REGEX : Regex = Regex::new("\\w+.*\\(#\\d+\\)$").unwrap();
 }
 
-fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn change_synset<L : Lexicon>(wn : &mut L,
+                 change_list : &mut ChangeList) {
     let mut mode = String::new();
     while mode != "a" && mode != "d" {
         mode = input("(A)dd synset/(d)elete synset: ").to_lowercase();
@@ -320,7 +326,8 @@ fn change_synset(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn change_definition<L : Lexicon>(wn : &mut L,
+    change_list : &mut ChangeList) {
     let (synset_id, synset) = enter_synset(wn, "");
 
     println!("Definition     : {}", synset.definition[0]);
@@ -337,7 +344,8 @@ fn change_definition(wn : &mut Lexicon, change_list : &mut ChangeList) {
     change_list.mark();
 }
 
-fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn change_example<L : Lexicon>(wn : &mut L,
+    change_list : &mut ChangeList) {
     let (synset_id, synset) = enter_synset(wn, "");
 
     let mut mode = String::new();
@@ -383,8 +391,9 @@ fn change_example(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
-                change_list : &mut ChangeList) {
+fn add_relation<L : Lexicon>(wn : &mut L,
+    source_id : Option<SynsetId>,
+    change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", source_id);
     match source_sense_id {
         Some(source_sense_id) => {
@@ -415,7 +424,8 @@ fn add_relation(wn : &mut Lexicon, source_id : Option<SynsetId>,
 
 }
 
-fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn delete_relation<L : Lexicon>(wn : &mut L,
+    change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
@@ -431,7 +441,8 @@ fn delete_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
+fn reverse_relation<L : Lexicon>(wn : &mut L,
+    change_list : &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
@@ -447,7 +458,7 @@ fn reverse_relation(wn : &mut Lexicon, change_list : &mut ChangeList) {
     }
 }
 
-fn change_relation(wn : &mut Lexicon, 
+fn change_relation<L : Lexicon>(wn : &mut L,
                    change_list : &mut ChangeList) {
     let mut mode = String::new();
     while mode != "a" && mode != "d" && mode != "r" && mode != "c" {
@@ -462,7 +473,8 @@ fn change_relation(wn : &mut Lexicon,
     }
 }
 
-fn save(wn : &Lexicon, path : &str) -> std::io::Result<bool> {
+fn save<L : Lexicon>(wn : &L,
+    path : &str) -> std::io::Result<bool> {
     let errors = validate(wn);
     if !errors.is_empty() {
         println!("There were validation errors");
@@ -490,7 +502,8 @@ fn input(prompt : &str) -> String {
     buffer.trim().to_string()
 }
 
-fn main_menu(wn : &mut Lexicon, path : &str,
+fn main_menu<L : Lexicon>(wn : &mut L,
+             path : &str,
              ewe_changed : &mut ChangeList) -> bool {
     println!("");
     println!("Please choose an option:");
@@ -590,7 +603,11 @@ fn main() {
             eprintln!("Please specify WordNet home as 2nd argument");
             exit(-1);
         };
-        let mut wn = wordnet::Lexicon::load(&path).unwrap();
+        let mut wn = LexiconHashMapBackend::new().
+            load(&path).unwrap_or_else(|e| {
+                eprintln!("Could not load WordNet from {}: {}", path, e);
+                exit(-1);
+            });
 
         let mut ewe_changed = ChangeList::new();
 
@@ -626,7 +643,8 @@ fn main() {
             }
         };
 
-        let mut wn = wordnet::Lexicon::load(&path).unwrap();
+        let mut wn = LexiconHashMapBackend::new().
+            load(&path).unwrap();
 
         let mut ewe_changed = ChangeList::new();
 

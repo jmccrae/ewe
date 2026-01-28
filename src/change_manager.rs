@@ -19,16 +19,22 @@ impl ChangeList {
 }
 
 /// Remove a relation between synsets
-pub fn delete_rel(wn : &mut Lexicon, source : &SynsetId, 
+pub fn delete_rel<L : Lexicon>(wn : &mut L, source : &SynsetId, 
                   target : &SynsetId, change_list : &mut ChangeList) {
     println!("Delete {} =*=> {}", source.as_str(), target.as_str());
-    wn.remove_rel(source, target);
-    wn.remove_rel(target, source);
+    wn.remove_rel(source, target).
+        unwrap_or_else(|_| {
+            eprintln!("Removing relation from non-existant synset");
+        });
+    wn.remove_rel(target, source).
+        unwrap_or_else(|_| {
+            eprintln!("Removing relation from non-existant synset");
+        });
     change_list.mark();
 }
 
 /// Remove a relation between senses
-pub fn delete_sense_rel(wn : &mut Lexicon, 
+pub fn delete_sense_rel<L : Lexicon>(wn : &mut L,
                         source : &SenseId, target : &SenseId,
                         change_list : &mut ChangeList) {
     println!("Delete {} =*=> {}", source.as_str(), target.as_str());
@@ -38,14 +44,19 @@ pub fn delete_sense_rel(wn : &mut Lexicon,
 }
 
 /// Add a relation between synsets
-pub fn insert_rel(wn : &mut Lexicon, source_id : &SynsetId,
+pub fn insert_rel<L : Lexicon>(wn : &mut L,
+                  source_id : &SynsetId,
                   rel_type : &SynsetRelType,
                   target_id : &SynsetId, change_list : &mut ChangeList) {
     println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
                     target_id.as_str());
-    wn.add_rel(source_id, rel_type.clone(), target_id);
+    wn.add_rel(source_id, rel_type.clone(), target_id).unwrap_or_else(|_| {
+        eprintln!("Adding relation to non-existant synset");
+    });
     if rel_type.is_symmetric() {
-        wn.add_rel(target_id, rel_type.clone(), source_id);
+        wn.add_rel(target_id, rel_type.clone(), source_id).unwrap_or_else(|_| {
+            eprintln!("Adding relation to non-existant synset");
+        });
     }
     if *rel_type == SynsetRelType::Similar {
         let mut changes = Vec::new();
@@ -75,7 +86,7 @@ pub enum RelationUpdate {
     Sense(SenseId, SenseRelType, SenseId)
 }
 
-pub fn update_rels(wn : &mut Lexicon, 
+pub fn update_rels<L : Lexicon>(wn : &mut L,
     source : &SynsetId,
     relations : Vec<RelationUpdate>,
     change_list : &mut ChangeList) {
@@ -104,7 +115,8 @@ pub fn update_rels(wn : &mut Lexicon,
 }
 
 /// Add a new entry
-pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId, 
+pub fn add_entry<L : Lexicon>(wn : &mut L,
+                 synset_id : SynsetId, 
                  lemma : String, 
                  synset_pos : PosKey,
                  subcat : Vec<String>,
@@ -163,22 +175,20 @@ pub fn add_entry(wn : &mut Lexicon, synset_id : SynsetId,
             }
         }
     };
-    match wn.synset_by_id_mut(&synset_id) {
-        Some(ref mut synset) => {
+    wn.update_synset(&synset_id, |synset| {
             if !synset.members.contains(&lemma) {
                 synset.members.push(lemma.clone());
             }
             change_list.mark();
-        },
-        None => {
-            eprintln!("Adding entry to non-existant synset");
-        }
-    }
+    }).unwrap_or_else(|_| {
+        eprintln!("Adding entry to non-existant synset");
+    });
     sense_id
 }
 
 /// Delete an entry
-pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str, 
+pub fn delete_entry<L : Lexicon>(wn : &mut L,
+                    synset_id : &SynsetId, lemma : &str, 
                     pos : &PosKey, warn : bool, change_list : &mut ChangeList) {
     println!("Removing {} from synset {}", lemma, synset_id.as_str());
     let links = wn.sense_links_to(lemma, pos, synset_id);
@@ -188,44 +198,38 @@ pub fn delete_entry(wn : &mut Lexicon, synset_id : &SynsetId, lemma : &str,
         }
     }
     change_list.mark();
-    match wn.synset_by_id_mut(&synset_id) {
-        Some(ref mut synset) => {
-            synset.members.retain(|l| l != lemma);
-            if warn && synset.members.is_empty() {
-                println!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
-            }
-        },
-        None => {
-            eprintln!("Removing entry from non-existant synset");
+    wn.update_synset(&synset_id, |synset| {
+        synset.members.retain(|l| l != lemma);
+        if warn && synset.members.is_empty() {
+            println!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
         }
-    }
-
+    }).unwrap_or_else(|_| {
+        eprintln!("Removing entry from non-existant synset");
+    });
 }
 
 /// Change the order of members in a synset
-pub fn change_members(wn : &mut Lexicon, synset_id : &SynsetId, members : Vec<String>,
+pub fn change_members<L : Lexicon>(wn : &mut L,
+                  synset_id : &SynsetId, members : Vec<String>,
                   change_list : &mut ChangeList) {
     let mut to_add = Vec::new();
     let mut to_delete = Vec::new();
-    match wn.synset_by_id_mut(synset_id) {
-        Some(ref mut synset) => {
-            for member in synset.members.iter() {
-                if !members.contains(member) {
-                    to_delete.push(member.clone());
-                }
+    wn.update_synset(synset_id, |synset| {
+        for member in synset.members.iter() {
+            if !members.contains(member) {
+                to_delete.push(member.clone());
             }
-            for member in members.iter() {
-                if !synset.members.contains(member) {
-                    to_add.push(member.clone());
-                }
-            }
-            synset.members = members;
-            change_list.mark();
-        },
-        None => {
-            eprintln!("Changing members of non-existant synset");
         }
-    }
+        for member in members.iter() {
+            if !synset.members.contains(member) {
+                to_add.push(member.clone());
+            }
+        }
+        synset.members = members;
+        change_list.mark();
+    }).unwrap_or_else(|_| {
+            eprintln!("Changing members of non-existant synset");
+    });
     for member in to_delete {
         if let Some(pos_key) = wn.pos_for_entry_synset(&member, synset_id) { 
             delete_entry(wn, synset_id, &member, 
@@ -246,7 +250,8 @@ pub fn change_members(wn : &mut Lexicon, synset_id : &SynsetId, members : Vec<St
 }
 
 /// Move an entry to another synset
-pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId, 
+pub fn move_entry<L : Lexicon>(wn : &mut L,
+              synset_id : SynsetId, 
               target_synset_id : SynsetId,
               lemma : String, pos : PosKey,
               change_list : &mut ChangeList) {
@@ -291,7 +296,8 @@ pub fn move_entry(wn : &mut Lexicon, synset_id : SynsetId,
 }
 
 /// Delete a synset
-pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
+pub fn delete_synset<L : Lexicon>(wn : &mut L,
+                 synset_id : &SynsetId,
                  supersede_id : Option<&SynsetId>,
                  reason : String, change_list: &mut ChangeList) {
     println!("Deleting synset {}", synset_id.as_str());
@@ -311,9 +317,12 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
             examples.push(example.clone());
         }
         for example in examples {
-            if let Some(ss_synset) = wn.synset_by_id_mut(supersede_id) {
-                ss_synset.example.push(example.clone());
-            }
+            wn.update_synset(supersede_id, |ss_sup| {
+                ss_sup.example.push(example.clone());
+                change_list.mark();
+            }).unwrap_or_else(|_| {
+                eprintln!("Adding example to non-existant synset");
+            });
         }
     } else {
         let entries = wn.members_by_id(synset_id);
@@ -334,7 +343,9 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
                         if rel == SynsetRelType::Hypernym {
                             hyp_targets.push(target.clone());
                         } else {
-                            wn.add_rel(supersede_id, rel, &target);
+                            wn.add_rel(supersede_id, rel, &target).unwrap_or_else(|_| {
+                                eprintln!("Adding relation to non-existant synset");
+                            });
                         }
                     }
                     let mut hyp_sources = Vec::new();
@@ -343,12 +354,16 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
                         if rel == SynsetRelType::Hypernym {
                             hyp_sources.push(source.clone());
                         } else {
-                            wn.add_rel(&source, rel, supersede_id);
+                            wn.add_rel(&source, rel, supersede_id).unwrap_or_else(|_| {
+                                eprintln!("Adding relation to non-existant synset");
+                            });
                         }
                     }
                     for source in hyp_sources {
                         for target in hyp_targets.iter() {
-                            wn.add_rel(&source, SynsetRelType::Hypernym, target);
+                            wn.add_rel(&source, SynsetRelType::Hypernym, target).unwrap_or_else(|_| {
+                                eprintln!("Adding relation to non-existant synset");
+                            });
                         }
                     }
                 },
@@ -382,7 +397,8 @@ pub fn delete_synset(wn : &mut Lexicon, synset_id : &SynsetId,
     change_list.mark();
 }
 
-fn new_id(wn : &Lexicon, pos : &PartOfSpeech, definition : &str) -> Result<SynsetId, String> {
+fn new_id<L : Lexicon>(wn : &L,
+    pos : &PartOfSpeech, definition : &str) -> Result<SynsetId, String> {
     let s = Sha256::digest(definition.as_bytes());
     let mut key : u32 = 0;
     for x in s.into_iter() {
@@ -396,7 +412,8 @@ fn new_id(wn : &Lexicon, pos : &PartOfSpeech, definition : &str) -> Result<Synse
 }
 
 /// Add a synset. Fails if POS key has invalid value.
-pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
+pub fn add_synset<L : Lexicon>(wn : &mut L,
+              definition : String, lexfile : String,
               pos : PosKey, ssid : Option<SynsetId>, 
               change_list : &mut ChangeList) -> Result<SynsetId, String> {
    match pos.to_part_of_speech() {
@@ -417,7 +434,8 @@ pub fn add_synset(wn : &mut Lexicon, definition : String, lexfile : String,
     }
 }
 
-fn find_rel_type(wn : &Lexicon, source : &SynsetId, target : &SynsetId) 
+fn find_rel_type<L : Lexicon>(wn : &L,
+    source : &SynsetId, target : &SynsetId) 
     -> Vec<SynsetRelType> {
         wn.links_from(source).into_iter()
             .filter(|x| x.1 == *target).map(|x| x.0).chain(
@@ -428,7 +446,8 @@ fn find_rel_type(wn : &Lexicon, source : &SynsetId, target : &SynsetId)
 
 
 /// Reverse the direction of relations
-pub fn reverse_rel(wn : &mut Lexicon, source : &SynsetId,
+pub fn reverse_rel<L : Lexicon>(wn : &mut L,
+               source : &SynsetId,
                target : &SynsetId, change_list : &mut ChangeList) {
     for rel_type in find_rel_type(wn, source, target) {
         delete_rel(wn, source, target, change_list);
@@ -437,7 +456,8 @@ pub fn reverse_rel(wn : &mut Lexicon, source : &SynsetId,
 }
 
 /// Add a relation between senses
-pub fn insert_sense_relation(wn : &mut Lexicon, source : SenseId, rel : SenseRelType,
+pub fn insert_sense_relation<L : Lexicon>(wn : &mut L,
+                      source : SenseId, rel : SenseRelType,
                       target : SenseId, change_list : &mut ChangeList) {
     println!("Insert {} ={}=> {}", source.as_str(), rel.value(), target.as_str());
     if rel.is_symmetric() {
@@ -447,7 +467,8 @@ pub fn insert_sense_relation(wn : &mut Lexicon, source : SenseId, rel : SenseRel
     change_list.mark();
 }
 
-fn find_sense_rel_type(wn : &Lexicon, source : &SenseId, target : &SenseId) 
+fn find_sense_rel_type<L : Lexicon>(wn : &L,
+    source : &SenseId, target : &SenseId) 
     -> Vec<SenseRelType> {
         wn.sense_links_from_id(source).into_iter()
             .filter(|x| x.1 == *target).map(|x| x.0).chain(
@@ -456,7 +477,8 @@ fn find_sense_rel_type(wn : &Lexicon, source : &SenseId, target : &SenseId)
 }
 
 /// Reverse the direction of a sense relation
-pub fn reverse_sense_rel(wn : &mut Lexicon, source : &SenseId,
+pub fn reverse_sense_rel<L : Lexicon>(wn : &mut L,
+                      source : &SenseId,
                       target : &SenseId, change_list : &mut ChangeList) {
     for rel_type in find_sense_rel_type(wn, source, target) {
         delete_sense_rel(wn, source, target, change_list);
@@ -465,52 +487,51 @@ pub fn reverse_sense_rel(wn : &mut Lexicon, source : &SenseId,
 }
 
 /// Change a definition
-pub fn update_def(wn : &mut Lexicon, synset_id : &SynsetId, defn : String,
+pub fn update_def<L : Lexicon>(wn : &mut L,
+              synset_id : &SynsetId, defn : String,
               add : bool) {
-    match wn.synset_by_id_mut(synset_id) {
-        Some(synset) => {
-            if add {
-                synset.definition.push(defn.to_string())
-            } else {
-                synset.definition = vec![defn.to_string()]
-            }
-        },
-        None => {
-            eprintln!("Changing definition of non-existant synset {}", synset_id.as_str());
+    wn.update_synset(synset_id, |synset| {
+        if add {
+            synset.definition.push(defn.to_string())
+        } else {
+            synset.definition = vec![defn.to_string()]
         }
-    }
+    }).unwrap_or_else(|_| {
+        eprintln!("Changing definition of non-existant synset {}", synset_id.as_str());
+    });
 }
 
 /// Add an example
-pub fn add_ex(wn : &mut Lexicon, synset_id : &SynsetId, example : String,
+pub fn add_ex<L : Lexicon>(wn : &mut L,
+          synset_id : &SynsetId, example : String,
           source : Option<String>, change_list : &mut ChangeList) {
-    match wn.synset_by_id_mut(synset_id) {
-        Some(ss) => {
-            ss.example.push(Example::new(example, source));
-            change_list.mark();
-        },
-        None => {
-            eprintln!("Adding example to non-existant synset");
-        }
-    }
+    wn.update_synset(synset_id, |ss| {
+        ss.example.push(Example::new(example, source));
+        change_list.mark();
+    }).unwrap_or_else(|_| {
+        eprintln!("Adding example to non-existant synset");
+    });
 }
 
 /// Remove the nth example
-pub fn delete_ex(wn : &mut Lexicon, synset_id : &SynsetId, idx : usize,
+pub fn delete_ex<L : Lexicon>(wn : &mut L,
+             synset_id : &SynsetId, idx : usize,
              change_list : &mut ChangeList) {
-    match wn.synset_by_id_mut(synset_id) {
-        Some(ss) => {
+    wn.update_synset(synset_id, |ss| {
+        if idx >= ss.example.len() {
+            eprintln!("Example index {} out of range", idx);
+        } else {
             ss.example.remove(idx);
             change_list.mark();
-        },
-        None => {
-            eprintln!("Adding example to non-existant synset");
         }
-    }
+    }).unwrap_or_else(|_| {
+        eprintln!("Adding example to non-existant synset");
+    });
 }
 
 /// Remove all indirect relations
-pub fn fix_indirect_relations(wn : &mut Lexicon, change_list : &mut ChangeList) {
+pub fn fix_indirect_relations<L : Lexicon>(wn : &mut L,
+            change_list : &mut ChangeList) {
     let mut to_delete = Vec::new();
     for (synset_id, synset) in wn.synsets() {
         for target in synset.hypernym.iter() {

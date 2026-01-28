@@ -62,7 +62,7 @@ lazy_static! {
     static ref SENSE_ID_LEX_ID : Regex = Regex::new("^.*%\\d:\\d\\d:(\\d\\d):.*$").unwrap();
 }
 
-fn gen_lex_id(wn : &Lexicon, lemma : &str) -> i32 {
+fn gen_lex_id<L : Lexicon>(wn : &L, lemma : &str) -> i32 {
     let mut max_id = -1;
     for e in wn.entry_by_lemma_ignore_case(lemma) {
         for s2 in e.sense.iter() {
@@ -92,13 +92,13 @@ fn extract_lex_id(sense_key : &SenseId) -> i32 {
     0
 }
 
-fn sense_for_entry_synset_id<'a>(wn : &'a Lexicon, ss_id : &SynsetId, lemma : &str) -> Vec<&'a Sense> {
+fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lemma : &str) -> Vec<&'a Sense> {
     wn.entry_by_lemma(lemma).iter().flat_map(|e| e.sense.iter()).
         filter(|sense| sense.synset == *ss_id).
         collect()
 }
 
-fn get_head_word(wn : &Lexicon, ss : &Synset) -> (String, String) {
+fn get_head_word<L : Lexicon>(wn : &L, ss : &Synset) -> (String, String) {
     // The hack here is we don't care about satellites in non-Princeton sets
     let mut srs : Vec<&SynsetId> = ss.similar.iter().filter(|target_id| 
         !target_id.as_str().starts_with("8") &&
@@ -124,7 +124,7 @@ fn get_head_word(wn : &Lexicon, ss : &Synset) -> (String, String) {
     }
 }
 
-pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
+pub fn get_sense_key2<L : Lexicon>(wn : &L, lemma : &str, sense_key : Option<&SenseId>,
                       synset_id : &SynsetId) -> Option<SenseId> {
     match wn.synset_by_id(synset_id) {
         Some(synset) => {
@@ -142,7 +142,7 @@ pub fn get_sense_key2(wn : &Lexicon, lemma : &str, sense_key : Option<&SenseId>,
 
 /// Calculate the sense key of an entry
 /// Pass `None` for `sense_key` for new senses
-pub fn get_sense_key(wn : &Lexicon, lemma : &str,
+pub fn get_sense_key<L : Lexicon>(wn : &L, lemma : &str,
                  sense_key : Option<&SenseId>,
                  synset : &Synset, synset_id : &SynsetId) -> SenseId {
     let ss_type = synset.part_of_speech.ss_type();

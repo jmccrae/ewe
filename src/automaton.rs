@@ -5,7 +5,7 @@ use crate::change_manager::{ChangeList, RelationUpdate};
 use crate::validate;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
-pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
+pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                     changes : &mut ChangeList) -> Result<(), String> {
     let mut last_synset_id : Option<SynsetId> = None;
     let mut last_sense_id : Option<SenseId> = None;
@@ -216,22 +216,22 @@ pub fn apply_automaton(actions : Vec<Action>, wn : &mut Lexicon,
             },
             Action::ChangeILI { synset, ili } => {
                 let synset = synset.resolve(&last_synset_id)?;
-                wn.synset_by_id_mut(&synset)
-                    .ok_or(format!("Synset {} not found", synset.as_str()))?
-                    .ili = Some(ILIID::new(&ili));
+                wn.update_synset(&synset, |s| {
+                    s.ili = Some(ILIID::new(&ili));
+                })?;
             },
             Action::ChangeWikidata { synset, wikidata } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 let wikidata = wikidata.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
-                wn.synset_by_id_mut(&synset)
-                    .ok_or(format!("Synset {} not found", synset.as_str()))?
-                    .wikidata = wikidata
+                wn.update_synset(&synset, |s| {
+                    s.wikidata = wikidata;
+                })?;
             },
             Action::ChangeSource { synset, source } => {
                 let synset = synset.resolve(&last_synset_id)?;
-                wn.synset_by_id_mut(&synset)
-                    .ok_or(format!("Synset {} not found", synset.as_str()))?
-                    .source = Some(source);
+                wn.update_synset(&synset, |s| {
+                    s.source = Some(source);
+                })?;
             },
             Action::ChangeMembers { synset, members } => {
                 change_manager::change_members(wn, &synset.resolve(&last_synset_id)?, members, changes);
@@ -297,7 +297,7 @@ pub enum SenseRef {
 }
 
 impl SenseRef {
-    fn resolve(self, last : &Option<SenseId>, wn : &Lexicon, synset : &SynsetId) -> Result<SenseId, String> {
+    fn resolve<L : Lexicon>(self, last : &Option<SenseId>, wn : &L, synset : &SynsetId) -> Result<SenseId, String> {
         match self {
             SenseRef::Id(id) => Ok(id),
             SenseRef::Lemma(lemma) => {
@@ -508,7 +508,7 @@ pub struct UpdateRelationItem {
 }
 
 impl UpdateRelationItem {
-    fn resolve(&self, wn : &mut Lexicon, source : &SynsetId, 
+    fn resolve<L : Lexicon>(&self, wn : &mut L, source : &SynsetId, 
         last_synset_id : &Option<SynsetId>,
         last_sense_id : &Option<SenseId>) -> Result<RelationUpdate, String> {
         let source_sense = if let Some(ref source_sense) = self.source_sense {
