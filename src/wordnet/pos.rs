@@ -1,4 +1,5 @@
 use serde::{Serialize,Deserialize};
+use std::fmt;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
 pub struct PosKey(String);
@@ -20,6 +21,12 @@ impl PosKey {
         } else {
             None
         }
+    }
+}
+
+impl fmt::Display for PosKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

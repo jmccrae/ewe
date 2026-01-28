@@ -5,13 +5,15 @@ use std::fs::File;
 use crate::rels::{SenseRelType,SynsetRelType};
 use indicatif::ProgressBar;
 use crate::wordnet::*;
+use crate::wordnet::entry::BTEntries;
 
 pub trait Lexicon : Sized {
+    type E : Entries;
     // Data access methods
-    fn entries_get(&self, lemma : &str) -> Option<&Entries>;
-    fn entries_insert(&mut self, key : String, entries : Entries);
-    fn entries_iter(&self) -> impl Iterator<Item=(&String, &Entries)>;
-    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Entries));
+    fn entries_get(&self, lemma : &str) -> Option<&Self::E>;
+    fn entries_insert(&mut self, key : String, entries : BTEntries);
+    fn entries_iter(&self) -> impl Iterator<Item=(&String, &Self::E)>;
+    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E));
     fn synsets_get(&self, lexname : &str) -> Option<&Synsets>;
     fn synsets_insert(&mut self, lexname : String, synsets : Synsets);
     fn synsets_iter(&self) -> impl Iterator<Item=(&String, &Synsets)>;
@@ -63,7 +65,7 @@ pub trait Lexicon : Sized {
                 unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
                 let key = file_name[8..9].to_string();
-                let entries2 : Entries =
+                let entries2 : BTEntries =
                     serde_yaml::from_reader(File::open(file.path())
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
                         .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
@@ -93,14 +95,12 @@ pub trait Lexicon : Sized {
         // Potentially ineffecient and we should try to reimplement it at some point
         let mut sense_links_to = HashMap::new();
         for (_, es) in self.entries_iter() {
-            for e2 in es.0.values() {
-                for e in e2.values() {
-                    for sense in e.sense.iter() {
-                        for (rel_type, target) in sense.sense_links_from() {
-                            sense_links_to.entry(target.clone())
-                                .or_insert_with(Vec::new)
-                                .push((rel_type, sense.id.clone()));
-                        }
+            for (_, _, e) in es.entries() {
+                for sense in e.sense.iter() {
+                    for (rel_type, target) in sense.sense_links_from() {
+                        sense_links_to.entry(target.clone())
+                            .or_insert_with(Vec::new)
+                            .push((rel_type, sense.id.clone()));
                     }
                 }
             }
@@ -294,7 +294,7 @@ pub trait Lexicon : Sized {
         for sense in entry.sense.iter() {
             self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()));
         }
-        self.entries_update(&entry_key(&lemma), |e| {
+        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
             e.insert_entry(lemma, pos, entry);
         });
     }
@@ -313,8 +313,11 @@ pub trait Lexicon : Sized {
     fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) {
         add_sense_link_to_sense(self, &sense);
         self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()));
-        self.entries_update(&entry_key(&lemma), |e| {
-            e.insert_sense(lemma, pos, sense);
+        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+            e.insert_sense(lemma, pos, sense)
+                .unwrap_or_else(|_| {
+                    eprintln!("Failed to insert sense as the entry does not exist");
+                });
         });
     }
 
@@ -331,7 +334,7 @@ pub trait Lexicon : Sized {
                         synset_id : &SynsetId) -> Vec<SenseId> {
         let v = self.sense_links_from(lemma, pos, synset_id);
         let mut keys = Vec::new();
-        self.entries_update(&entry_key(lemma), |e| {
+        self.entries_update(&entry_key(lemma), |e : &mut Self::E| {
                 keys.extend(e.remove_sense(lemma, pos, synset_id)) });
         for source in keys.iter() {
             for (rel, target) in v.iter() {
@@ -481,8 +484,11 @@ pub trait Lexicon : Sized {
             }
             match lemma_pos {
                 Some((lemma, pos)) => {
-                    self.entries_update(&entry_key(&lemma), |e| {
-                        e.add_rel(&lemma, &pos, source, rel, target);
+                    self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+                        e.add_rel(&lemma, &pos, source, rel, target).
+                            unwrap_or_else(|_| {
+                                eprintln!("Failed to update entry");
+                            });
                     });
                 },
                 None => {}
@@ -507,8 +513,11 @@ pub trait Lexicon : Sized {
         }
         match lemma_pos {
             Some ((lemma, pos)) => {
-                self.entries_update(&entry_key(&lemma), |e| {
-                    e.remove_rel(&lemma, &pos, source, target);
+                self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+                    e.remove_rel(&lemma, &pos, source, target).
+                        unwrap_or_else(|_| {
+                            eprintln!("Could not remove sense rel");
+                        });
                 });
             },
             None => {}
@@ -555,8 +564,11 @@ pub trait Lexicon : Sized {
 
     /// Add a variant form to an entry
     fn add_form(&mut self, lemma : &str, pos : &PosKey, form : String) {
-        self.entries_update(&entry_key(&lemma), |e| {
-            e.add_form(lemma, pos, form);
+        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+            e.add_form(lemma, pos, form)
+                .unwrap_or_else(|_| {
+                    eprintln!("Could not find form");
+                });
         });
     }
 
@@ -570,8 +582,12 @@ pub trait Lexicon : Sized {
 
     /// Add a pronunciation to an entry
     fn add_pronunciation(&mut self, lemma : &str, pos : &PosKey, pronunciation : Pronunciation) {
-        self.entries_update(&entry_key(&lemma), |e| {
-            e.add_pronunciation(lemma, pos, pronunciation);
+        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+            e.add_pronunciation(lemma, pos, pronunciation).
+                unwrap_or_else(|_| {
+                    eprintln!("Could not remove pronunciation");
+                });
+
         });
     }
 
@@ -609,8 +625,11 @@ pub trait Lexicon : Sized {
             None => {}
         };
         if let Some((lemma, pos)) = lemma_pos {
-            self.entries_update(&entry_key(&lemma), |e| {
-                e.update_sense_key(&lemma, &pos, old_key, new_key);
+            self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+                e.update_sense_key(&lemma, &pos, old_key, new_key)
+                    .unwrap_or_else(|_| {
+                        eprintln!("Could not remove sense key");
+                    });
             });
         }
         match self.sense_links_to_get(old_key).map(|x| x.clone()) {

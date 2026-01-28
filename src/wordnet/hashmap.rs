@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use crate::rels::{SenseRelType,SynsetRelType};
 use crate::wordnet::*;
+use crate::wordnet::entry::BTEntries;
 
 pub struct LexiconHashMapBackend {
-    entries : HashMap<String, Entries>,
+    entries : HashMap<String, BTEntries>,
     synsets : HashMap<String, Synsets>,
     synset_id_to_lexfile : HashMap<SynsetId, String>,
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
@@ -27,20 +28,21 @@ impl LexiconHashMapBackend {
 }
 
 impl Lexicon for LexiconHashMapBackend {
-    fn entries_get(&self, lemma : &str) -> Option<&Entries> {
+    type E = BTEntries;
+    fn entries_get(&self, lemma : &str) -> Option<&BTEntries> {
         self.entries.get(lemma)
     }
-    fn entries_insert(&mut self, key : String, entries : Entries) {
+    fn entries_insert(&mut self, key : String, entries : BTEntries) {
         self.entries.insert(key, entries);
     }
-    fn entries_iter(&self) -> impl Iterator<Item=(&String, &Entries)> {
+    fn entries_iter(&self) -> impl Iterator<Item=(&String, &BTEntries)> {
         self.entries.iter()
     }
-    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Entries)) {
+    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut BTEntries)) {
         if let Some(e) = self.entries.get_mut(lemma) {
             f(e);
         } else {
-            let mut e = Entries::new();
+            let mut e = BTEntries::new();
             f(&mut e);
             self.entries.insert(lemma.to_string(), e);
         }
