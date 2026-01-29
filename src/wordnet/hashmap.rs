@@ -5,7 +5,7 @@ use crate::wordnet::entry::BTEntries;
 
 pub struct LexiconHashMapBackend {
     entries : HashMap<String, BTEntries>,
-    synsets : HashMap<String, Synsets>,
+    synsets : HashMap<String, BTSynsets>,
     synset_id_to_lexfile : HashMap<SynsetId, String>,
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
     links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
@@ -29,6 +29,7 @@ impl LexiconHashMapBackend {
 
 impl Lexicon for LexiconHashMapBackend {
     type E = BTEntries;
+    type S = BTSynsets;
     fn entries_get(&self, lemma : &str) -> Option<&BTEntries> {
         self.entries.get(lemma)
     }
@@ -47,22 +48,23 @@ impl Lexicon for LexiconHashMapBackend {
             self.entries.insert(lemma.to_string(), e);
         }
     }
-    fn synsets_get(&self, lexname : &str) -> Option<&Synsets> {
+    fn synsets_get(&self, lexname : &str) -> Option<&BTSynsets> {
         self.synsets.get(lexname)
     }
-    fn synsets_insert(&mut self, lexname : String, synsets : Synsets) {
+    fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) {
         self.synsets.insert(lexname, synsets);
     }
-    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &Synsets)> {
+    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &BTSynsets)> {
         self.synsets.iter()
     }
-    fn synsets_update(&mut self, lexname : &str, f : impl FnOnce(&mut Synsets)) {
+    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut BTSynsets) -> X) -> X {
         if let Some(s) = self.synsets.get_mut(lexname) {
-            f(s);
+            f(s)
         } else {
-            let mut s = Synsets::new();
-            f(&mut s);
+            let mut s = BTSynsets::new();
+            let result = f(&mut s);
             self.synsets.insert(lexname.to_string(), s);
+            result
         }
     }
     fn synset_id_to_lexfile_get(&self, synset_id : &SynsetId) -> Option<&String> {

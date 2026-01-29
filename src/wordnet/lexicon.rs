@@ -9,15 +9,16 @@ use crate::wordnet::entry::BTEntries;
 
 pub trait Lexicon : Sized {
     type E : Entries;
+    type S : Synsets;
     // Data access methods
     fn entries_get(&self, lemma : &str) -> Option<&Self::E>;
     fn entries_insert(&mut self, key : String, entries : BTEntries);
     fn entries_iter(&self) -> impl Iterator<Item=(&String, &Self::E)>;
     fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E));
-    fn synsets_get(&self, lexname : &str) -> Option<&Synsets>;
-    fn synsets_insert(&mut self, lexname : String, synsets : Synsets);
-    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &Synsets)>;
-    fn synsets_update(&mut self, lexname : &str, f : impl FnOnce(&mut Synsets));
+    fn synsets_get(&self, lexname : &str) -> Option<&Self::S>;
+    fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets);
+    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &Self::S)>;
+    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut Self::S) -> X) -> X;
     fn synsets_contains_key(&self, lexname : &str) -> bool {
         self.synsets_get(lexname).is_some()
     }
@@ -80,7 +81,7 @@ pub trait Lexicon : Sized {
 
                 self.entries_insert(key, entries2);
             } else if file_name.ends_with(".yaml") && file_name != "frames.yaml" {
-                let synsets2 : Synsets = serde_yaml::from_reader(
+                let synsets2 : BTSynsets = serde_yaml::from_reader(
                     File::open(file.path())
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
                         .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
@@ -108,7 +109,7 @@ pub trait Lexicon : Sized {
         self.set_sense_links_to(sense_links_to);
         let mut links_to = HashMap::new();
         for (_, ss) in self.synsets_iter() {
-            for (ssid, s) in ss.0.iter() {
+            for (ssid, s) in ss.iter() {
                 for (rel_type, target) in s.links_from() {
                     links_to.entry(target.clone())
                         .or_insert_with(Vec::new)
@@ -232,7 +233,7 @@ pub trait Lexicon : Sized {
             Some(lex_name) => {
                 match self.synsets_get(&lex_name) {
                     Some(sss) => {
-                        sss.0.get(synset_id)
+                        sss.get(synset_id)
                     },
                     None => None
                 }
@@ -246,10 +247,10 @@ pub trait Lexicon : Sized {
         match self.lex_name_for(synset_id) {
             Some(lex_name) => {
                 self.synsets_update(&lex_name, |sss| {
-                    if let Some(ss) = sss.0.get_mut(synset_id) {
-                        f(ss);
-                    }
-                });
+                    sss.update(synset_id, |ss| {
+                        f(ss)
+                    })
+                })?;
                 Ok(())
             },
             None => Err(format!("Synset ID {} not found", synset_id))
@@ -305,7 +306,7 @@ pub trait Lexicon : Sized {
         add_link_to(self, &synset_id, &synset);
         self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone());
         self.synsets_update(&lexname, |s| {
-            s.0.insert(synset_id, synset.clone());
+            s.insert(synset_id, synset.clone());
         });
     }
 
@@ -354,7 +355,7 @@ pub trait Lexicon : Sized {
         match self.lex_name_for(synset_id) {
             Some(lexname) => {
                 self.synsets_update(&lexname, |m| {
-                    removed.extend(m.0.remove_entry(synset_id));
+                    removed.extend(m.remove_entry(synset_id));
                 });
                 for (_, ss) in removed.iter() {
                     remove_link_to(self, synset_id, &ss);
@@ -653,7 +654,7 @@ pub trait Lexicon : Sized {
     /// Get all synsets
     fn synsets(&self) -> impl Iterator<Item=(&SynsetId, &Synset)> {
         self.synsets_iter().flat_map(|(_,e)| {
-            e.0.iter()
+            e.iter()
         })
     }
                 
@@ -683,7 +684,7 @@ pub trait Lexicon : Sized {
 
     /// Number of synsets in the dictionary
     fn n_synsets(&self) -> usize {
-        self.synsets_iter().map(|v| v.1.0.len()).sum()
+        self.synsets_iter().map(|v| v.1.len()).sum()
     }
 
     #[cfg(test)]

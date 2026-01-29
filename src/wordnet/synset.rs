@@ -6,14 +6,15 @@ use crate::rels::{YamlSynsetRelType,SynsetRelType};
 use crate::wordnet::*;
 use crate::wordnet::util::{escape_yaml_string, string_or_vec};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Synsets(pub(crate) BTreeMap<SynsetId, Synset>);
-
-impl Synsets {
-    pub(crate) fn new() -> Synsets { Synsets(BTreeMap::new()) }
-
-    pub(crate) fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        for (key, ss) in self.0.iter() {
+pub trait Synsets {
+    fn get(&self, id : &SynsetId) -> Option<&Synset>;
+    fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Option<Synset>;
+    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X, String>;
+    fn iter(&self) -> impl Iterator<Item=(&SynsetId, &Synset)>;
+    fn len(&self) -> usize;
+    fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)>;
+    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+        for (key, ss) in self.iter() {
             write!(w, "{}:", key.as_str())?;
             ss.save(w)?;
             write!(w, "\n")?;
@@ -21,7 +22,40 @@ impl Synsets {
         Ok(())
     }
 }
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct BTSynsets(pub(crate) BTreeMap<SynsetId, Synset>);
+
+impl BTSynsets {
+    pub(crate) fn new() -> BTSynsets { BTSynsets(BTreeMap::new()) }
+
+}
     
+impl Synsets for BTSynsets {
+    fn get(&self, id : &SynsetId) -> Option<&Synset> {
+        self.0.get(id)
+    }
+    fn insert(&mut self, id : SynsetId, synset : Synset) -> Option<Synset> {
+        self.0.insert(id, synset)
+    }
+    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X, String> {
+        if let Some(x) = self.0.get_mut(id) {
+            Ok(f(x))
+        } else {
+            Err(format!("Could not find synset {}", id))
+        }
+    }
+    fn iter(&self) -> impl Iterator<Item=(&SynsetId, &Synset)> {
+        self.0.iter()
+    }
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)> {
+        self.0.remove_entry(id)
+    }
+}
+ 
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct Synset {

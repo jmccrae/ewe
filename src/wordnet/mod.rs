@@ -11,7 +11,7 @@ pub mod sense;
 pub use sense::{Sense,SenseId};
 
 pub mod synset;
-pub use synset::{Synset,Synsets,SynsetId, ILIID};
+pub use synset::{Synset,Synsets,SynsetId, ILIID,BTSynsets};
 
 pub mod example;
 pub use example::Example;
