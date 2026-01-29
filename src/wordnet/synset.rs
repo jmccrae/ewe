@@ -28,7 +28,6 @@ pub struct BTSynsets(pub(crate) BTreeMap<SynsetId, Synset>);
 
 impl BTSynsets {
     pub(crate) fn new() -> BTSynsets { BTSynsets(BTreeMap::new()) }
-
 }
     
 impl Synsets for BTSynsets {
@@ -70,11 +69,11 @@ pub struct Synset {
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
-    also : Vec<SynsetId>,
+    pub also : Vec<SynsetId>,
     #[serde(default)]
-    attribute : Vec<SynsetId>,
+    pub attribute : Vec<SynsetId>,
     #[serde(default)]
-    causes : Vec<SynsetId>,
+    pub causes : Vec<SynsetId>,
     #[serde(default)]
     pub domain_region : Vec<SynsetId>,
     #[serde(default)]
@@ -82,23 +81,23 @@ pub struct Synset {
     #[serde(default)]
     pub exemplifies : Vec<SynsetId>,
     #[serde(default)]
-    entails : Vec<SynsetId>,
+    pub entails : Vec<SynsetId>,
     #[serde(default)]
     pub hypernym : Vec<SynsetId>,
     #[serde(default)]
     pub instance_hypernym : Vec<SynsetId>,
     #[serde(default)]
-    mero_location : Vec<SynsetId>,
+    pub mero_location : Vec<SynsetId>,
     #[serde(default)]
-    mero_member : Vec<SynsetId>,
+    pub mero_member : Vec<SynsetId>,
     #[serde(default)]
-    mero_part : Vec<SynsetId>,
+    pub mero_part : Vec<SynsetId>,
     #[serde(default)]
-    mero_portion : Vec<SynsetId>,
+    pub mero_portion : Vec<SynsetId>,
     #[serde(default)]
-    mero_substance : Vec<SynsetId>,
+    pub mero_substance : Vec<SynsetId>,
     #[serde(default)]
-    meronym : Vec<SynsetId>,
+    pub meronym : Vec<SynsetId>,
     #[serde(default)]
     pub similar : Vec<SynsetId>,
     #[serde(default)]
@@ -106,7 +105,7 @@ pub struct Synset {
     #[serde(default)]
     pub masculine : Vec<SynsetId>,
     #[serde(default)]
-    other : Vec<SynsetId>
+    pub other : Vec<SynsetId>
 }
 
 impl Synset {

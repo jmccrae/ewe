@@ -22,6 +22,14 @@ impl PosKey {
             None
         }
     }
+    pub fn entry_no(&self) -> Option<u32> {
+        if self.0.len() < 3 {
+            None
+        } else {
+            self.0[2..].parse().ok()
+        }
+    }
+    
 }
 
 impl fmt::Display for PosKey {

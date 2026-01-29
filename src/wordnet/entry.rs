@@ -267,7 +267,7 @@ pub struct Entry {
     pub form : Vec<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pronunciation : Vec<Pronunciation>
+    pub pronunciation : Vec<Pronunciation>
 }
 
 impl Entry {

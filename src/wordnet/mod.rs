@@ -28,6 +28,9 @@ pub use deprecation::DeprecationRecord;
 pub mod hashmap;
 pub use hashmap::LexiconHashMapBackend;
 
+pub mod synset_members;
+pub use synset_members::MemberSynset;
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {

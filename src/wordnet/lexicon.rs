@@ -207,12 +207,28 @@ pub trait Lexicon : Sized {
         }
     }
 
-    /// Get the mutable sense by lemma and synset id
+    /// Get the sense by lemma and synset id
     fn get_sense<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Vec<&'a Sense> {
         match self.entries_get(&entry_key(&lemma)) {
             Some(entries) => entries.get_sense(lemma, synset_id),
             None => Vec::new()
         }
+    }
+
+    /// Get the sense by its sense identifier
+    fn get_sense_by_id(&self, sense_id : &SenseId) -> Option<(&String, &PosKey, &Sense)> {
+        if let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id) {
+            for (pos2, e) in self.entry_by_lemma_with_pos(lemma) {
+                if pos == pos2 {
+                    for sense in e.sense.iter() {
+                        if &sense.id == sense_id {
+                            return Some((lemma, pos, sense))
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Get the part of speech key for an entry referring to a specific synset
