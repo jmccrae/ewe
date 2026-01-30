@@ -4,6 +4,7 @@ use crate::wordnet::{Lexicon, Synset, SynsetId, Sense, SenseId, PartOfSpeech};
 use regex::Regex;
 use std::cmp::max;
 use std::borrow::Cow;
+use crate::wordnet::Result;
 
 lazy_static! {
     static ref LEX_FILENUMS : HashMap<&'static str, usize> = {
@@ -63,9 +64,9 @@ lazy_static! {
     static ref SENSE_ID_LEX_ID : Regex = Regex::new("^.*%\\d:\\d\\d:(\\d\\d):.*$").unwrap();
 }
 
-fn gen_lex_id<L : Lexicon>(wn : &L, lemma : &str) -> i32 {
+fn gen_lex_id<L : Lexicon>(wn : &L, lemma : &str) -> Result<i32> {
     let mut max_id = -1;
-    for e in wn.entry_by_lemma_ignore_case(lemma) {
+    for e in wn.entry_by_lemma_ignore_case(lemma)? {
         for s2 in e.sense.iter() {
             for m in SENSE_ID_LEX_ID.captures_iter(s2.id.as_str()) {
                 match m[1].parse() {
@@ -80,7 +81,7 @@ fn gen_lex_id<L : Lexicon>(wn : &L, lemma : &str) -> i32 {
         }
     }
     println!("gen_lex_id {} = {}", lemma, max_id + 1);
-    max_id + 1
+    Ok(max_id + 1)
 }
         
 fn extract_lex_id(sense_key : &SenseId) -> i32 {
@@ -93,9 +94,9 @@ fn extract_lex_id(sense_key : &SenseId) -> i32 {
     0
 }
 
-fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lemma : &str) -> Vec<Cow<'a, Sense>> {
+fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lemma : &str) -> Result<Vec<Cow<'a, Sense>>> {
     let mut senses = Vec::new();
-    for entry in wn.entry_by_lemma(lemma) {
+    for entry in wn.entry_by_lemma(lemma)? {
         match entry {
             Cow::Borrowed(entry) => {
                 for sense in entry.sense.iter() {
@@ -113,74 +114,74 @@ fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lem
             }
         }
     }
-    senses
+    Ok(senses)
 }
 
-fn get_head_word<L : Lexicon>(wn : &L, ss : &Synset) -> (String, String) {
+fn get_head_word<L : Lexicon>(wn : &L, ss : &Synset) -> Result<(String, String)> {
     // The hack here is we don't care about satellites in non-Princeton sets
     let mut srs : Vec<&SynsetId> = ss.similar.iter().filter(|target_id| 
         !target_id.as_str().starts_with("8") &&
         !target_id.as_str().starts_with("9")).collect();
         
     if srs.len() != 1 {
-        ("???".to_string(), "00".to_string())
+        Ok(("???".to_string(), "00".to_string()))
     } else {
         let tss = srs.pop().unwrap();
-        match wn.members_by_id(tss).iter().flat_map(|m| {
-            sense_for_entry_synset_id(wn, tss,  m) 
+        match wn.members_by_id(tss)?.iter().flat_map(|m| {
+            sense_for_entry_synset_id(wn, tss,  m).unwrap()
         }).next() {
             Some(s2) => {
                 let (entry_id, _) = s2.id.as_str().split_at(
                     s2.id.as_str().find("%").unwrap_or(0));
-                (entry_id.to_string(), 
-                 format!("{:02}", extract_lex_id(&s2.id)))
+                Ok((entry_id.to_string(), 
+                 format!("{:02}", extract_lex_id(&s2.id))))
             },
             None => {
-                ("???".to_string(), "00".to_string())
+                Ok(("???".to_string(), "00".to_string()))
             }
         }
     }
 }
 
 pub fn get_sense_key2<L : Lexicon>(wn : &L, lemma : &str, sense_key : Option<&SenseId>,
-                      synset_id : &SynsetId) -> Option<SenseId> {
-    match wn.synset_by_id(synset_id) {
+                      synset_id : &SynsetId) -> Result<Option<SenseId>> {
+    match wn.synset_by_id(synset_id)? {
         Some(synset) => {
-            for entry in wn.entry_by_lemma(lemma) {
+            for entry in wn.entry_by_lemma(lemma)? {
                 if entry.sense.iter().any(|sense| sense.synset == *synset_id) {
-                    return Some(get_sense_key(wn, lemma, sense_key,
-                                              &synset, synset_id));
+                    return Ok(Some(get_sense_key(wn, lemma, sense_key,
+                                              &synset, synset_id)?));
                 }
             }
         },
         None => {}
     }
-    None
+    Ok(None)
 }
 
 /// Calculate the sense key of an entry
 /// Pass `None` for `sense_key` for new senses
 pub fn get_sense_key<L : Lexicon>(wn : &L, lemma : &str,
                  sense_key : Option<&SenseId>,
-                 synset : &Synset, synset_id : &SynsetId) -> SenseId {
+                 synset : &Synset, synset_id : &SynsetId) -> Result<SenseId> {
     let ss_type = synset.part_of_speech.ss_type();
-    let lex_filenum = wn.lex_name_for(synset_id).and_then(|lex_name|
+    let lex_filenum = wn.lex_name_for(synset_id)?.and_then(|lex_name|
             LEX_FILENUMS.get(lex_name.as_str()))
         .map(|x| *x)
         .unwrap_or(99);
     let lex_id = match sense_key {
         Some(sense_key) => extract_lex_id(sense_key),
-        None => gen_lex_id(wn, &lemma)
+        None => gen_lex_id(wn, &lemma)?
     };
     let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
     let (head_word, head_id) = if synset.part_of_speech == PartOfSpeech::s {
-        get_head_word(wn, synset)
+        get_head_word(wn, synset)?
     } else {
         (String::new(), String::new())
     };
-    SenseId::new(format!("{}%{}:{:02}:{:02}:{}:{}",
+    Ok(SenseId::new(format!("{}%{}:{:02}:{:02}:{}:{}",
             lemma, ss_type, lex_filenum,
-            lex_id, head_word, head_id))
+            lex_id, head_word, head_id)))
 }
 
 #[cfg(test)]

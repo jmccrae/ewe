@@ -26,32 +26,33 @@ use std::env;
 use std::fs::File;
 use std::process::exit;
 use std::borrow::Cow;
+use std::result;
 
 /// Supports the user in choosing a synset
 fn enter_synset<'a, L : Lexicon>(wn : &'a L, spec_string : &str) -> (SynsetId, Cow<'a, Synset>) {
     loop {
         let input_str = input(&format!("Enter {}synset: ", spec_string));
         let ssid = SynsetId::new(&input_str);
-        match wn.synset_by_id(&ssid) {
+        match wn.synset_by_id(&ssid).expect("Cannot read wordnet") {
             Some(ss) => {
                 return (ssid, ss);
             },
             None => {
-                let entries = wn.entry_by_lemma(&input_str);
+                let entries = wn.entry_by_lemma(&input_str).expect("Cannot read wordnet");
                 if !entries.is_empty() {
                     let senses : Vec<&Sense> = 
                         entries.iter().flat_map(|entry|
                                     entry.sense.iter()).collect();
                     if senses.len() == 1 {
                         let ssid = senses[0].synset.clone();
-                        match wn.synset_by_id(&ssid) {
+                        match wn.synset_by_id(&ssid).expect("Cannot read wordnet") {
                             Some(ss) => return (ssid, ss),
                             None => {}
                         }
                     } else {
                         println!("0. Search again");
                         for (i, sense) in senses.iter().enumerate() {
-                            let ss = wn.synset_by_id(&sense.synset);
+                            let ss = wn.synset_by_id(&sense.synset).expect("Cannot read wordnet");
                             match ss {
                                 Some(ss) => {
                                     let ex_text = if ss.example.is_empty() {
@@ -72,7 +73,7 @@ fn enter_synset<'a, L : Lexicon>(wn : &'a L, spec_string : &str) -> (SynsetId, C
                             Ok(synset_no) => {
                                 if synset_no > 0 && synset_no <= senses.len() {
                                     let ssid = senses[synset_no - 1].synset.clone();
-                                    match wn.synset_by_id(&ssid) {
+                                    match wn.synset_by_id(&ssid).expect("Cannot read wordnet") {
                                         Some(ss) => return (ssid, ss),
                                         None => {}
                                     }
@@ -98,7 +99,7 @@ fn enter_sense_synset<L : Lexicon>(wordnet : &L,
         Some(ssid) => ssid,
         None => enter_synset(wordnet, spec_string).0
     };
-    let mems = wordnet.members_by_id(&synset_id);
+    let mems = wordnet.members_by_id(&synset_id).expect("Cannot read wordnet");
     println!("0. Synset (no sense)");
     for (i, m) in mems.iter().enumerate() {
         println!("{}. {}", i + 1, m);
@@ -108,6 +109,7 @@ fn enter_sense_synset<L : Lexicon>(wordnet : &L,
         Ok(i) => {
             if i >= 1 && i <= mems.len() {
                 wordnet.get_sense(&mems[i - 1], &synset_id)
+                    .expect("Cannot read wordnet")
                     .iter()
                     .filter(|sense| sense.synset == synset_id)
                     .map(|sense| sense.id.clone())
@@ -124,7 +126,7 @@ fn enter_sense_synset<L : Lexicon>(wordnet : &L,
 fn enter_sense<L : Lexicon>(wordnet : &L,
                spec_string : &str, allow_none : bool) -> SenseId {
     let synset_id = enter_synset(wordnet, spec_string).0;
-    let mems = wordnet.members_by_id(&synset_id);
+    let mems = wordnet.members_by_id(&synset_id).expect("Cannot read wordnet");
     loop {
         if allow_none {
             println!("0. None");
@@ -137,6 +139,7 @@ fn enter_sense<L : Lexicon>(wordnet : &L,
             Ok(i) => {
                 if i >= 1 && i <= mems.len() {
                     match wordnet.get_sense(&mems[i-1], &synset_id)
+                        .expect("Cannot read wordnet")
                         .iter()
                         .filter(|sense| sense.synset == synset_id)
                         .map(|sense| sense.id.clone())
@@ -176,7 +179,7 @@ fn change_entry<L : Lexicon>(wn : &mut L,
 
     let (synset_id, synset) = enter_synset(wn, "");
 
-    let entries = wn.members_by_id(&synset_id);
+    let entries = wn.members_by_id(&synset_id).expect("Cannot read wordnet");
 
     if !entries.is_empty() {
         println!("Entries: {}", entries.join(", "));
@@ -204,11 +207,13 @@ fn change_entry<L : Lexicon>(wn : &mut L,
             Vec::new()
         };
         change_manager::add_entry(wn, synset_id, 
-                                  lemma, pos, subcat, None, change_list); 
+                                  lemma, pos, subcat, None, change_list)
+            .expect("Could not add entry");
     } else if action == "D" {
-        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+        match wn.pos_for_entry_synset(&lemma, &synset_id).expect("Cannot read wordnet") {
             Some(pos) => {
-                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
+                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list)
+                    .expect("Could not delete entry");
             },
             None => {
                 println!("Could not find entry, skipping change")
@@ -216,11 +221,12 @@ fn change_entry<L : Lexicon>(wn : &mut L,
         }
     } else if action == "M" {
         let (target_synset_id, target_synset) = enter_synset(wn, "target ");
-        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+        match wn.pos_for_entry_synset(&lemma, &synset_id).expect("Cannot read wordnet") {
             Some(pos) => {
                 if synset.part_of_speech.equals_pos(&target_synset.part_of_speech) {
                     change_manager::move_entry(wn, synset_id, target_synset_id,
-                                               lemma, pos, change_list);
+                                               lemma, pos, change_list)
+                        .expect("Could not move entry");
                 } else {
                     println!("Different part of speech, skipping this change");
                 }
@@ -230,9 +236,10 @@ fn change_entry<L : Lexicon>(wn : &mut L,
             }
         }
     } else if action == "C" {
-        match wn.pos_for_entry_synset(&lemma, &synset_id) {
+        match wn.pos_for_entry_synset(&lemma, &synset_id).expect("Cannot read wordnet") {
             Some(pos) => {
-                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list);
+                change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list)
+                    .expect("Could not delete entry");
                 let new_lemma = input("New lemma: ");
                 let subcat = if pos.as_str() == "v" {
                     input("Enter verb subcats as comma-separated list: ").split(",").
@@ -242,7 +249,8 @@ fn change_entry<L : Lexicon>(wn : &mut L,
                     Vec::new()
                 };
                 change_manager::add_entry(wn, synset_id, 
-                                          new_lemma, pos, subcat, None, change_list); 
+                                          new_lemma, pos, subcat, None, change_list)
+                    .expect("Could not add new entry");
 
             },
             None => {
@@ -276,11 +284,12 @@ fn change_synset<L : Lexicon>(wn : &mut L,
         
         change_manager::delete_synset(wn, 
                                       &synset_id, Some(&supersede_synset_id),
-                                      reason, change_list);
+                                      reason, change_list)
+            .expect("Could not delete synset");
     } else /*if mode == "a"*/ {
         let definition = input("Definition: ");
         let lexfile = input("Lexicographer file: ");
-        let poses = wn.pos_for_lexfile(&lexfile);
+        let poses = wn.pos_for_lexfile(&lexfile).expect("Cannot read wordnet");
         if poses.is_empty() {
             println!("Lexicographer file does not exist");
             return;
@@ -311,7 +320,8 @@ fn change_synset<L : Lexicon>(wn : &mut L,
                     };
                     if lemma.len() > 0 {
                         change_manager::add_entry(wn, new_id.clone(),
-                            lemma, pos.clone(), subcat, None, change_list);
+                            lemma, pos.clone(), subcat, None, change_list)
+                            .expect("Could not add lemma");
                     } else {
                         break;
                     }
@@ -407,7 +417,8 @@ fn add_relation<L : Lexicon>(wn : &mut L,
             let target_sense_id = enter_sense(wn, "target ", true);
             change_manager::insert_sense_relation(wn, source_sense_id,
                                                rel, target_sense_id,
-                                               change_list);
+                                               change_list)
+                .expect("Could not add relation");
         },
         None => {
             let mut relation = input("Enter new relation: ");
@@ -419,7 +430,8 @@ fn add_relation<L : Lexicon>(wn : &mut L,
             let target_id = enter_synset(wn, "target ").0;
             change_manager::insert_rel(wn, &source_id,
                                          &rel, &target_id,
-                                         change_list);
+                                         change_list)
+                .expect("Could not add relation");
         }
     }
 
@@ -432,7 +444,8 @@ fn delete_relation<L : Lexicon>(wn : &mut L,
         Some(source_sense_id) => {
             let target_sense_id = enter_sense(wn, "target ", false);
             change_manager::delete_sense_rel(wn, &source_sense_id,
-                                             &target_sense_id, change_list);
+                                             &target_sense_id, change_list)
+                .expect("Could not delete relation");
         },
         None => {
             let target_id = enter_synset(wn, "target ").0;
@@ -449,12 +462,14 @@ fn reverse_relation<L : Lexicon>(wn : &mut L,
         Some(source_sense_id) => {
             let target_sense_id = enter_sense(wn, "target ", false);
             change_manager::reverse_sense_rel(wn, &source_sense_id,
-                                             &target_sense_id, change_list);
+                                             &target_sense_id, change_list)
+                .expect("Could not reverse relation");
         },
         None => {
             let target_id = enter_synset(wn, "target ").0;
             change_manager::reverse_rel(wn, &source_id, &target_id,
-                                       change_list);
+                                       change_list)
+                .expect("Could not reverse relation");
         }
     }
 }
@@ -475,8 +490,8 @@ fn change_relation<L : Lexicon>(wn : &mut L,
 }
 
 fn save<L : Lexicon>(wn : &L,
-    path : &str) -> std::io::Result<bool> {
-    let errors = validate(wn);
+    path : &str) -> result::Result<bool, crate::wordnet::LexiconSaveError> {
+    let errors = validate(wn)?;
     if !errors.is_empty() {
         println!("There were validation errors");
         for error in errors {
@@ -529,7 +544,7 @@ fn main_menu<L : Lexicon>(wn : &mut L,
         "4" => change_example(wn, ewe_changed),
         "5" => change_relation(wn, ewe_changed),
         "6" => {
-            let errors = validate(wn);
+            let errors = validate(wn).expect("Could not complete validation");
             for error in errors.iter() {
                 println!("{}", error);
             }
@@ -540,10 +555,10 @@ fn main_menu<L : Lexicon>(wn : &mut L,
             }
         },
         "7" => {
-            let errors = validate(wn);
+            let errors = validate(wn).expect("Could not complete validation");
             let mut fixed = 0;
             for error in errors.iter() {
-                if fix(wn, error, ewe_changed) {
+                if fix(wn, error, ewe_changed).expect("Could not fix error") {
                     fixed += 1;
                 }
             }

@@ -3,6 +3,7 @@ use std::io::Write;
 use crate::rels::SenseRelType;
 use crate::wordnet::*;
 use crate::wordnet::util::{write_prop_sense, escape_yaml_string};
+use std::fmt;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub struct Sense {
@@ -302,4 +303,10 @@ impl SenseId {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
+
+impl fmt::Display for SenseId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 

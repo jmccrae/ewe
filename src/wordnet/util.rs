@@ -6,6 +6,7 @@ use serde::de::{self, Visitor};
 use lazy_static::lazy_static;
 use regex::Regex;
 use crate::wordnet::*;
+use std::result;
 
 static YAML_LINE_LENGTH : usize = 80;
 lazy_static! {
@@ -139,11 +140,34 @@ pub enum WordNetYAMLIOError {
     #[error("Could not load WordNet: {0}")]
     Serde(String),
     #[error("Could not load WordNet: {0}")]
-    Csv(String)
+    Csv(String),
+    #[error("Could not load WordNet: {0}")]
+    Lexicon(#[from] LexiconError)
+}
+
+#[derive(Error,Debug)]
+pub enum LexiconError {
+    #[error("Synset Identifier not found: {0}")]
+    SynsetIdNotFound(SynsetId),
+    #[error("Sense Identifier not found: {0}")]
+    SenseIdNotFound(SenseId),
+    #[error("No such entry: ({0}, {1})")]
+    EntryNotFound(String, PosKey),
+    #[cfg(feature="redb")]
+    #[error("DB error: {0}")]
+    DBError(redb::StorageError)
+}
+
+#[derive(Error,Debug)]
+pub enum LexiconSaveError {
+    #[error("Could not save WordNet: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Could not save WordNet: {0}")]
+    Lexicon(#[from] LexiconError)
 }
 
 /// Deserialize a string or a vector of strings
-pub fn string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+pub fn string_or_vec<'de, D>(deserializer: D) -> result::Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -156,21 +180,21 @@ where
             formatter.write_str("a string or a list of strings")
         }
 
-        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        fn visit_str<E>(self, value: &str) -> result::Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(vec![value.to_string()])
         }
 
-        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        fn visit_string<E>(self, value: String) -> result::Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(vec![value])
         }
 
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        fn visit_seq<A>(self, mut seq: A) -> result::Result<Self::Value, A::Error>
         where
             A: de::SeqAccess<'de>,
         {

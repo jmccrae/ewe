@@ -1,6 +1,6 @@
 use crate::wordnet::*;
 use crate::rels::*;
-use crate::sense_keys::{get_sense_key2};
+use crate::sense_keys::get_sense_key2;
 use std::fmt;
 use std::collections::{HashSet,HashMap};
 use indicatif::{ProgressBar,ProgressStyle};
@@ -8,17 +8,17 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
 
-pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
+pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
     let mut errors = Vec::new();
     println!("Validating");
-    let bar = ProgressBar::new((wn.n_entries() + 2 * wn.n_synsets()) as u64);
+    let bar = ProgressBar::new((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
     bar.set_style(ProgressStyle::default_bar()
                   .template("{wide_bar} {percent}%"));
     let mut sense_keys = HashSet::new();
-    for (lemma, poskey, entry) in wn.entries() {
+    for (lemma, poskey, entry) in wn.entries()? {
         bar.inc(1);
         for sense in entry.sense.iter() {
-           match get_sense_key2(wn, &lemma, Some(&sense.id), &sense.synset) {
+           match get_sense_key2(wn, &lemma, Some(&sense.id), &sense.synset)? {
                Some(sense_key) => {
                    if sense_key != sense.id {
                        errors.push(ValidationError::InvalidSenseId {
@@ -29,7 +29,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                },
                None => {} // No synset error will be checked next.
            }
-           match wn.synset_by_id(&sense.synset) {
+           match wn.synset_by_id(&sense.synset)? {
                Some(synset) => {
                    if poskey.to_part_of_speech() == None ||
                        synset.part_of_speech != poskey.to_part_of_speech().unwrap() && 
@@ -57,7 +57,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
            }
            let mut sr_items = HashSet::new();
            for (rel, target) in sense.sense_links_from() {
-               if !wn.has_sense(&target) && wn.synset_by_id(&SynsetId::new(target.as_str())).is_none() {
+               if !wn.has_sense(&target)? && wn.synset_by_id(&SynsetId::new(target.as_str()))?.is_none() {
                    errors.push(ValidationError::SenseRelTargetMissing {
                        id: sense.id.clone(),
                        rel: rel.clone(),
@@ -78,7 +78,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                    None => {}
                }
                if rel.is_symmetric() {
-                   if !wn.sense_links_from_id(&target).iter().any(|(r2, t2)| {
+                   if !wn.sense_links_from_id(&target)?.iter().any(|(r2, t2)| {
                        *r2 == rel && *t2 == sense.id }) {
                        errors.push(ValidationError::SenseRelationSymmetry {
                            source: sense.id.clone(),
@@ -133,7 +133,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             });
         }
     }
-    for (synset_id, synset) in wn.synsets() {
+    for (synset_id, synset) in wn.synsets()? {
         bar.inc(1);
         let ssid = synset_id.as_str();
         if ssid[(ssid.len() - 1)..ssid.len()] != *synset.part_of_speech.value() {
@@ -177,7 +177,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             }
             if rel == SynsetRelType::Hypernym || 
                 rel == SynsetRelType::InstanceHypernym {
-                match wn.synset_by_id(&target) {
+                match wn.synset_by_id(&target)? {
                     Some(target_synset) => {
                         if synset.part_of_speech != target_synset.part_of_speech {
                             errors.push(ValidationError::CrossPOSHyper {
@@ -196,7 +196,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                 }
             }
             if rel.is_symmetric() {
-                if !wn.links_from(&target).iter().any(|(r2, t2)| {
+                if !wn.links_from(&target)?.iter().any(|(r2, t2)| {
                     *r2 == rel && *t2 == synset_id }) {
                     errors.push(ValidationError::SynsetRelationSymmetry {
                         source: synset_id.clone(),
@@ -245,9 +245,9 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             });
         }
 
-        match wn.lex_name_for(&synset_id) {
+        match wn.lex_name_for(&synset_id)? {
             Some(lex_name) => {
-                if !wn.pos_for_lexfile(&lex_name).iter().any(|pos| {
+                if !wn.pos_for_lexfile(&lex_name)?.iter().any(|pos| {
                     *pos == synset.part_of_speech }) {
                     errors.push(ValidationError::Lexfile {
                         id: synset_id.clone(),
@@ -260,7 +260,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
         }
 
         for member in synset.members.iter() {
-            if !wn.entry_by_lemma(member).iter().
+            if !wn.entry_by_lemma(member)?.iter().
                 any(|entry| {
                     entry.sense.iter().any(
                         |sense| {
@@ -285,19 +285,19 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             }
         }
 
-        check_transitive(wn, &mut errors, &synset_id, &synset);
+        check_transitive(wn, &mut errors, &synset_id, &synset)?;
 
     }
-    check_no_loops(wn, &mut errors, &bar);
+    check_no_loops(wn, &mut errors, &bar)?;
     bar.finish();
-    errors
+    Ok(errors)
 }
 
 fn check_transitive<L : Lexicon>(wn : &L,
                    errors : &mut Vec<ValidationError>,
-                   synset_id : &SynsetId, synset : &Synset) {
+                   synset_id : &SynsetId, synset : &Synset) -> Result<()> {
     for target in synset.hypernym.iter() {
-        match wn.synset_by_id(target) {
+        match wn.synset_by_id(target)? {
             Some(synset2) => {
                 for target2 in synset2.hypernym.iter() {
                     if synset.hypernym.iter().any(|t| t == target2) {
@@ -312,14 +312,15 @@ fn check_transitive<L : Lexicon>(wn : &L,
             None => {} // fails elsewhere
         }
     }
+    Ok(())
 }
 
 fn check_no_loops<L : Lexicon>(wn : &L,
                   errors : &mut Vec<ValidationError>,
-                  bar : &ProgressBar) {
+                  bar : &ProgressBar) -> Result<()> {
     let mut hypernyms = HashMap::new();
     let mut domains = HashMap::new();
-    for (synset_id, synset) in wn.synsets() {
+    for (synset_id, synset) in wn.synsets()? {
         bar.inc(1);
         hypernyms.insert(synset_id.clone(), HashSet::new());
         for target in synset.hypernym.iter() {
@@ -351,7 +352,7 @@ fn check_no_loops<L : Lexicon>(wn : &L,
     let mut changed = true;
     while changed {
         changed = false;
-        for (synset_id, _) in wn.synsets() {
+        for (synset_id, _) in wn.synsets()? {
             let n_size = hypernyms[&synset_id].len();
             for c in hypernyms[&synset_id].clone() {
                 let extension : Vec<SynsetId> = 
@@ -392,6 +393,7 @@ fn check_no_loops<L : Lexicon>(wn : &L,
             }
          }
     }
+    Ok(())
 }
 
 lazy_static! {
@@ -547,10 +549,10 @@ impl fmt::Display for ValidationError {
 ///
 /// * `true` if the error was fixed, `false` otherwise
 pub fn fix<L : Lexicon>(wn : &mut L,
-           error : &ValidationError, change_list : &mut change_manager::ChangeList) -> bool {
-    match error {
+           error : &ValidationError, change_list : &mut change_manager::ChangeList) -> Result<bool> {
+    Ok(match error {
         ValidationError::InvalidSenseId { id, expected } => {
-            wn.update_sense_key(id, expected);
+            wn.update_sense_key(id, expected)?;
             true
         },
         ValidationError::SenseSynsetNotExists { .. } => false,
@@ -558,7 +560,7 @@ pub fn fix<L : Lexicon>(wn : &mut L,
         ValidationError::SenseRelationPOS { .. } => false,
         ValidationError::SynsetRelationPOS { .. } => false,
         ValidationError::SelfReferencingSenseRelation { source, target, .. } => {
-            change_manager::delete_sense_rel(wn, source, target, change_list);
+            change_manager::delete_sense_rel(wn, source, target, change_list)?;
             true
         },
         ValidationError::SelfReferencingSynsetRelation { source, target, .. } => {
@@ -589,12 +591,12 @@ pub fn fix<L : Lexicon>(wn : &mut L,
         ValidationError::Definition { .. } => false,
         ValidationError::Lexfile { .. } => false,
         ValidationError::SenseRelationSymmetry { source, rel, target } => {
-            change_manager::insert_sense_relation(wn, source.clone(), rel.clone(), target.clone(), change_list);
+            change_manager::insert_sense_relation(wn, source.clone(), rel.clone(), target.clone(), change_list)?;
             true
         },
         ValidationError::SynsetRelationSymmetry { source, rel, target } => {
 
-            change_manager::insert_rel(wn, target, rel, source, change_list);
+            change_manager::insert_rel(wn, target, rel, source, change_list)?;
             true
         },
         ValidationError::Transitivity { id1, id2, id3 } =>  {
@@ -610,5 +612,5 @@ pub fn fix<L : Lexicon>(wn : &mut L,
             false
         },
         ValidationError::SenseNotInSynsetMembers { .. } => false,
-    }
+    })
 }

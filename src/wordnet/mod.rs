@@ -1,5 +1,5 @@
 pub mod lexicon;
-pub use lexicon::Lexicon;
+pub use lexicon::{Lexicon, Result};
 
 pub mod entry;
 pub use entry::{Entry,Entries};
@@ -20,7 +20,7 @@ pub mod pos;
 pub use pos::{PartOfSpeech, PosKey};
 
 mod util;
-pub use util::{WordNetYAMLIOError, string_or_vec};
+pub use util::{WordNetYAMLIOError, LexiconError, LexiconSaveError, string_or_vec};
 
 pub mod deprecation;
 pub use deprecation::DeprecationRecord;

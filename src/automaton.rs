@@ -13,15 +13,15 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
         match action {
             Action::AddEntry { synset, lemma, pos, subcat } => {
                 last_sense_id = change_manager::add_entry(wn, synset.resolve(&last_synset_id)?, 
-                    lemma, pos, subcat, None, changes);
+                    lemma, pos, subcat, None, changes).map_err(|e| e.to_string())?;
             },
             Action::DeleteEntry { synset, lemma } => {
-                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?) {
+                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?).map_err(|e| e.to_string())? {
                     Some(pos) => {
                         change_manager::delete_entry(wn, 
                             &synset.resolve(&last_synset_id)?, 
                             &lemma, &pos, 
-                            true, changes);
+                            true, changes).map_err(|e| e.to_string())?;
                     },
                     None => { 
                         return Err(format!("Entry {} not found in synset {}", lemma, synset.as_str()));
@@ -29,18 +29,18 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 }
             },
             Action::MoveEntry { synset, lemma, target_synset } => {
-                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?) {
+                match wn.pos_for_entry_synset(&lemma, &synset.clone().resolve(&last_synset_id)?).map_err(|e| e.to_string())? {
                     Some(pos) => {
                         change_manager::move_entry(wn, 
                             synset.resolve(&last_synset_id)?, 
                             target_synset.resolve(&last_synset_id)?, 
-                            lemma, pos, changes);
+                            lemma, pos, changes).map_err(|e| e.to_string())?;
                     },
                     None => return Err(format!("Entry {} not found in synset {}", lemma, synset.as_str()))
                 }
             },
             Action::AddSynset { definition, lexfile, pos, lemmas, subcats } => {
-                let poses = wn.pos_for_lexfile(&lexfile);
+                let poses = wn.pos_for_lexfile(&lexfile).map_err(|e| e.to_string())?;
                 let pos = if let Some(pos) = pos {
                     match pos.to_part_of_speech() {
                         Some(p) => if !poses.iter().any(|p2| p == *p2) {
@@ -67,7 +67,7 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                                         lemma, pos.clone(), 
                                         Vec::new(),
                                         None,
-                                        changes);
+                                        changes).map_err(|e| e.to_string())?;
                                 }
                             } else {
                                 for (lemma, subcat) in lemmas.into_iter().zip(subcats.into_iter()) {
@@ -76,18 +76,18 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                                         lemma, pos.clone(), 
                                         subcat,
                                         None,
-                                        changes);
+                                        changes).map_err(|e| e.to_string())?;
                                 }
                             }
                             last_synset_id = Some(new_id);
                         },
-                        Err(e) => return Err(e)
+                        Err(e) => return Err(e.to_string())
                 }
             },
             Action::DeleteSynset { synset, reason, superseded_by } => {
                 change_manager::delete_synset(wn, 
                     &synset.resolve(&last_synset_id)?, Some(&superseded_by.resolve(&last_synset_id)?), 
-                    reason, changes);
+                    reason, changes).map_err(|e| e.to_string())?;
             },
             Action::Definition { synset, definition } => {
                 change_manager::update_def(wn, 
@@ -106,7 +106,9 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 let source_sense = if let Some(source_sense) = source_sense {
                     Some(source_sense.resolve(&last_sense_id, wn, &source)?)
                 } else if let Some(lemma) = source_lemma.as_ref() {
-                    Some(wn.get_sense_id2(&lemma, &source).ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
+                    Some(wn.get_sense_id2(&lemma, &source)
+                        .map_err(|e| e.to_string())?
+                        .ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
                 } else {
                     None
                 };
@@ -114,7 +116,9 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 let target_sense = if let Some(target_sense) = target_sense {
                     Some(target_sense.resolve(&last_sense_id, wn, &target)?)
                 } else if let Some(lemma) = target_lemma.as_ref() {
-                    Some(wn.get_sense_id2(&lemma, &target).ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
+                    Some(wn.get_sense_id2(&lemma, &target)
+                        .map_err(|e| e.to_string())?
+                        .ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
                 } else {
                     None
                 };
@@ -127,14 +131,14 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                             sense.clone(), 
                             SenseRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}.", relation))?,
-                            target_sense, changes);
+                            target_sense, changes).map_err(|e| e.to_string())?;
                     },
                     None => {
                         change_manager::insert_rel(wn, 
                             &source,
                             &SynsetRelType::from(&relation)
                                 .ok_or(format!("Bad relation {}.", relation))?,
-                            &target, changes);
+                            &target, changes).map_err(|e| e.to_string())?;
                     }
                 }
             },
@@ -143,7 +147,9 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 let source_sense = if let Some(source_sense) = source_sense {
                     Some(source_sense.resolve(&last_sense_id, wn, &source)?)
                 } else if let Some(lemma) = source_lemma.as_ref() {
-                    Some(wn.get_sense_id2(&lemma, &source).ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
+                    Some(wn.get_sense_id2(&lemma, &source)
+                        .map_err(|e| e.to_string())?
+                        .ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
                 } else {
                     None
                 };
@@ -151,7 +157,9 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 let target_sense = if let Some(target_sense) = target_sense {
                     Some(target_sense.resolve(&last_sense_id, wn, &target)?)
                 } else if let Some(lemma) = target_lemma.as_ref() {
-                    Some(wn.get_sense_id2(&lemma, &target).ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
+                    Some(wn.get_sense_id2(&lemma, &target)
+                        .map_err(|e| e.to_string())?
+                        .ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
                 } else {
                     None
                 };
@@ -162,7 +170,7 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                             .ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?;
                         change_manager::delete_sense_rel(wn, 
                             &source_sense,
-                            &target_sense, changes);
+                            &target_sense, changes).map_err(|e| e.to_string())?;
                     },
                     None => {
                         change_manager::delete_rel(wn, 
@@ -180,12 +188,13 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                         
                         change_manager::reverse_sense_rel(wn, 
                             &source_sense,
-                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id, wn, &target.resolve(&last_synset_id)?)?, changes);
+                            &target_sense.ok_or(format!("Source sense {} with target sense", source_sense.as_str()))?.resolve(&last_sense_id, wn, &target.resolve(&last_synset_id)?)?, changes).map_err(|e| e.to_string())?;
                     },
                     None => {
                         change_manager::reverse_rel(wn, 
                             &source.resolve(&last_synset_id)?, 
-                            &target.resolve(&last_synset_id)?, changes);
+                            &target.resolve(&last_synset_id)?, changes)
+                            .map_err(|e| e.to_string())?;
                     }
                 }
             },
@@ -197,10 +206,10 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                 }
                 change_manager::update_rels(wn, 
                     &synset,
-                    relations2, changes);
+                    relations2, changes).map_err(|e| e.to_string())?;
             },
             Action::Validate => {
-                let errors = validate(wn);
+                let errors = validate(wn).map_err(|e| e.to_string())?;
                 for error in errors.iter() {
                     println!("{}", error);
                 }
@@ -212,29 +221,29 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
 
             },
             Action::FixTransitivity => {
-                change_manager::fix_indirect_relations(wn, changes);
+                change_manager::fix_indirect_relations(wn, changes).map_err(|e| e.to_string())?;
             },
             Action::ChangeILI { synset, ili } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 wn.update_synset(&synset, |s| {
                     s.ili = Some(ILIID::new(&ili));
-                })?;
+                }).map_err(|e| e.to_string())?;
             },
             Action::ChangeWikidata { synset, wikidata } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 let wikidata = wikidata.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
                 wn.update_synset(&synset, |s| {
                     s.wikidata = wikidata;
-                })?;
+                }).map_err(|e| e.to_string())?;
             },
             Action::ChangeSource { synset, source } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 wn.update_synset(&synset, |s| {
                     s.source = Some(source);
-                })?;
+                }).map_err(|e| e.to_string())?;
             },
             Action::ChangeMembers { synset, members } => {
-                change_manager::change_members(wn, &synset.resolve(&last_synset_id)?, members, changes);
+                change_manager::change_members(wn, &synset.resolve(&last_synset_id)?, members, changes).map_err(|e| e.to_string())?;
             },
         }
     }
@@ -301,7 +310,7 @@ impl SenseRef {
         match self {
             SenseRef::Id(id) => Ok(id),
             SenseRef::Lemma(lemma) => {
-                wn.entry_by_lemma(&lemma).iter().flat_map(|entry| entry.sense.iter())
+                wn.entry_by_lemma(&lemma).map_err(|e| e.to_string())?.iter().flat_map(|entry| entry.sense.iter())
                     .filter(|sense| sense.synset == *synset)
                     .map(|sense| sense.id.clone())
                     .next()
@@ -514,7 +523,9 @@ impl UpdateRelationItem {
         let source_sense = if let Some(ref source_sense) = self.source_sense {
             Some(source_sense.clone().resolve(&last_sense_id, wn, &source)?)
         } else if let Some(lemma) = self.source_lemma.as_ref() {
-            Some(wn.get_sense_id2(&lemma, &source).ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
+            Some(wn.get_sense_id2(&lemma, &source)
+                .map_err(|e| e.to_string())?
+                .ok_or(format!("No sense with lemma {} in {}", lemma, source.as_str()))?.clone())
         } else {
             None
         };
@@ -522,7 +533,9 @@ impl UpdateRelationItem {
         let target_sense = if let Some(ref target_sense) = self.target_sense {
             Some(target_sense.clone().resolve(&last_sense_id, wn, &target)?)
         } else if let Some(lemma) = self.target_lemma.as_ref() {
-            Some(wn.get_sense_id2(&lemma, &target).ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
+            Some(wn.get_sense_id2(&lemma, &target)
+                .map_err(|e| e.to_string())?
+                .ok_or(format!("No sense with lemma {} in {}", lemma, target.as_str()))?.clone())
         } else {
             None
         };

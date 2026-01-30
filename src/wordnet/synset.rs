@@ -10,8 +10,8 @@ use std::borrow::Cow;
 pub trait Synsets : Sized {
     fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>>;
     fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Option<Synset>;
-    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X, String>;
-    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)>;
+    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X>;
+    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> + 'a;
     fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)>;
     fn len(&self) -> usize;
     fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)>;
@@ -39,11 +39,11 @@ impl Synsets for BTSynsets {
     fn insert(&mut self, id : SynsetId, synset : Synset) -> Option<Synset> {
         self.0.insert(id, synset)
     }
-    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X, String> {
+    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
         if let Some(x) = self.0.get_mut(id) {
             Ok(f(x))
         } else {
-            Err(format!("Could not find synset {}", id))
+            Err(LexiconError::SynsetIdNotFound(id.clone()))
         }
     }
     fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> {
