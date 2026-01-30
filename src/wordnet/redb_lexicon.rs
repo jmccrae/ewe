@@ -27,9 +27,10 @@ impl Lexicon for ReDBLexicon {
         Ok(self.entries.get(lemma).map(|x| Cow::Borrowed(x)))
     }
     fn entries_insert(&mut self, key : String, entries : BTEntries) -> Result<()> {
-        for (lemma, pos, entry) in entries.into_entries() {
+        for entry in entries.into_entries()? {
+            let (lemma, pos, entry) = entry?;
             if let Some(e) = self.entries.get_mut(&key) {
-                e.insert_entry(lemma, pos, entry);
+                e.insert_entry(lemma, pos, entry)?;
             }
         }
         Ok(())
@@ -51,9 +52,10 @@ impl Lexicon for ReDBLexicon {
         Ok(self.synsets.get(lexname).map(Cow::Borrowed))
     }
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()> {
-        for (id, synset) in synsets.into_iter() {
+        for synset in synsets.into_iter()? {
+            let (id, synset) = synset?;
             if let Some(s) = self.synsets.get_mut(&lexname) {
-                s.insert(id, synset);
+                s.insert(id, synset)?;
             }
         }
         Ok(())
@@ -139,27 +141,27 @@ impl ReDBEntries {
 }
 
 impl Entries for ReDBEntries {
-    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Option<Cow<'a, Entry>> {
+    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Result<Option<Cow<'a, Entry>>> {
         panic!("TODO");
     }
-    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) {
+    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) -> Result<()> {
         panic!("TODO");
     }
     fn update_entry<X>(&mut self, lemma : &str, pos_key : &PosKey,
         f : impl FnOnce(&mut Entry) -> X) -> Result<X> {
         panic!("TODO");
         }
-    fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Option<Entry> {
+    fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Result<Option<Entry>> {
         panic!("TODO");
     }
 
-    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
         panic!("TODO");
     }
-    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)> {
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
         panic!("TODO");
     }
-    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
         panic!("TODO");
     }
 
@@ -167,23 +169,28 @@ impl Entries for ReDBEntries {
     //    //SynsetIterator::new(self.db.clone())
     //    panic!("TODO")
     //}
-    fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)> {
-        let txn = self.db.begin_read().unwrap();
-        let table = txn.open_table(ENTRIES_TABLE).unwrap();
-        EntryIterator::new(txn, table, |table| {
+    fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ENTRIES_TABLE)?;
+        Ok(EntryIterator::new(txn, table, |table| {
             table.iter().unwrap()
-        }).map(|(l,p,e)| (l,p,Cow::Owned(e)))
+        }).map(|e| {
+            match e {
+                Ok((l,p,en)) => Ok((l,p,Cow::Owned(en))),
+                Err(err) => Err(err)
+            }
+        }))
     }
 
-    fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)> {
-        let txn = self.db.begin_read().unwrap();
-        let table = txn.open_table(ENTRIES_TABLE).unwrap();
-        EntryIterator::new(txn, table, |table| {
+    fn into_entries(self) -> Result<impl Iterator<Item=Result<(String, PosKey, Entry)>>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ENTRIES_TABLE)?;
+        Ok(EntryIterator::new(txn, table, |table| {
             table.iter().unwrap()
-        })
+        }))
     }
 
-    fn n_entries(&self) -> usize {
+    fn n_entries(&self) -> Result<usize> {
         panic!("TODO");
     }
  
@@ -202,34 +209,43 @@ impl ReDBSynsets {
 }
 
 impl Synsets for ReDBSynsets {
-    fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>> {
-        panic!("TODO");
+    fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
+        // TODO: implement DB lookup and deserialization
+        Ok(None)
     }
-    fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Option<Synset> {
-        panic!("TODO");
+    fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
+        // TODO: implement DB insert and return previous value if any
+        let _ = (id, synset);
+        Ok(None)
     }
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
         panic!("TODO");
     }
-    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> + 'a {
-        let txn = self.db.begin_read().unwrap();
-        let table = txn.open_table(SYNSETS_TABLE).unwrap();
-        SynsetIterator::new(txn, table, |table| {
+    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        Ok(SynsetIterator::new(txn, table, |table| {
             table.iter().unwrap()
-        }).map(|(k, v)| (k, Cow::Owned(v)))
+        }).map(|kv| {
+            let (k, v) = kv?;
+            Ok((k, Cow::Owned(v)))
+        }))
     }
-    fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)> {
-        let txn = self.db.begin_read().unwrap();
-        let table = txn.open_table(SYNSETS_TABLE).unwrap();
-        SynsetIterator::new(txn, table, |table| {
+    fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        Ok(SynsetIterator::new(txn, table, |table| {
             table.iter().unwrap()
-        })
+        }))
     }
-    fn len(&self) -> usize {
-        panic!("TODO");
+    fn len(&self) -> Result<usize> {
+        // TODO: implement accurate counting
+        Ok(0)
     }
-    fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)> {
-        panic!("TODO");
+    fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
+        // TODO: implement removal from DB and return removed entry if any
+        let _ = id;
+        Ok(None)
     }
 }
 
@@ -243,13 +259,13 @@ pub struct SynsetIterator {
 }
 
 impl Iterator for SynsetIterator {
-    type Item = (SynsetId, Synset);
+    type Item = Result<(SynsetId, Synset)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.with_inner_mut(|inner| {
             inner.next().map(|res| {
-                let (k, v) = res.unwrap();
-                (SynsetId::new_owned(k.value()), deserialize_synset(v.value()))
+                let (k, v) = res?;
+                Ok((SynsetId::new_owned(k.value()), deserialize_synset(v.value())))
             })
         })
     }
@@ -270,16 +286,16 @@ pub struct EntryIterator {
 }
 
 impl Iterator for EntryIterator {
-    type Item = (String, PosKey, Entry);
+    type Item = Result<(String, PosKey, Entry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.with_inner_mut(|inner| {
             inner.next().map(|res| {
-                let (ks, v) = res.unwrap();
+                let (ks, v) = res?;
                 let (k1, k2) = ks.value();
-                (k1,
+                Ok((k1,
                     PosKey::new(k2),
-                    deserialize_entry(v.value()))
+                    deserialize_entry(v.value())))
             })
         })
     }

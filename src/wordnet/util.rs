@@ -153,7 +153,13 @@ pub enum LexiconError {
     EntryNotFound(String, PosKey),
     #[cfg(feature="redb")]
     #[error("DB error: {0}")]
-    DBError(redb::StorageError)
+    DBStorageError(#[from] redb::StorageError),
+    #[cfg(feature="redb")]
+    #[error("DB error: {0}")]
+    DBTransactionError(#[from] redb::TransactionError),
+    #[cfg(feature="redb")]
+    #[error("DB error: {0}")]
+    DBTableError(#[from] redb::TableError)
 }
 
 #[derive(Error,Debug)]

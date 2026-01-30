@@ -15,7 +15,8 @@ pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
     bar.set_style(ProgressStyle::default_bar()
                   .template("{wide_bar} {percent}%"));
     let mut sense_keys = HashSet::new();
-    for (lemma, poskey, entry) in wn.entries()? {
+    for entry in wn.entries()? {
+        let (lemma, poskey, entry) = entry?;
         bar.inc(1);
         for sense in entry.sense.iter() {
            match get_sense_key2(wn, &lemma, Some(&sense.id), &sense.synset)? {
@@ -133,7 +134,8 @@ pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
             });
         }
     }
-    for (synset_id, synset) in wn.synsets()? {
+    for synset in wn.synsets()? {
+        let (synset_id, synset) = synset?;
         bar.inc(1);
         let ssid = synset_id.as_str();
         if ssid[(ssid.len() - 1)..ssid.len()] != *synset.part_of_speech.value() {
@@ -269,7 +271,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
                 }) {
                 errors.push(ValidationError::SynsetMemberNotInEntries {
                     id: synset_id.clone(), 
-                    member: member.clone()
+                    member: member.to_string()
                 });
             }
         }
@@ -320,7 +322,8 @@ fn check_no_loops<L : Lexicon>(wn : &L,
                   bar : &ProgressBar) -> Result<()> {
     let mut hypernyms = HashMap::new();
     let mut domains = HashMap::new();
-    for (synset_id, synset) in wn.synsets()? {
+    for synsets in wn.synsets()? {
+        let (synset_id, synset) = synsets?;
         bar.inc(1);
         hypernyms.insert(synset_id.clone(), HashSet::new());
         for target in synset.hypernym.iter() {
@@ -352,7 +355,8 @@ fn check_no_loops<L : Lexicon>(wn : &L,
     let mut changed = true;
     while changed {
         changed = false;
-        for (synset_id, _) in wn.synsets()? {
+        for synsets in wn.synsets()? {
+            let (synset_id, _) = synsets?;
             let n_size = hypernyms[&synset_id].len();
             for c in hypernyms[&synset_id].clone() {
                 let extension : Vec<SynsetId> = 

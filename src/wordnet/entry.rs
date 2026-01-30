@@ -8,23 +8,22 @@ use crate::wordnet::util::escape_yaml_string;
 use std::result;
 
 pub trait Entries : Sized {
-    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Option<Cow<'a, Entry>>;
-    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry);
+    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Result<Option<Cow<'a, Entry>>>;
+    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) -> Result<()>;
     fn update_entry<X>(&mut self, lemma : &str, pos_key : &PosKey,
         f : impl FnOnce(&mut Entry) -> X) -> Result<X>;
-    fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Option<Entry>;
+    fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Result<Option<Entry>>;
 
-    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>>;
-    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)>;
-    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>>;
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>>;
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>>;
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>>;
 
-    //fn iter(&self) -> impl Iterator<Item=(&String,Vec<(&PosKey, &Entry)>)>;
-
-    fn n_entries(&self) -> usize;
+    fn n_entries(&self) -> Result<usize>;
     
     fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         let mut last_lemma = None;
-        for (lemma, pos, entry) in self.entries() {
+        for entry in self.entries()? {
+            let (lemma, pos, entry) = entry?;
             if last_lemma.is_none() || last_lemma.as_ref().unwrap() != &lemma {
                 write!(w, "{}:\n", escape_yaml_string(&lemma,0,0))?;
             }
@@ -35,70 +34,68 @@ pub trait Entries : Sized {
         Ok(())
     }
 
-
     fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) -> Result<()> {
         self.update_entry(&lemma, &pos, |entry| {
             entry.sense.push(sense);
         })?;
         Ok(())
     }
-    fn remove_sense(&mut self, lemma : &str, pos : &PosKey, synset : &SynsetId) -> Vec<SenseId> {
-        if let Ok(removed_ids) = self.update_entry(lemma, pos, |e| {
+
+    fn remove_sense(&mut self, lemma : &str, pos : &PosKey, synset : &SynsetId) -> Result<Vec<SenseId>> {
+        let removed_ids = self.update_entry(lemma, pos, |e| {
             let sense_id = e.sense.iter().
                 filter(|s| s.synset == *synset).
                 map(|s| s.id.clone()).collect();
             e.sense.retain(|s| s.synset != *synset);
             sense_id
-        }) {
-            if let Some(e) = self.entry(lemma, pos) {
-                if e.sense.is_empty() {
-                    self.remove_entry(lemma, pos);
-                }
+        })?;
+        
+        if let Some(e) = self.entry(lemma, pos)? {
+            if e.sense.is_empty() {
+                self.remove_entry(lemma, pos)?;
             }
-            removed_ids
-        } else {
-            vec![]
         }
+        Ok(removed_ids)
     }
 
     fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
-                            synset_id : &SynsetId) -> Vec<(SenseRelType, SenseId)> {
-        if let Some(e) = self.entry(lemma, pos) {
-            e.sense.iter().filter(|sense| sense.synset == *synset_id)
-                .flat_map(|sense| sense.sense_links_from()).collect()
+                            synset_id : &SynsetId) -> Result<Vec<(SenseRelType, SenseId)>> {
+        if let Some(e) = self.entry(lemma, pos)? {
+            Ok(e.sense.iter().filter(|sense| sense.synset == *synset_id)
+                .flat_map(|sense| sense.sense_links_from()).collect())
         } else {
-            vec![]
+            Ok(vec![])
         }
     }
 
     fn sense_links_from_id(&self, lemma : &str, pos : &PosKey, 
-                               sense_id : &SenseId) -> Vec<(SenseRelType, SenseId)> {
-        if let Some(e) = self.entry(lemma, pos) {
-            e.sense.iter().filter(|sense| sense.id == *sense_id)
-                .flat_map(|sense| sense.sense_links_from()).collect()
+                               sense_id : &SenseId) -> Result<Vec<(SenseRelType, SenseId)>> {
+        if let Some(e) = self.entry(lemma, pos)? {
+            Ok(e.sense.iter().filter(|sense| sense.id == *sense_id)
+                .flat_map(|sense| sense.sense_links_from()).collect())
         } else {
-            vec![]
+            Ok(vec![])
         }
     }
 
-    fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> Option<SenseId> {
-        if let Some(e) = self.entry(lemma, pos) {
-            e.sense.iter().filter(|sense| sense.synset == *synset_id)
-                .map(|sense| sense.id.clone()).nth(0)
+    fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> Result<Option<SenseId>> {
+        if let Some(e) = self.entry(lemma, pos)? {
+            Ok(e.sense.iter().filter(|sense| sense.synset == *synset_id)
+                .map(|sense| sense.id.clone()).nth(0))
         } else {
-            None
+            Ok(None)
         }
     }
 
-    fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Option<SenseId> {
-        for e in self.entry_by_lemma(lemma) {
+    fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Result<Option<SenseId>> {
+        for e in self.entry_by_lemma(lemma)? {
             for sense in e.sense.iter() {
                 if sense.synset == *synset_id {
-                    return Some(sense.id.clone());
+                    return Ok(Some(sense.id.clone()));
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     fn add_rel(&mut self, lemma : &str, pos : &PosKey,
@@ -125,11 +122,11 @@ pub trait Entries : Sized {
         })
     }
 
-    fn get_forms(&self, lemma : &str, pos : &PosKey) -> Vec<String> {
-        if let Some(e) = self.entry(lemma, pos) {
-            e.form.clone()
+    fn get_forms(&self, lemma : &str, pos : &PosKey) -> Result<Vec<String>> {
+        if let Some(e) = self.entry(lemma, pos)? {
+            Ok(e.form.clone())
         } else {
-            vec![]
+            Ok(vec![])
         }
     }
 
@@ -141,11 +138,11 @@ pub trait Entries : Sized {
         })
     }
 
-    fn get_pronunciations(&self, lemma : &str, pos : &PosKey) -> Vec<Pronunciation> {
-        if let Some(e) = self.entry(lemma, pos) {
-            e.pronunciation.iter().map(|x| x.clone()).collect()
+    fn get_pronunciations(&self, lemma : &str, pos : &PosKey) -> Result<Vec<Pronunciation>> {
+        if let Some(e) = self.entry(lemma, pos)? {
+            Ok(e.pronunciation.iter().map(|x| x.clone()).collect())
         } else {
-            vec![]
+            Ok(vec![])
         }
     }
 
@@ -158,10 +155,9 @@ pub trait Entries : Sized {
     }
 
     fn get_sense<'a>(&'a self, lemma : &str, 
-                         synset_id : &SynsetId) -> Vec<Cow<'a, Sense>> {
-        
+                         synset_id : &SynsetId) -> Result<Vec<Cow<'a, Sense>>> {
         let mut senses = Vec::new();
-        for e in self.entry_by_lemma(lemma) {
+        for e in self.entry_by_lemma(lemma)? {
             match e {
                 Cow::Borrowed(e) => {
                     for s in e.sense.iter() {
@@ -179,9 +175,8 @@ pub trait Entries : Sized {
                 }
             }
         }
-        senses
+        Ok(senses)
     }
-
 
     fn update_sense_key(&mut self, lemma : &str, key : &PosKey,
                         old_key : &SenseId, new_key : &SenseId) -> Result<()> {
@@ -194,9 +189,9 @@ pub trait Entries : Sized {
         })
     }
 
-    fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)>;
+    fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>> + 'a>;
 
-    fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)>;
+    fn into_entries(self) -> Result<impl Iterator<Item=Result<(String, PosKey, Entry)>>>;
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
@@ -209,12 +204,18 @@ impl BTEntries {
 }
 
 impl Entries for BTEntries {
-    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Option<Cow<'a, Entry>> {
+    fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Result<Option<Cow<'a, Entry>>> {
         if let Some(by_pos) = self.0.get(lemma) {
-            by_pos.get(pos_key).map(Cow::Borrowed)
+            Ok(by_pos.get(pos_key).map(Cow::Borrowed))
         } else {
-            None
+            Ok(None)
         }
+    }
+
+    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) -> Result<()> {
+        self.0.entry(lemma).
+            or_insert_with(|| BTreeMap::new()).insert(pos, entry);
+        Ok(())
     }
 
     fn update_entry<X>(&mut self, lemma : &str, pos_key : &PosKey,
@@ -230,65 +231,50 @@ impl Entries for BTEntries {
         }
     }
 
-    //fn iter(&self) -> impl Iterator<Item=(&String, Vec<(&PosKey, &Entry)>)> {
-    //    self.0.iter().map(|(k, v)| {
-    //        (k, v.iter().collect())
-    //    })
-    //}
-
-
-    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
-        self.0.get(lemma).iter().flat_map(|x| x.values().map(|y| Cow::Borrowed(y))).collect()
-    }
-
-    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)> {
-        self.0.get(lemma).iter().flat_map(|x| x.iter()
-            .map(|(k,v)| (k.clone(), Cow::Borrowed(v)))).collect()
-    }
-
-    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
-        self.0.iter().filter(|(k,_)| k.to_lowercase() == lemma.to_lowercase()).
-            flat_map(|(_,v)| v.values().map(Cow::Borrowed)).collect()
-    }
-
-    fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) {
-        self.0.entry(lemma).
-            or_insert_with(|| BTreeMap::new()).insert(pos, entry);
-    }
-
-    fn remove_entry(&mut self, lemma : &str, pos : &PosKey) -> Option<Entry> {
+    fn remove_entry(&mut self, lemma : &str, pos : &PosKey) -> Result<Option<Entry>> {
         if let Some(by_pos) = self.0.get_mut(lemma) {
             let result = by_pos.remove(pos);
             if by_pos.is_empty() {
                self.0.remove(lemma);
             }
-            result
+            Ok(result)
         } else {
-            None
+            Ok(None)
         }
     }
 
-    fn n_entries(&self) -> usize {
-        self.0.values().map(|v| v.len()).sum()
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
+        Ok(self.0.get(lemma).iter().flat_map(|x| x.values().map(|y| Cow::Borrowed(y))).collect())
     }
-    fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)> {
-        self.0.iter().flat_map(|(s, inner_map)| {
-            // Move 's' (String) into the inner closure so it can be paired with each entry
+
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
+        Ok(self.0.get(lemma).iter().flat_map(|x| x.iter()
+            .map(|(k,v)| (k.clone(), Cow::Borrowed(v)))).collect())
+    }
+
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
+        Ok(self.0.iter().filter(|(k,_)| k.to_lowercase() == lemma.to_lowercase()).
+            flat_map(|(_,v)| v.values().map(Cow::Borrowed)).collect())
+    }
+
+    fn n_entries(&self) -> Result<usize> {
+        Ok(self.0.values().map(|v| v.len()).sum())
+    }
+
+    fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>> + 'a> {
+        Ok(self.0.iter().flat_map(|(s, inner_map)| {
             inner_map.into_iter().map(move |(p, e)| {
-                (s.clone(), p.clone(), Cow::Borrowed(e))
+                Ok((s.clone(), p.clone(), Cow::Borrowed(e)))
             })
-        })
+        }))
     } 
 
-    #[allow(unused)]
-    fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)> {
-        // self.0 accesses the BTreeMap inside the tuple struct
-        self.0.into_iter().flat_map(|(s, inner_map)| {
-            // Move 's' (String) into the inner closure so it can be paired with each entry
+    fn into_entries(self) -> Result<impl Iterator<Item=Result<(String, PosKey, Entry)>>> {
+        Ok(self.0.into_iter().flat_map(|(s, inner_map)| {
             inner_map.into_iter().map(move |(p, e)| {
-                (s.clone(), p, e)
+                Ok((s.clone(), p, e))
             })
-        })
+        }))
     } 
 }
 
@@ -306,7 +292,7 @@ pub struct Entry {
 impl Entry {
     pub fn new() -> Entry { Entry::default() }
 
-    pub(crate) fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+    pub(crate) fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         if !self.form.is_empty() {
             write!(w,"    form:")?;
             for f in self.form.iter() {

@@ -545,7 +545,8 @@ pub fn delete_ex<L : Lexicon>(wn : &mut L,
 pub fn fix_indirect_relations<L : Lexicon>(wn : &mut L,
             change_list : &mut ChangeList) -> Result<()> {
     let mut to_delete = Vec::new();
-    for (synset_id, synset) in wn.synsets()? {
+    for synset in wn.synsets()? {
+        let (synset_id, synset) = synset?;
         for target in synset.hypernym.iter() {
             match wn.synset_by_id(target)? {
                 Some(synset2) => {

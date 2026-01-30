@@ -6,17 +6,20 @@ use crate::rels::{YamlSynsetRelType,SynsetRelType};
 use crate::wordnet::*;
 use crate::wordnet::util::{escape_yaml_string, string_or_vec};
 use std::borrow::Cow;
+use std::result;
+
 
 pub trait Synsets : Sized {
-    fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>>;
-    fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Option<Synset>;
+    fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>>;
+    fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Result<Option<Synset>>;
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X>;
-    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> + 'a;
-    fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)>;
-    fn len(&self) -> usize;
-    fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)>;
-    fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
-        for (key, ss) in self.iter() {
+    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a>;
+    fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>> + 'static>;
+    fn len(&self) -> Result<usize>;
+    fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>>;
+    fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
+        for ss in self.iter()? {
+            let (key, ss) = ss?;
             write!(w, "{}:", key.as_str())?;
             ss.save(w)?;
             write!(w, "\n")?;
@@ -25,6 +28,7 @@ pub trait Synsets : Sized {
     }
 }
 
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct BTSynsets(pub(crate) BTreeMap<SynsetId, Synset>);
 
@@ -32,12 +36,13 @@ impl BTSynsets {
     pub(crate) fn new() -> BTSynsets { BTSynsets(BTreeMap::new()) }
 }
     
+   
 impl Synsets for BTSynsets {
-    fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>> {
-        self.0.get(id).map(|x| Cow::Borrowed(x))
+    fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
+        Ok(self.0.get(id).map(|x| Cow::Borrowed(x)))
     }
-    fn insert(&mut self, id : SynsetId, synset : Synset) -> Option<Synset> {
-        self.0.insert(id, synset)
+    fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
+        Ok(self.0.insert(id, synset))
     }
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
         if let Some(x) = self.0.get_mut(id) {
@@ -46,17 +51,17 @@ impl Synsets for BTSynsets {
             Err(LexiconError::SynsetIdNotFound(id.clone()))
         }
     }
-    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> {
-        self.0.iter().map(|(k, v)| (k.clone(), Cow::Borrowed(v)) )
+    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
+        Ok(self.0.iter().map(|(k, v)| Ok((k.clone(), Cow::Borrowed(v)))))
     }
-    fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)> {
-        self.0.into_iter()
+    fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>> + 'static> {
+        Ok(self.0.into_iter().map(|(k, v)| Ok((k, v))))
     }
-    fn len(&self) -> usize {
-        self.0.len()
+    fn len(&self) -> Result<usize> {
+        Ok(self.0.len())
     }
-    fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)> {
-        self.0.remove_entry(id)
+    fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
+        Ok(self.0.remove_entry(id))
     }
 }
  
