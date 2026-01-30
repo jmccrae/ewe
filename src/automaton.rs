@@ -561,6 +561,7 @@ impl UpdateRelationItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wordnet::LexiconHashMapBackend;
 
     #[test]
     fn test_serialize() {
@@ -655,17 +656,17 @@ mod tests {
                 source_lemma: None,
                 target_lemma: None
             }];
-        let mut lexicon = Lexicon::new();
-        lexicon.add_lexfile("noun.animal");
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
         apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
 
     }
 
     #[test]
     fn test_sense_by_lemma() {
-                let mut lexicon = Lexicon::new();
+                let mut lexicon = LexiconHashMapBackend::new();
         let mut change_list = ChangeList::new();
-        lexicon.add_lexfile("noun.animal");
+        lexicon.add_lexfile("noun.animal").unwrap();
         let ssid1 = change_manager::add_synset(&mut lexicon, 
             "def 1".to_string(), 
             "noun.animal".to_string(), 
@@ -676,7 +677,7 @@ mod tests {
             ssid1.clone(), 
             "bar".to_owned(), 
             PosKey::new("n".to_string()), 
-            Vec::new(), None, &mut change_list);
+            Vec::new(), None, &mut change_list).unwrap();
         let ssid2 = change_manager::add_synset(&mut lexicon, 
             "def 2".to_string(), 
             "noun.animal".to_string(), 
@@ -687,7 +688,7 @@ mod tests {
             ssid2.clone(), 
             "baz".to_owned(), 
             PosKey::new("n".to_string()), 
-            Vec::new(), None, &mut change_list);
+            Vec::new(), None, &mut change_list).unwrap();
         let actions = vec![
             Action::AddRelation {
                 source: SynsetRef::Id(ssid1),

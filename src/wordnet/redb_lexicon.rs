@@ -23,20 +23,21 @@ impl Lexicon for ReDBLexicon {
     type E = ReDBEntries;
     type S = ReDBSynsets;
     // Data access methods
-    fn entries_get<'a>(&'a self, lemma : &str) -> Option<Cow<'a, ReDBEntries>> {
-        self.entries.get(lemma).map(|x| Cow::Borrowed(x))
+    fn entries_get<'a>(&'a self, lemma : &str) -> Result<Option<Cow<'a, ReDBEntries>>> {
+        Ok(self.entries.get(lemma).map(|x| Cow::Borrowed(x)))
     }
-    fn entries_insert(&mut self, key : String, entries : BTEntries) {
+    fn entries_insert(&mut self, key : String, entries : BTEntries) -> Result<()> {
         for (lemma, pos, entry) in entries.into_entries() {
             if let Some(e) = self.entries.get_mut(&key) {
                 e.insert_entry(lemma, pos, entry);
             }
         }
+        Ok(())
     }
-    fn entries_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, ReDBEntries>)> {
-        self.entries.iter().map(|(k, v)| (k, Cow::Borrowed(v)))
+    fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, ReDBEntries>)>>> {
+        Ok(self.entries.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
-    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E)) {
+    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E)) -> Result<()> {
         if let Some(e) = self.entries.get_mut(lemma) {
             f(e);
         } else {
@@ -44,81 +45,83 @@ impl Lexicon for ReDBLexicon {
             f(&mut e);
             self.entries.insert(lemma.to_string(), e);
         }
+        Ok(())
     }
-    fn synsets_get<'a>(&'a self, lexname : &str) -> Option<Cow<'a, Self::S>> {
-        self.synsets.get(lexname).map(Cow::Borrowed)
+    fn synsets_get<'a>(&'a self, lexname : &str) -> Result<Option<Cow<'a, Self::S>>> {
+        Ok(self.synsets.get(lexname).map(Cow::Borrowed))
     }
-    fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) {
+    fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()> {
         for (id, synset) in synsets.into_iter() {
             if let Some(s) = self.synsets.get_mut(&lexname) {
                 s.insert(id, synset);
             }
         }
+        Ok(())
     }
-    fn synsets_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, Self::S>)> {
-        self.synsets.iter().map(|(k, v)| (k, Cow::Borrowed(v)))
+    fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::S>)>>> {
+        Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
-    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut Self::S) -> X) -> X {
+    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut Self::S) -> X) -> Result<X> {
         if let Some(s) = self.synsets.get_mut(lexname) {
-            f(s)
+            Ok(f(s))
         } else {
             let mut s = ReDBSynsets::new(self.db.clone(), lexname.to_string());
             let result = f(&mut s);
             self.synsets.insert(lexname.to_string(), s);
-            result
+            Ok(result)
         }
     }
-    fn synsets_contains_key(&self, lexname : &str) -> bool {
-        self.synsets_get(lexname).is_some()
+    fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
+        Ok(self.synsets_get(lexname)?.is_some())
     }
-    fn synset_id_to_lexfile_get(&self, synset_id : &SynsetId) -> Option<&String> {
+    fn synset_id_to_lexfile_get(&self, synset_id : &SynsetId) -> Result<Option<&String>> {
         panic!("TODO");
     }
-    fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) {
+    fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()> {
         panic!("TODO");
     }
-    fn sense_links_to_get(&self, sense_id : &SenseId) -> Option<&Vec<(SenseRelType, SenseId)>> {
+    fn sense_links_to_get(&self, sense_id : &SenseId) -> Result<Option<&Vec<(SenseRelType, SenseId)>>> {
         panic!("TODO");
     }
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) 
-        -> &mut Vec<(SenseRelType, SenseId)> {
+        -> Result<&mut Vec<(SenseRelType, SenseId)>> {
             panic!("TODO");
     }
-    fn sense_links_to_update(&mut self, sense_id : &SenseId, f : impl FnOnce(&mut Vec<(SenseRelType, SenseId)>)) {
+    fn sense_links_to_update(&mut self, sense_id : &SenseId, f : impl FnOnce(&mut Vec<(SenseRelType, SenseId)>)) -> Result<()> {
         panic!("TODO");
     }
-    fn sense_links_to_push(&mut self, sense_id : SenseId, rel : SenseRelType, target : SenseId) {
+    fn sense_links_to_push(&mut self, sense_id : SenseId, rel : SenseRelType, target : SenseId) -> Result<()> {
         panic!("TODO");
     }
-    fn set_sense_links_to(&mut self, links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>) {
+    fn set_sense_links_to(&mut self, links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>) -> Result<()> {
         panic!("TODO");
     }
-    fn links_to_get(&self, synset_id : &SynsetId) -> Option<&Vec<(SynsetRelType, SynsetId)>> {
+    fn links_to_get(&self, synset_id : &SynsetId) -> Result<Option<&Vec<(SynsetRelType, SynsetId)>>> {
         panic!("TODO");
     }
     fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) 
-        -> &mut Vec<(SynsetRelType, SynsetId)> {
+        -> Result<&mut Vec<(SynsetRelType, SynsetId)>> {
             panic!("TODO");
     }
-    fn links_to_update(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Vec<(SynsetRelType, SynsetId)>)) {
+    fn links_to_update(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Vec<(SynsetRelType, SynsetId)>)) -> Result<()> {
         panic!("TODO");
     }
-    fn links_to_push(&mut self, synset_id : SynsetId, rel : SynsetRelType, target : SynsetId) {
+    fn links_to_push(&mut self, synset_id : SynsetId, rel : SynsetRelType, target : SynsetId) -> Result<()> {
         panic!("TODO");
     }
-    fn set_links_to(&mut self, links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>) {
+    fn set_links_to(&mut self, links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>) -> Result<()> {
         panic!("TODO");
     }
-    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Option<&(String, PosKey)> {
+    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<&(String, PosKey)>> {
         panic!("TODO");
     }
-    fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) {
+    fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
         panic!("TODO");
     }
-    fn deprecations_get(&self) -> &Vec<DeprecationRecord> {
+    fn deprecations_get(&self) -> Result<&Vec<DeprecationRecord>> {
         panic!("TODO");
     }
-    fn deprecations_push(&mut self, record : DeprecationRecord) {
+    fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()> {
         panic!("TODO");
     }
 }
@@ -165,7 +168,6 @@ impl Entries for ReDBEntries {
     //    panic!("TODO")
     //}
     fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)> {
-;
         let txn = self.db.begin_read().unwrap();
         let table = txn.open_table(ENTRIES_TABLE).unwrap();
         EntryIterator::new(txn, table, |table| {

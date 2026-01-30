@@ -187,26 +187,26 @@ pub fn get_sense_key<L : Lexicon>(wn : &L, lemma : &str,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wordnet::{PosKey, Entry};
+    use crate::wordnet::{PosKey, Entry, LexiconHashMapBackend};
     use crate::change_manager::{add_entry, ChangeList};
 
     #[test]
     fn test_sense_key_1() {
-        let mut lexicon = Lexicon::new();
+        let mut lexicon = LexiconHashMapBackend::new();
         let synset = Synset::new(PartOfSpeech::n);
         let entry = Entry::new();
         lexicon.insert_entry("foot".to_string(),
-            PosKey::new("n".to_string()), entry.clone());
+            PosKey::new("n".to_string()), entry.clone()).unwrap();
         lexicon.insert_synset("noun.body".to_string(),
-            SynsetId::new("00001740-n"), synset.clone());
+            SynsetId::new("00001740-n"), synset.clone()).unwrap();
         assert_eq!(SenseId::new("foot%1:08:00::".to_owned()),
                    get_sense_key(&lexicon, "foot", None, &synset,
-                                 &SynsetId::new("00001740-n")));
+                                 &SynsetId::new("00001740-n")).unwrap());
     }
 
     #[test]
     fn test_sense_key_2() {
-        let mut lexicon = Lexicon::new();
+        let mut lexicon = LexiconHashMapBackend::new();
         let synset = Synset::new(PartOfSpeech::n);
         let mut entry = Entry::new();
         entry.sense.push(Sense::new(
@@ -214,17 +214,17 @@ mod tests {
                 SynsetId::new("00001750-n")
                 ));
         lexicon.insert_entry("foot".to_string(),
-            PosKey::new("n".to_string()), entry.clone());
+            PosKey::new("n".to_string()), entry.clone()).unwrap();
         lexicon.insert_synset("noun.body".to_string(),
-            SynsetId::new("00001740-n"), synset.clone());
+            SynsetId::new("00001740-n"), synset.clone()).unwrap();
         assert_eq!(SenseId::new("foot%1:08:02::".to_owned()),
                    get_sense_key(&lexicon, "foot", None, &synset,
-                                 &SynsetId::new("00001740-n")));
+                                 &SynsetId::new("00001740-n")).unwrap());
     }
 
     #[test]
     fn test_sense_key_3() {
-        let mut lexicon = Lexicon::new();
+        let mut lexicon = LexiconHashMapBackend::new();
         let mut synset1 = Synset::new(PartOfSpeech::a);
         synset1.members.push("hot".to_string());
         let mut synset2 = Synset::new(PartOfSpeech::s);
@@ -240,43 +240,43 @@ mod tests {
                 SynsetId::new("00000002-s")
                 ));
         lexicon.insert_entry("hot".to_string(),
-            PosKey::new("a".to_string()), entry1.clone());
+            PosKey::new("a".to_string()), entry1.clone()).unwrap();
         lexicon.insert_entry("scorching".to_string(),
-            PosKey::new("s".to_string()), entry2.clone());
+            PosKey::new("s".to_string()), entry2.clone()).unwrap();
         lexicon.insert_synset("adj.all".to_string(),
-            SynsetId::new("00000001-a"), synset1.clone());
+            SynsetId::new("00000001-a"), synset1.clone()).unwrap();
         lexicon.insert_synset("adj.all".to_string(),
-            SynsetId::new("00000002-s"), synset2.clone());
+            SynsetId::new("00000002-s"), synset2.clone()).unwrap();
         assert_eq!(SenseId::new("scorching%5:00:01:hot:01".to_owned()),
                    get_sense_key(&lexicon, "scorching", 
                                  Some(&SenseId::new("scorching%5:00:01:???:".to_owned())),
                                  &synset2,
-                                 &SynsetId::new("00000002-s")));
+                                 &SynsetId::new("00000002-s")).unwrap());
     }
 
     #[test]
     #[allow(non_snake_case)]
     fn test_gen_id() {
-        let mut lexicon = Lexicon::new();
+        let mut lexicon = LexiconHashMapBackend::new();
         let synset1 = Synset::new(PartOfSpeech::n);
         let synset2 = Synset::new(PartOfSpeech::n);
         let ssid1 = SynsetId::new("00000001-n");
         let ssid2 = SynsetId::new("00000002-n");
         lexicon.insert_synset("adj.all".to_string(),
-            ssid1.clone(), synset1.clone());
+            ssid1.clone(), synset1.clone()).unwrap();
         lexicon.insert_synset("adj.all".to_string(),
-            ssid2.clone(), synset2.clone());
+            ssid2.clone(), synset2.clone()).unwrap();
     
         let mut change_list = ChangeList::new();
         add_entry(&mut lexicon,
-            ssid1, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
+            ssid1, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list).unwrap();
         add_entry(&mut lexicon,
-            ssid2.clone(), "Hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
+            ssid2.clone(), "Hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list).unwrap();
         add_entry(&mut lexicon,
-            ssid2, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list);
+            ssid2, "hot".to_string(), PosKey::new("n".to_string()), Vec::new(), None, &mut change_list).unwrap();
 
-        let entry_hot = lexicon.entry_by_lemma("hot");
-        let entry_Hot = lexicon.entry_by_lemma("Hot");
+        let entry_hot = lexicon.entry_by_lemma("hot").unwrap();
+        let entry_Hot = lexicon.entry_by_lemma("Hot").unwrap();
         
         assert_ne!(entry_hot[0].sense[0].id, entry_Hot[0].sense[0].id);
         assert_ne!(entry_hot[0].sense[1].id, entry_Hot[0].sense[0].id);

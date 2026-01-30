@@ -26,6 +26,12 @@ impl LexiconHashMapBackend {
             deprecations : Vec::new()
         }
     }
+    #[cfg(test)]
+    pub fn add_lexfile(&mut self, lexfile : &str) -> Result<()> {
+        self.synsets_insert(lexfile.to_owned(), BTSynsets::new())?;
+        Ok(())
+    }
+
 }
 
 impl Lexicon for LexiconHashMapBackend {

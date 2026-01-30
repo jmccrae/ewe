@@ -149,8 +149,6 @@ pub enum WordNetYAMLIOError {
 pub enum LexiconError {
     #[error("Synset Identifier not found: {0}")]
     SynsetIdNotFound(SynsetId),
-    #[error("Sense Identifier not found: {0}")]
-    SenseIdNotFound(SenseId),
     #[error("No such entry: ({0}, {1})")]
     EntryNotFound(String, PosKey),
     #[cfg(feature="redb")]

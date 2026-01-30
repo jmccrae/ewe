@@ -188,12 +188,12 @@ pub struct SenseRelation {
 
 impl MemberSynset {
     pub fn from_synset<L : Lexicon>(synset_id : &SynsetId, 
-        synset : Synset, lexicon : L) -> MemberSynset {
+        synset : Synset, lexicon : L) -> Result<MemberSynset> {
         let mut members = Vec::new();
         let mut sense_links = HashMap::new();
         let mut inv_sense_links = HashMap::new();
         for m in synset.members.iter() {
-            for (poskey, entry) in lexicon.entry_by_lemma_with_pos(m) {
+            for (poskey, entry) in lexicon.entry_by_lemma_with_pos(m)? {
                 for sense in entry.sense.iter() {
                     if &sense.synset != synset_id {
                         continue;
@@ -212,7 +212,7 @@ impl MemberSynset {
                     macro_rules! extract_sense_rel {
                         ($rel:ident,$name:ident) => {
                             for target in sense.$rel.iter() {
-                                if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target) {
+                                if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target)? {
                                     sense_links.entry(SenseRelType::$name)
                                         .or_insert_with(|| Vec::new())
                                         .push(SenseRelation {
@@ -243,9 +243,9 @@ impl MemberSynset {
                     extract_sense_rel!(destination,Destination);
                     extract_sense_rel!(body_part,BodyPart);
                     extract_sense_rel!(vehicle,Vehicle);
-                    if let Some(sense_links_to) = lexicon.sense_links_to_get(&sense.id) {
+                    if let Some(sense_links_to) = lexicon.sense_links_to_get(&sense.id)? {
                         for (rel, target_sense_id) in sense_links_to {
-                            if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target_sense_id) {
+                            if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target_sense_id)? {
                                 inv_sense_links.
                                     entry(rel).
                                     or_insert_with(|| Vec::new()).
@@ -260,7 +260,7 @@ impl MemberSynset {
                 }
             }
         }
-        let links_to = lexicon.links_to_get(synset_id);
+        let links_to = lexicon.links_to_get(synset_id)?;
         let mut links = HashMap::new();
         if let Some(links_to) = links_to {
             for (rel, target) in links_to.into_iter() {
@@ -268,10 +268,10 @@ impl MemberSynset {
             }
         }
 
-        MemberSynset {
+        Ok(MemberSynset {
             members,
             id: synset_id.clone(),
-            lexname: lexicon.lex_name_for(synset_id).unwrap_or("".to_string()),
+            lexname: lexicon.lex_name_for(synset_id)?.unwrap_or("".to_string()),
             definition: synset.definition,
             example: synset.example,
             ili: synset.ili,
@@ -343,7 +343,7 @@ impl MemberSynset {
             is_body_part_of: inv_sense_links.remove(&SenseRelType::BodyPart).unwrap_or_else(|| Vec::new()),
             vehicle: sense_links.remove(&SenseRelType::Vehicle).unwrap_or_else(|| Vec::new()),
             is_vehicle_of: inv_sense_links.remove(&SenseRelType::Vehicle).unwrap_or_else(|| Vec::new())
-        }
+        })
     }
 
     pub fn into_synset(self) -> Synset {
@@ -378,7 +378,6 @@ impl MemberSynset {
             other: self.other
         }
     }
-
 }
 
 

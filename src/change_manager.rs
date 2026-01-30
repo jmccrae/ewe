@@ -568,10 +568,11 @@ pub fn fix_indirect_relations<L : Lexicon>(wn : &mut L,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wordnet::LexiconHashMapBackend;
 
     #[test]
     fn test_move_entry() {
-        let mut wn = Lexicon::new();
+        let mut wn = LexiconHashMapBackend::new();
         let mut change_list = ChangeList::new();
         let synset_id = add_synset(&mut wn, "test".to_owned(), "noun.object".to_owned(), 
             PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
@@ -581,12 +582,14 @@ mod tests {
             PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
         let lemma = "test".to_owned();
         let pos = PosKey::new("n".to_owned());
-        add_entry(&mut wn, synset_id.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list);
-        add_entry(&mut wn, synset3.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list);
-        let sense = wn.entry_by_lemma("test").iter().next().unwrap().sense.iter().next().unwrap(); 
+        add_entry(&mut wn, synset_id.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list).unwrap();
+        add_entry(&mut wn, synset3.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list).unwrap();
+        let entry = wn.entry_by_lemma("test").unwrap();
+        let sense = entry.iter().next().unwrap().sense.iter().next().unwrap(); 
         assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
-        move_entry(&mut wn, synset_id.clone(), target_synset_id.clone(), lemma.clone(), pos.clone(), &mut change_list);
-        let sense = wn.entry_by_lemma("test").iter().next().unwrap().sense.iter()
+        move_entry(&mut wn, synset_id.clone(), target_synset_id.clone(), lemma.clone(), pos.clone(), &mut change_list).unwrap();
+        let entry = wn.entry_by_lemma("test").unwrap();
+        let sense = entry.iter().next().unwrap().sense.iter()
             .filter(|sense| sense.synset == target_synset_id).next().unwrap();
         assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
     }

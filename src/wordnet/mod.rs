@@ -40,6 +40,8 @@ pub mod redb_lexicon;
 #[allow(unused_variables)]
 mod tests {
     use super::*;
+    use entry::BTEntries;
+    use util::escape_yaml_string;
 
     #[test]
     fn test_entry() {
@@ -50,8 +52,8 @@ mod tests {
         assert_eq!(serde_yaml::from_str::<Entry>(&entry_str).unwrap(),
             Entry {
                 sense: vec![Sense::new(
-                    SenseId("foo%1:01:00::".to_string()),
-                    SynsetId("00001740-n".to_string())
+                    SenseId::new("foo%1:01:00::".to_string()),
+                    SynsetId::new("00001740-n")
                 )],
                 form: Vec::new(),
                 pronunciation: Vec::new()
@@ -68,8 +70,8 @@ mod tests {
 
         Entry {
             sense: vec![Sense::new(
-                SenseId("foo%1:01:00::".to_string()),
-                SynsetId("00001740-n".to_string())
+                SenseId::new("foo%1:01:00::".to_string()),
+                SynsetId::new("00001740-n")
             )],
             form: Vec::new(),
             pronunciation: Vec::new()
@@ -106,7 +108,7 @@ abatement:
       synset: 07382856-n
     - id: 'abatement%1:04:00::'
       synset: 00362159-n";
-        let e : Entries = serde_yaml::from_str(&entry_str).unwrap();
+        let e : BTEntries = serde_yaml::from_str(&entry_str).unwrap();
     }
 
     #[test]
@@ -190,8 +192,8 @@ partOfSpeech: n";
 ";
         let mut gen_str : Vec<u8> = Vec::new();
         let mut sense = Sense::new(
-                SenseId("foo%1:01:00::".to_string()),
-                SynsetId("00001740-n".to_string())
+                SenseId::new("foo%1:01:00::".to_string()),
+                SynsetId::new("00001740-n")
             );
         sense.derivation.push(SenseId::new("foo%1:01:00::".to_owned()));
 
@@ -238,7 +240,7 @@ partOfSpeech: n";
   - able
   partOfSpeech: a
 ";
-        let synsets = serde_yaml::from_str::<Synsets>(input).unwrap();
+        let synsets = serde_yaml::from_str::<BTSynsets>(input).unwrap();
         let mut buf = Vec::new();
         synsets.save(&mut buf).unwrap();
         assert_eq!(output, String::from_utf8(buf).unwrap());
@@ -268,7 +270,7 @@ partOfSpeech: n";
   members:
   - foo
   partOfSpeech: a";
-    let synsets = serde_yaml::from_str::<Synsets>(input).unwrap();
+    let synsets = serde_yaml::from_str::<BTSynsets>(input).unwrap();
     synsets.0.iter().for_each(|(key, ss)| {
         if key.as_str() == "00001740-n" {
             assert_eq!(ss.wikidata.len(), 1);
