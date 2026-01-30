@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::wordnet::{Lexicon, Synset, SynsetId, Sense, SenseId, PartOfSpeech};
 use regex::Regex;
 use std::cmp::max;
+use std::borrow::Cow;
 
 lazy_static! {
     static ref LEX_FILENUMS : HashMap<&'static str, usize> = {
@@ -92,10 +93,27 @@ fn extract_lex_id(sense_key : &SenseId) -> i32 {
     0
 }
 
-fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lemma : &str) -> Vec<&'a Sense> {
-    wn.entry_by_lemma(lemma).iter().flat_map(|e| e.sense.iter()).
-        filter(|sense| sense.synset == *ss_id).
-        collect()
+fn sense_for_entry_synset_id<'a, L : Lexicon>(wn : &'a L, ss_id : &SynsetId, lemma : &str) -> Vec<Cow<'a, Sense>> {
+    let mut senses = Vec::new();
+    for entry in wn.entry_by_lemma(lemma) {
+        match entry {
+            Cow::Borrowed(entry) => {
+                for sense in entry.sense.iter() {
+                    if sense.synset == *ss_id {
+                        senses.push(Cow::Borrowed(sense));
+                    }
+                }
+            },
+            Cow::Owned(entry) => {
+                for sense in entry.sense.iter() {
+                    if sense.synset == *ss_id {
+                        senses.push(Cow::Owned(sense.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    senses
 }
 
 fn get_head_word<L : Lexicon>(wn : &L, ss : &Synset) -> (String, String) {

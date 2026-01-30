@@ -18,7 +18,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
     for (lemma, poskey, entry) in wn.entries() {
         bar.inc(1);
         for sense in entry.sense.iter() {
-           match get_sense_key2(wn, lemma, Some(&sense.id), &sense.synset) {
+           match get_sense_key2(wn, &lemma, Some(&sense.id), &sense.synset) {
                Some(sense_key) => {
                    if sense_key != sense.id {
                        errors.push(ValidationError::InvalidSenseId {
@@ -42,7 +42,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                         });
                    }
 
-                   if !synset.members.iter().any(|member| member == lemma) {
+                   if !synset.members.iter().any(|member| *member == lemma) {
                        errors.push(ValidationError::SenseNotInSynsetMembers {
                            id: sense.synset.clone(),
                            member: lemma.clone()

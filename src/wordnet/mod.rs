@@ -31,6 +31,9 @@ pub use hashmap::LexiconHashMapBackend;
 pub mod synset_members;
 pub use synset_members::MemberSynset;
 
+#[cfg(feature = "redb")]
+pub mod redb_lexicon;
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {

@@ -6,14 +6,15 @@ use crate::rels::{SenseRelType,SynsetRelType};
 use indicatif::ProgressBar;
 use crate::wordnet::*;
 use crate::wordnet::entry::BTEntries;
+use std::borrow::Cow;
 
 pub trait Lexicon : Sized {
-    type E : Entries;
+    type E : Entries + Clone;
     type S : Synsets;
     // Data access methods
-    fn entries_get(&self, lemma : &str) -> Option<&Self::E>;
+    fn entries_get<'a>(&'a self, lemma : &str) -> Option<Cow<'a, Self::E>>;
     fn entries_insert(&mut self, key : String, entries : BTEntries);
-    fn entries_iter(&self) -> impl Iterator<Item=(&String, &Self::E)>;
+    fn entries_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, Self::E>)>;
     fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E));
     fn synsets_get(&self, lexname : &str) -> Option<&Self::S>;
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets);
@@ -164,30 +165,37 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the entry data for a lemma
-    fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
         if lemma.is_empty() {
             return Vec::new();
         }
         match self.entries_get(&entry_key(lemma)) {
-            Some(v) => v.entry_by_lemma(lemma),
+            Some(Cow::Borrowed(v)) => v.entry_by_lemma(lemma),
+            Some(Cow::Owned(v)) => v.entry_by_lemma(lemma).into_iter().map(|e| Cow::Owned(e.into_owned())).collect(),
             None => Vec::new()
         }
     }
 
     /// Get the entry data for a lemma, ignoring case 
-    fn entry_by_lemma_ignore_case(&self, lemma : &str) -> Vec<&Entry> {
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
         self.entries_iter()
-            .flat_map(|(_,v)| v.entry_by_lemma_ignore_case(lemma))
+            .flat_map(|(_,v)| match v {
+                Cow::Borrowed(v) => v.entry_by_lemma_ignore_case(lemma),
+                Cow::Owned(v) => v.entry_by_lemma_ignore_case(lemma).
+                    into_iter().map(|e| Cow::Owned(e.into_owned())).collect()
+            })
             .collect()
     }
 
     /// Get the entry data (with the part of speech key) for a lemma
-    fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)> {
         match lemma.chars().nth(0) {
             Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
                 let key = format!("{}", c.to_lowercase());
                 match self.entries_get(&key) {
-                    Some(v) => v.entry_by_lemma_with_pos(lemma),
+                    Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma),
+                    Some(Cow::Owned(v)) => v.entry_by_lemma_with_pos(lemma)
+                        .into_iter().map(|(p,e)| (p, Cow::Owned(e.into_owned()))).collect(),
                     None => {
                         eprintln!("No entries for {}", key);
                         Vec::new()
@@ -196,7 +204,9 @@ pub trait Lexicon : Sized {
             },
             Some(_) => {
                 match self.entries_get("0") {
-                    Some(v) => v.entry_by_lemma_with_pos(lemma),
+                    Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma),
+                    Some(Cow::Owned(v)) => v.entry_by_lemma_with_pos(lemma)
+                        .into_iter().map(|(p,e)| (p, Cow::Owned(e.into_owned()))).collect(),
                     None => Vec::new()
                 }
             },
@@ -208,21 +218,34 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the sense by lemma and synset id
-    fn get_sense<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Vec<&'a Sense> {
+    fn get_sense<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Vec<Cow<'a, Sense>> {
         match self.entries_get(&entry_key(&lemma)) {
-            Some(entries) => entries.get_sense(lemma, synset_id),
+            Some(Cow::Borrowed(entries)) => entries.get_sense(lemma, synset_id),
+            Some(Cow::Owned(entries)) => entries.get_sense(lemma, synset_id)
+                .into_iter().map(|s| Cow::Owned(s.into_owned())).collect(),
             None => Vec::new()
         }
     }
 
     /// Get the sense by its sense identifier
-    fn get_sense_by_id(&self, sense_id : &SenseId) -> Option<(&String, &PosKey, &Sense)> {
+    fn get_sense_by_id<'a>(&'a self, sense_id : &SenseId) -> Option<(String, PosKey, Cow<'a, Sense>)> {
         if let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id) {
             for (pos2, e) in self.entry_by_lemma_with_pos(lemma) {
-                if pos == pos2 {
-                    for sense in e.sense.iter() {
-                        if &sense.id == sense_id {
-                            return Some((lemma, pos, sense))
+                if *pos == pos2 {
+                    match e {
+                        Cow::Borrowed(e) => {
+                            for sense in e.sense.iter() {
+                                if &sense.id == sense_id {
+                                    return Some((lemma.clone(), pos.clone(), Cow::Borrowed(sense)))
+                                }
+                            }
+                        },
+                        Cow::Owned(e) => {
+                            for sense in e.into_senses() {
+                                if &sense.id == sense_id {
+                                    return Some((lemma.clone(), pos.clone(), Cow::Owned(sense)))
+                                }
+                            }
                         }
                     }
                 }
@@ -330,7 +353,7 @@ pub trait Lexicon : Sized {
     fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) {
         add_sense_link_to_sense(self, &sense);
         self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()));
-        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(&entry_key(&lemma), |e| {
             e.insert_sense(lemma, pos, sense)
                 .unwrap_or_else(|_| {
                     eprintln!("Failed to insert sense as the entry does not exist");
@@ -395,7 +418,7 @@ pub trait Lexicon : Sized {
                           synset_id : &SynsetId) -> Vec<(SenseRelType, SenseId)> {
         match self.get_sense_id(lemma, pos, synset_id) {
             Some(sense_id) => {
-                match self.sense_links_to_get(sense_id) {
+                match self.sense_links_to_get(&sense_id) {
                     Some(v) => v.clone(),
                     None => Vec::new()
                 }
@@ -465,7 +488,7 @@ pub trait Lexicon : Sized {
 
     /// Get a sense ID for a lemma, POS key and synset
     fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> 
-        Option<&'a SenseId> {
+        Option<SenseId> {
         match self.entries_get(&entry_key(lemma)) {
             Some(e) => e.get_sense_id(lemma, pos, synset_id),
             None => None
@@ -474,7 +497,7 @@ pub trait Lexicon : Sized {
 
     // Get a sense ID for a lemma and synset
     fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> 
-        Option<&'a SenseId> {
+        Option<SenseId> {
         match self.entries_get(&entry_key(lemma)) {
             Some(e) => e.get_sense_id2(lemma, synset_id),
             None => None
@@ -661,9 +684,17 @@ pub trait Lexicon : Sized {
     }
 
     /// Get all the entries
-    fn entries(&self) -> impl Iterator<Item=(&String, &PosKey, &Entry)> {
+    fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)> {
         self.entries_iter().flat_map(|(_,e)| {
-            e.entries()
+            //let it: Box<dyn Iterator<Item=(String, PosKey, Cow<'a, Entry>>) + 'a> = match e {
+            let it = match e {
+                Cow::Borrowed(v) => Box::new(v.entries()),
+                Cow::Owned(v) => {
+                    Box::new(v.into_entries().into_iter()
+                        .map(|(s, p, e)| (s, p, Cow::Owned(e)))) as Box<dyn Iterator<Item = _>>
+                }
+            };
+            it
         })
     }
 
@@ -743,7 +774,7 @@ fn remove_link_to<L : Lexicon>(backend : &mut L,
     }
 }
 
-fn entry_key(lemma : &str) -> String {
+pub(crate) fn entry_key(lemma : &str) -> String {
     let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
     if key < 'a' || key > 'z' {
         '0'.to_string()

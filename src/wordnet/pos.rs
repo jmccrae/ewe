@@ -38,7 +38,6 @@ impl fmt::Display for PosKey {
     }
 }
 
-
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 pub enum PartOfSpeech { n, v, a, r, s }

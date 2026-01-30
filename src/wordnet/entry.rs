@@ -4,17 +4,18 @@ use std::io::Write;
 use crate::rels::SenseRelType;
 use crate::wordnet::*;
 use crate::wordnet::util::escape_yaml_string;
+use std::borrow::Cow;
 
-pub trait Entries {
+pub trait Entries : Sized {
     fn entry(&self, lemma : &str, pos_key : &PosKey) -> Option<&Entry>;
     fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry);
     fn update_entry<X>(&mut self, lemma : &str, pos_key : &PosKey,
         f : impl FnOnce(&mut Entry) -> X) -> Result<X, String>;
     fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Option<Entry>;
 
-    fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry>;
-    fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)>;
-    fn entry_by_lemma_ignore_case(&self, lemma : &str) -> Vec<&Entry>;
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>>;
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)>;
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>>;
 
     fn iter(&self) -> impl Iterator<Item=(&String,Vec<(&PosKey, &Entry)>)>;
 
@@ -77,20 +78,20 @@ pub trait Entries {
         }
     }
 
-    fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> Option<&'a SenseId> {
+    fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> Option<SenseId> {
         if let Some(e) = self.entry(lemma, pos) {
             e.sense.iter().filter(|sense| sense.synset == *synset_id)
-                .map(|sense| &sense.id).nth(0)
+                .map(|sense| sense.id.clone()).nth(0)
         } else {
             None
         }
     }
 
-    fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Option<&'a SenseId> {
+    fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Option<SenseId> {
         for e in self.entry_by_lemma(lemma) {
             for sense in e.sense.iter() {
                 if sense.synset == *synset_id {
-                    return Some(&sense.id);
+                    return Some(sense.id.clone());
                 }
             }
         }
@@ -154,13 +155,24 @@ pub trait Entries {
     }
 
     fn get_sense<'a>(&'a self, lemma : &str, 
-                         synset_id : &SynsetId) -> Vec<&'a Sense> {
+                         synset_id : &SynsetId) -> Vec<Cow<'a, Sense>> {
         
         let mut senses = Vec::new();
         for e in self.entry_by_lemma(lemma) {
-            for s in e.sense.iter() {
-                if s.synset == *synset_id {
-                    senses.push(s);
+            match e {
+                Cow::Borrowed(e) => {
+                    for s in e.sense.iter() {
+                        if s.synset == *synset_id {
+                            senses.push(Cow::Borrowed(s));
+                        }
+                    }
+                },
+                Cow::Owned(e) => {
+                    for s in e.sense.iter() {
+                        if s.synset == *synset_id {
+                            senses.push(Cow::Owned(s.clone()));
+                        }
+                    }
                 }
             }
         }
@@ -179,14 +191,48 @@ pub trait Entries {
         })
     }
 
-    fn entries(&self) -> impl Iterator<Item=(&String, &PosKey, &Entry)> {
+    fn entries<'a>(&'a self) -> impl Iterator<Item=(String, PosKey, Cow<'a, Entry>)> {
         self.iter().flat_map(|(lemma, e)| {
-            e.into_iter().map(move |(k,v)| (lemma, k, v))
+            e.into_iter().map(move |(k,v)| (lemma.clone(), k.clone(), Cow::Borrowed(v)))
         })
+    }
+
+    fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)>;
+}
+
+struct BTEntriesIter(BTEntries,
+    std::collections::btree_map::Iter<'static, String, BTreeMap<PosKey, Entry>>,
+    Option<(String, std::collections::btree_map::Iter<'static, PosKey, Entry>)>
+);
+
+impl Iterator for BTEntriesIter {
+    type Item = (String, PosKey, Entry);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((ref lemma, ref mut by_pos_iter)) = self.2 {
+                if let Some((pos, entry)) = by_pos_iter.next() {
+                    return Some((lemma.clone(), pos.clone(), entry.clone()));
+                } else {
+                    self.2 = None;
+                }
+            }
+
+            if let Some((lemma, by_pos)) = self.1.next() {
+                self.2 = Some((lemma.clone(), unsafe {
+                    std::mem::transmute::<
+                        std::collections::btree_map::Iter<'_, PosKey, Entry>,
+                        std::collections::btree_map::Iter<'static, PosKey, Entry>
+                    >(by_pos.iter())
+                }));
+            } else {
+                return None;
+            }
+        }
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct BTEntries(pub(crate) BTreeMap<String, BTreeMap<PosKey, Entry>>);
 
 impl BTEntries {
@@ -224,17 +270,18 @@ impl Entries for BTEntries {
     }
 
 
-    fn entry_by_lemma(&self, lemma : &str) -> Vec<&Entry> {
-        self.0.get(lemma).iter().flat_map(|x| x.values()).collect()
+    fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
+        self.0.get(lemma).iter().flat_map(|x| x.values().map(|y| Cow::Borrowed(y))).collect()
     }
 
-    fn entry_by_lemma_with_pos(&self, lemma : &str) -> Vec<(&PosKey, &Entry)> {
-        self.0.get(lemma).iter().flat_map(|x| x.iter()).collect()
+    fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Vec<(PosKey, Cow<'a, Entry>)> {
+        self.0.get(lemma).iter().flat_map(|x| x.iter()
+            .map(|(k,v)| (k.clone(), Cow::Borrowed(v)))).collect()
     }
 
-    fn entry_by_lemma_ignore_case(&self, lemma : &str) -> Vec<&Entry> {
+    fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Vec<Cow<'a, Entry>> {
         self.0.iter().filter(|(k,_)| k.to_lowercase() == lemma.to_lowercase()).
-            flat_map(|(_,v)| v.values()).collect()
+            flat_map(|(_,v)| v.values().map(Cow::Borrowed)).collect()
     }
 
     fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) {
@@ -257,6 +304,16 @@ impl Entries for BTEntries {
     fn n_entries(&self) -> usize {
         self.0.values().map(|v| v.len()).sum()
     }
+
+    fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)> {
+        // self.0 accesses the BTreeMap inside the tuple struct
+        self.0.into_iter().flat_map(|(s, inner_map)| {
+            // Move 's' (String) into the inner closure so it can be paired with each entry
+            inner_map.into_iter().map(move |(p, e)| {
+                (s.clone(), p, e)
+            })
+        })
+    } 
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone,Default)]
@@ -295,6 +352,8 @@ impl Entry {
         write!(w, "\n")?;
         Ok(())
     }
+
+    pub(crate) fn into_senses(self) -> Vec<Sense> {
+        self.sense
+    }
 }
-
-

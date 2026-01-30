@@ -3,6 +3,7 @@ use crate::rels::*;
 use crate::sense_keys::{get_sense_key, get_sense_key2};
 use sha2::Sha256;
 use crate::sha2::Digest;
+use std::borrow::Cow;
 
 /// Monitors is any changes have been made
 pub struct ChangeList(bool);
@@ -125,9 +126,9 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
     println!("Adding {} to synset {}", lemma, synset_id.as_str());
 
     let mut entries = wn.entry_by_lemma_with_pos(&lemma).iter_mut()
-        .filter(|(pos, _)| synset_pos == **pos)
-        .map(|x| x.1)
-        .collect::<Vec<&Entry>>();
+        .filter(|(pos, _)| synset_pos == *pos)
+        .map(|x| x.1.clone())
+        .collect::<Vec<Cow<Entry>>>();
 
 
     if entries.len() > 1 {

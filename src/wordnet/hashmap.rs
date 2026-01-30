@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::rels::{SenseRelType,SynsetRelType};
 use crate::wordnet::*;
 use crate::wordnet::entry::BTEntries;
+use std::borrow::Cow;
 
 pub struct LexiconHashMapBackend {
     entries : HashMap<String, BTEntries>,
@@ -30,14 +31,14 @@ impl LexiconHashMapBackend {
 impl Lexicon for LexiconHashMapBackend {
     type E = BTEntries;
     type S = BTSynsets;
-    fn entries_get(&self, lemma : &str) -> Option<&BTEntries> {
-        self.entries.get(lemma)
+    fn entries_get<'a>(&'a self, lemma : &str) -> Option<Cow<'a, BTEntries>> {
+        self.entries.get(lemma).map(|x| Cow::Borrowed(x))
     }
     fn entries_insert(&mut self, key : String, entries : BTEntries) {
         self.entries.insert(key, entries);
     }
-    fn entries_iter(&self) -> impl Iterator<Item=(&String, &BTEntries)> {
-        self.entries.iter()
+    fn entries_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, BTEntries>)> {
+        self.entries.iter().map(|(k, v)| (k, Cow::Borrowed(v)))
     }
     fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut BTEntries)) {
         if let Some(e) = self.entries.get_mut(lemma) {
