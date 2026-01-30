@@ -10,15 +10,15 @@ use std::borrow::Cow;
 
 pub trait Lexicon : Sized {
     type E : Entries + Clone;
-    type S : Synsets;
+    type S : Synsets + Clone;
     // Data access methods
     fn entries_get<'a>(&'a self, lemma : &str) -> Option<Cow<'a, Self::E>>;
     fn entries_insert(&mut self, key : String, entries : BTEntries);
     fn entries_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, Self::E>)>;
     fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E));
-    fn synsets_get(&self, lexname : &str) -> Option<&Self::S>;
+    fn synsets_get<'a>(&'a self, lexname : &str) -> Option<Cow<'a, Self::S>>;
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets);
-    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &Self::S)>;
+    fn synsets_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, Self::S>)>;
     fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut Self::S) -> X) -> X;
     fn synsets_contains_key(&self, lexname : &str) -> bool {
         self.synsets_get(lexname).is_some()
@@ -228,6 +228,7 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the sense by its sense identifier
+    #[allow(unused)]
     fn get_sense_by_id<'a>(&'a self, sense_id : &SenseId) -> Option<(String, PosKey, Cow<'a, Sense>)> {
         if let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id) {
             for (pos2, e) in self.entry_by_lemma_with_pos(lemma) {
@@ -267,12 +268,15 @@ pub trait Lexicon : Sized {
     }
 
     /// Get synset data by ID
-    fn synset_by_id(&self, synset_id : &SynsetId) -> Option<&Synset> {
+    fn synset_by_id<'a>(&'a self, synset_id : &SynsetId) -> Option<Cow<'a, Synset>> {
         match self.lex_name_for(synset_id) {
             Some(lex_name) => {
                 match self.synsets_get(&lex_name) {
-                    Some(sss) => {
+                    Some(Cow::Borrowed(sss)) => {
                         sss.get(synset_id)
+                    },
+                    Some(Cow::Owned(sss)) => {
+                        sss.get(synset_id).map(|s| Cow::Owned(s.into_owned()))
                     },
                     None => None
                 }
@@ -699,9 +703,16 @@ pub trait Lexicon : Sized {
     }
 
     /// Get all synsets
-    fn synsets(&self) -> impl Iterator<Item=(&SynsetId, &Synset)> {
+    fn synsets<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> {
         self.synsets_iter().flat_map(|(_,e)| {
-            e.iter()
+            let it = match e {
+                Cow::Borrowed(v) => Box::new(v.iter()),
+                Cow::Owned(v) => {
+                    Box::new(v.into_iter()
+                        .map(|(s, e)| (s, Cow::Owned(e)))) as Box<dyn Iterator<Item = _>>
+                }
+            };
+            it
         })
     }
                 

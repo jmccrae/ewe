@@ -200,38 +200,6 @@ pub trait Entries : Sized {
     fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)>;
 }
 
-struct BTEntriesIter(BTEntries,
-    std::collections::btree_map::Iter<'static, String, BTreeMap<PosKey, Entry>>,
-    Option<(String, std::collections::btree_map::Iter<'static, PosKey, Entry>)>
-);
-
-impl Iterator for BTEntriesIter {
-    type Item = (String, PosKey, Entry);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some((ref lemma, ref mut by_pos_iter)) = self.2 {
-                if let Some((pos, entry)) = by_pos_iter.next() {
-                    return Some((lemma.clone(), pos.clone(), entry.clone()));
-                } else {
-                    self.2 = None;
-                }
-            }
-
-            if let Some((lemma, by_pos)) = self.1.next() {
-                self.2 = Some((lemma.clone(), unsafe {
-                    std::mem::transmute::<
-                        std::collections::btree_map::Iter<'_, PosKey, Entry>,
-                        std::collections::btree_map::Iter<'static, PosKey, Entry>
-                    >(by_pos.iter())
-                }));
-            } else {
-                return None;
-            }
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct BTEntries(pub(crate) BTreeMap<String, BTreeMap<PosKey, Entry>>);
 
@@ -305,6 +273,7 @@ impl Entries for BTEntries {
         self.0.values().map(|v| v.len()).sum()
     }
 
+    #[allow(unused)]
     fn into_entries(self) -> impl Iterator<Item=(String, PosKey, Entry)> {
         // self.0 accesses the BTreeMap inside the tuple struct
         self.0.into_iter().flat_map(|(s, inner_map)| {
@@ -353,6 +322,7 @@ impl Entry {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn into_senses(self) -> Vec<Sense> {
         self.sense
     }

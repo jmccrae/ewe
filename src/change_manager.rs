@@ -146,7 +146,7 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
                     match wn.synset_by_id(&synset_id) {
                         Some(synset) => {
                             let sense_id = 
-                                    get_sense_key(wn, &lemma, old_sense_id, synset, &synset_id);
+                                    get_sense_key(wn, &lemma, old_sense_id, &synset, &synset_id);
                             let mut sense = Sense::new(sense_id.clone(),
                                     synset_id.clone());
                             sense.subcat = subcat;
@@ -163,7 +163,7 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
             match wn.synset_by_id(&synset_id) {
                 Some(synset) => {
                     let e = Entry::new();
-                    let sense_id = get_sense_key(wn, &lemma, old_sense_id, synset, &synset_id);
+                    let sense_id = get_sense_key(wn, &lemma, old_sense_id, &synset, &synset_id);
                     let mut sense = Sense::new(sense_id.clone(),
                             synset_id.clone());
                     sense.subcat = subcat;

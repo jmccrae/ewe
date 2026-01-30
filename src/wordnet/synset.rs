@@ -5,12 +5,14 @@ use std::io::Write;
 use crate::rels::{YamlSynsetRelType,SynsetRelType};
 use crate::wordnet::*;
 use crate::wordnet::util::{escape_yaml_string, string_or_vec};
+use std::borrow::Cow;
 
-pub trait Synsets {
-    fn get(&self, id : &SynsetId) -> Option<&Synset>;
+pub trait Synsets : Sized {
+    fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>>;
     fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Option<Synset>;
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X, String>;
-    fn iter(&self) -> impl Iterator<Item=(&SynsetId, &Synset)>;
+    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)>;
+    fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)>;
     fn len(&self) -> usize;
     fn remove_entry(&mut self, id : &SynsetId) -> Option<(SynsetId, Synset)>;
     fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
@@ -23,7 +25,7 @@ pub trait Synsets {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct BTSynsets(pub(crate) BTreeMap<SynsetId, Synset>);
 
 impl BTSynsets {
@@ -31,8 +33,8 @@ impl BTSynsets {
 }
     
 impl Synsets for BTSynsets {
-    fn get(&self, id : &SynsetId) -> Option<&Synset> {
-        self.0.get(id)
+    fn get<'a>(&'a self, id : &SynsetId) -> Option<Cow<'a, Synset>> {
+        self.0.get(id).map(|x| Cow::Borrowed(x))
     }
     fn insert(&mut self, id : SynsetId, synset : Synset) -> Option<Synset> {
         self.0.insert(id, synset)
@@ -44,8 +46,11 @@ impl Synsets for BTSynsets {
             Err(format!("Could not find synset {}", id))
         }
     }
-    fn iter(&self) -> impl Iterator<Item=(&SynsetId, &Synset)> {
-        self.0.iter()
+    fn iter<'a>(&'a self) -> impl Iterator<Item=(SynsetId, Cow<'a, Synset>)> {
+        self.0.iter().map(|(k, v)| (k.clone(), Cow::Borrowed(v)) )
+    }
+    fn into_iter(self) -> impl Iterator<Item=(SynsetId, Synset)> {
+        self.0.into_iter()
     }
     fn len(&self) -> usize {
         self.0.len()

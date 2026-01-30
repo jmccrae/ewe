@@ -25,9 +25,10 @@ use std::path::Path;
 use std::env;
 use std::fs::File;
 use std::process::exit;
+use std::borrow::Cow;
 
 /// Supports the user in choosing a synset
-fn enter_synset<'a, L : Lexicon>(wn : &'a L, spec_string : &str) -> (SynsetId, &'a Synset) {
+fn enter_synset<'a, L : Lexicon>(wn : &'a L, spec_string : &str) -> (SynsetId, Cow<'a, Synset>) {
     loop {
         let input_str = input(&format!("Enter {}synset: ", spec_string));
         let ssid = SynsetId::new(&input_str);

@@ -149,7 +149,7 @@ pub fn get_sense_key2<L : Lexicon>(wn : &L, lemma : &str, sense_key : Option<&Se
             for entry in wn.entry_by_lemma(lemma) {
                 if entry.sense.iter().any(|sense| sense.synset == *synset_id) {
                     return Some(get_sense_key(wn, lemma, sense_key,
-                                              synset, synset_id));
+                                              &synset, synset_id));
                 }
             }
         },

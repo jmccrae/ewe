@@ -17,3 +17,8 @@ void = "1"
 indicatif = "0.16.2"
 csv = "*"
 sha2 = "*"
+redb = { version = "3.1.0", optional = true }
+
+[features]
+default = []
+redb = ["dep:redb"]

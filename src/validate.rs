@@ -142,7 +142,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                 pos: synset.part_of_speech.clone()
             });
         }
-        if !is_valid_synset_id(synset_id) {
+        if !is_valid_synset_id(&synset_id) {
             errors.push(ValidationError::InvalidSynsetId {
                 id: synset_id.clone()
             });
@@ -197,7 +197,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             }
             if rel.is_symmetric() {
                 if !wn.links_from(&target).iter().any(|(r2, t2)| {
-                    *r2 == rel && t2 == synset_id }) {
+                    *r2 == rel && *t2 == synset_id }) {
                     errors.push(ValidationError::SynsetRelationSymmetry {
                         source: synset_id.clone(),
                         rel: rel.clone(),
@@ -205,7 +205,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                     });
                 }
             }
-            if *synset_id == target {
+            if synset_id == target {
                 errors.push(ValidationError::SelfReferencingSynsetRelation {
                     source: synset_id.clone(),
                     rel: rel.clone(),
@@ -264,7 +264,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
                 any(|entry| {
                     entry.sense.iter().any(
                         |sense| {
-                            sense.synset == *synset_id
+                            sense.synset == synset_id
                         })
                 }) {
                 errors.push(ValidationError::SynsetMemberNotInEntries {
@@ -285,7 +285,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
             }
         }
 
-        check_transitive(wn, &mut errors, synset_id, synset);
+        check_transitive(wn, &mut errors, &synset_id, &synset);
 
     }
     check_no_loops(wn, &mut errors, &bar);
@@ -323,26 +323,26 @@ fn check_no_loops<L : Lexicon>(wn : &L,
         bar.inc(1);
         hypernyms.insert(synset_id.clone(), HashSet::new());
         for target in synset.hypernym.iter() {
-            match hypernyms.get_mut(synset_id) {
+            match hypernyms.get_mut(&synset_id) {
                 Some(h) => { h.insert(target.clone()); },
                 None => {}
             }
         }
         domains.insert(synset_id.clone(), HashSet::new());
         for target in synset.domain_region.iter() {
-            match domains.get_mut(synset_id) {
+            match domains.get_mut(&synset_id) {
                 Some(h) => { h.insert(target.clone()); },
                 None => {}
             }
         }
         for target in synset.domain_topic.iter() {
-            match domains.get_mut(synset_id) {
+            match domains.get_mut(&synset_id) {
                 Some(h) => { h.insert(target.clone()); },
                 None => {}
             }
         }
         for target in synset.exemplifies.iter() {
-            match domains.get_mut(synset_id) {
+            match domains.get_mut(&synset_id) {
                 Some(h) => { h.insert(target.clone()); },
                 None => {}
             }
@@ -352,40 +352,40 @@ fn check_no_loops<L : Lexicon>(wn : &L,
     while changed {
         changed = false;
         for (synset_id, _) in wn.synsets() {
-            let n_size = hypernyms[synset_id].len();
-            for c in hypernyms[synset_id].clone() {
+            let n_size = hypernyms[&synset_id].len();
+            for c in hypernyms[&synset_id].clone() {
                 let extension : Vec<SynsetId> = 
                     hypernyms.get(&c).iter().
                     flat_map(|x| x.iter()).
                     map(|x| x.clone()).collect();
-                match hypernyms.get_mut(synset_id) {
+                match hypernyms.get_mut(&synset_id) {
                     Some(h) => h.extend(extension.into_iter()),
                     None => {}
                 }
             }
-            if hypernyms[synset_id].len() != n_size {
+            if hypernyms[&synset_id].len() != n_size {
                 changed = true;
             }
-            if hypernyms[synset_id].contains(synset_id) {
+            if hypernyms[&synset_id].contains(&synset_id) {
                 errors.push(ValidationError::Loop {
                     id: synset_id.clone()
                 });
             }
-            let n_size_dom = domains[synset_id].len();
-            for c in domains[synset_id].clone() {
+            let n_size_dom = domains[&synset_id].len();
+            for c in domains[&synset_id].clone() {
                 let extension : Vec<SynsetId> = 
                     domains.get(&c).iter().
                     flat_map(|x| x.iter()).
                     map(|x| x.clone()).collect();
-                match domains.get_mut(synset_id) {
+                match domains.get_mut(&synset_id) {
                     Some(h) => h.extend(extension.into_iter()),
                     None => {}
                 }
             }
-            if domains[synset_id].len() != n_size_dom {
+            if domains[&synset_id].len() != n_size_dom {
                 changed = true;
             }
-            if domains[synset_id].contains(synset_id) {
+            if domains[&synset_id].contains(&synset_id) {
                 errors.push(ValidationError::DomainLoop {
                     id: synset_id.clone()
                 });

@@ -49,14 +49,14 @@ impl Lexicon for LexiconHashMapBackend {
             self.entries.insert(lemma.to_string(), e);
         }
     }
-    fn synsets_get(&self, lexname : &str) -> Option<&BTSynsets> {
-        self.synsets.get(lexname)
+    fn synsets_get<'a>(&'a self, lexname : &str) -> Option<Cow<'a, BTSynsets>> {
+        self.synsets.get(lexname).map(|x| Cow::Borrowed(x))
     }
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) {
         self.synsets.insert(lexname, synsets);
     }
-    fn synsets_iter(&self) -> impl Iterator<Item=(&String, &BTSynsets)> {
-        self.synsets.iter()
+    fn synsets_iter<'a>(&'a self) -> impl Iterator<Item=(&'a String, Cow<'a, BTSynsets>)> {
+        self.synsets.iter().map(|(k, v)| (k, Cow::Borrowed(v)))
     }
     fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut BTSynsets) -> X) -> X {
         if let Some(s) = self.synsets.get_mut(lexname) {

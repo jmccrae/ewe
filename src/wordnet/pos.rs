@@ -22,6 +22,7 @@ impl PosKey {
             None
         }
     }
+    #[allow(dead_code)]
     pub fn entry_no(&self) -> Option<u32> {
         if self.0.len() < 3 {
             None

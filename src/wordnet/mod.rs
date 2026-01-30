@@ -28,7 +28,9 @@ pub use deprecation::DeprecationRecord;
 pub mod hashmap;
 pub use hashmap::LexiconHashMapBackend;
 
+#[cfg(feature = "redb")]
 pub mod synset_members;
+#[cfg(feature = "redb")]
 pub use synset_members::MemberSynset;
 
 #[cfg(feature = "redb")]
