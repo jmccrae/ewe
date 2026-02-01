@@ -67,21 +67,35 @@ impl Lexicon for LexiconHashMapBackend {
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, BTSynsets>)>>> {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
-    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
-        for synsets in self.synsets.values_mut() {
-            synsets.remove_entry(synset_id)?;
-        }
+    fn synsets_insert_synset(&mut self, lexname : &str, synset_id : SynsetId, synset : Synset) -> Result<()> {
+        self.synsets.entry(lexname.to_owned()).or_insert_with(BTSynsets::new)
+            .insert(synset_id.clone(), synset.clone())?;
         Ok(())
     }
-    fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
-                         synset : Synset) -> Result<()> {
-        if let Some(synsets) = self.synsets.get_mut(&lexname) {
-            synsets.insert(synset_id, synset)?;
-            Ok(())
-        } else {
-            Err(LexiconError::SynsetIdNotFound(synset_id))
+    fn synsets_remove_synset(&mut self, lexname : &str,  synset_id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
+        if let Some(synsets) = self.synsets.get_mut(lexname) {
+            if let Some(synset) = synsets.remove_entry(synset_id)? {
+                return Ok(Some(synset))
+            }
         }
+        Ok(None)
     }
+    //fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
+    //    let mut removed = Vec::new();
+    //    for synsets in self.synsets.values_mut() {
+    //        synsets.remove_entry(synset_id)?;
+    //    }
+    //    Ok(())
+    //}
+    //fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
+    //                     synset : Synset) -> Result<()> {
+    //    add_link_to(self, &synset_id, &synset)?;
+    //    self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
+    //    self.synsets.entry(lexname).or_insert_with(BTSynsets::new)
+    //        .insert(synset_id, synset)?;
+    //    Ok(())
+    //}
+
     fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
         for synsets in self.synsets.values_mut() {
             if let Some(synset) = synsets.get_mut(synset_id) {

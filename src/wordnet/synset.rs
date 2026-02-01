@@ -12,7 +12,7 @@ use std::result;
 pub trait Synsets : Sized {
     fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>>;
     //fn insert<L : Lexicon>(&mut self, id : SynsetId, synset : Synset, lexicon : &L) -> Result<Option<Synset>>;
-    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X>;
+    //fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X>;
     fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a>;
     fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>> + 'static>;
     fn len(&self) -> Result<usize>;
@@ -50,13 +50,13 @@ impl Synsets for BTSynsets {
     //fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
     //    Ok(self.0.insert(id, synset))
     //}
-    fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
-        if let Some(x) = self.0.get_mut(id) {
-            Ok(f(x))
-        } else {
-            Err(LexiconError::SynsetIdNotFound(id.clone()))
-        }
-    }
+    //fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
+    //    if let Some(x) = self.0.get_mut(id) {
+    //        Ok(f(x))
+    //    } else {
+    //        Err(LexiconError::SynsetIdNotFound(id.clone()))
+    //    }
+    //}
     fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
         Ok(self.0.iter().map(|(k, v)| Ok((k.clone(), Cow::Borrowed(v)))))
     }

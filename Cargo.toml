@@ -22,5 +22,5 @@ ouroboros = "0.18.5"
 speedy = "0.8.7"
 
 [features]
-default = ["redb"]
+default = []
 redb = ["dep:redb"]

@@ -134,7 +134,6 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
         .map(|x| x.1.clone())
         .collect::<Vec<Cow<Entry>>>();
 
-
     if entries.len() > 1 {
         println!("More than one entry for {} ({}). Please check the YAML file",
             lemma, synset_pos.as_str());
@@ -176,7 +175,7 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
                     change_list.mark();
                     Some(sense_id)
                 },
-                None => None
+                None => return Err(LexiconError::SynsetIdNotFound(synset_id))
             }
         }
     };
@@ -577,6 +576,7 @@ mod tests {
         let mut change_list = ChangeList::new();
         let synset_id = add_synset(&mut wn, "test".to_owned(), "noun.object".to_owned(), 
             PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
+        eprintln!("synset {:?}", wn.synset_by_id(&synset_id).unwrap());
         let target_synset_id = add_synset(&mut wn, "another test".to_owned(), "noun.object".to_owned(), 
             PosKey::new("n".to_owned()), None, &mut change_list).unwrap();
         let synset3 = add_synset(&mut wn, "third test".to_owned(), "noun.object".to_owned(), 
@@ -586,7 +586,9 @@ mod tests {
         add_entry(&mut wn, synset_id.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list).unwrap();
         add_entry(&mut wn, synset3.clone(), lemma.clone(), pos.clone(), Vec::new(), None, &mut change_list).unwrap();
         let entry = wn.entry_by_lemma("test").unwrap();
-        let sense = entry.iter().next().unwrap().sense.iter().next().unwrap(); 
+        eprintln!("entry={:?}", entry);
+        let entry1 = entry.iter().next().unwrap();
+        let sense = entry1.sense.iter().next().unwrap(); 
         assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
         move_entry(&mut wn, synset_id.clone(), target_synset_id.clone(), lemma.clone(), pos.clone(), &mut change_list).unwrap();
         let entry = wn.entry_by_lemma("test").unwrap();

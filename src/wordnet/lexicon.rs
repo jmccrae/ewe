@@ -26,6 +26,8 @@ pub trait Lexicon : Sized {
     fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
         Ok(self.synsets_get(lexname)?.is_some())
     }
+    fn synsets_insert_synset(&mut self, lexname : &str, synset_id : SynsetId, synset : Synset) -> Result<()>;
+    fn synsets_remove_synset(&mut self, lexname : &str,  synset_id : &SynsetId) -> Result<Option<(SynsetId, Synset)>>;
     fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>>;
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()>;
     fn sense_links_to_get<'a>(&'a self, sense_id : &SenseId) -> Result<Option<Cow<'a, Vec<(SenseRelType, SenseId)>>>>;
@@ -332,7 +334,7 @@ pub trait Lexicon : Sized {
         for sense in entry.sense.iter() {
             self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()))?;
         }
-        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(&lemma), |e| {
             e.insert_entry(lemma, pos, entry).unwrap();
         })?;
         Ok(())
@@ -340,14 +342,12 @@ pub trait Lexicon : Sized {
 
     /// Add a synset to WordNet
     fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
-                         synset : Synset) -> Result<()>;
-//        add_link_to(self, &synset_id, &synset)?;
-//        self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
-//        self.synsets_update(&lexname, |s| {
-//            s.insert(synset_id, synset.clone()).unwrap();
-//        })?;
-//        Ok(())
-//    }
+                         synset : Synset) -> Result<()> {
+        add_link_to(self, &synset_id, &synset)?;
+        self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
+        self.synsets_insert_synset(&lexname, synset_id, synset)?;
+        Ok(())
+    }
 
     /// Add a sense to an existing entry. This will not create an entry if it does not exist
     fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) -> Result<()> {
@@ -389,22 +389,17 @@ pub trait Lexicon : Sized {
     }
 
     /// Remove a synset. This does not remove any senses or incoming links!
-    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()>;
-    //{
-    //    let mut removed = Vec::new();
-    //    match self.lex_name_for(synset_id)? {
-    //        Some(lexname) => {
-    //            self.synsets_update(&lexname, |m| {
-    //                removed.extend(m.remove_entry(synset_id).unwrap());
-    //            })?;
-    //            for (_, ss) in removed.iter() {
-    //                remove_link_to(self, synset_id, &ss)?;
-    //            }
-    //        },
-    //        None => {}
-    //    }
-    //    Ok(())
-    //}
+    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
+        match self.lex_name_for(synset_id)? {
+            Some(lexname) => {
+                if let Some((_, ss)) = self.synsets_remove_synset(&lexname, synset_id)? {
+                    remove_link_to(self, synset_id, &ss)?;
+                }
+            },
+            None => {}
+        }
+        Ok(())
+    }
 
     /// For a given sense, get all links from this sense
     fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
@@ -760,6 +755,7 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the synset augmented with the member data
+    #[cfg(feature = "redb")]
     fn get_member_synset(&self, id : &SynsetId) -> Result<MemberSynset> {
         if let Some(synset) = self.synset_by_id(id)? {
             let synset = synset.into_owned();
@@ -796,7 +792,7 @@ fn add_sense_link_to_sense<L : Lexicon>(backend : &mut L,
     Ok(())
 }
 
-fn add_link_to<L : Lexicon>(backend : &mut L,
+pub(crate) fn add_link_to<L : Lexicon>(backend : &mut L,
                synset_id : &SynsetId, synset : &Synset) -> Result<()> {
     for (rel_type, target) in synset.links_from() {
         backend.links_to_push(target.clone(), rel_type, synset_id.clone())?;

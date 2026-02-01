@@ -145,17 +145,58 @@ impl Lexicon for ReDBLexicon {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
     fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
-        panic!("TODO")
+        let lexfile_opt = self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned());
+        if let Some(lexfile) = lexfile_opt {
+            let res = if let Some(synsets) = self.synsets.get_mut(&lexfile) {
+                synsets.update(synset_id, f)?;
+                Ok(())
+            } else {
+                Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
+            };
+            res
+        } else {
+            Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
+        }
     }
-    fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
-                         synset : Synset) -> Result<()> {
-        panic!("TODO")
+    fn synsets_insert_synset(&mut self, lexname : &str, synset_id : SynsetId, synset : Synset) -> Result<()> {
+        let db_clone = self.db.clone();
+        self.synsets.entry(lexname.to_owned()).or_insert_with(|| {
+            ReDBSynsets::new(db_clone, lexname.to_owned())
+        }).insert(lexname.to_owned(), synset_id.clone(), synset.clone())?;
+        Ok(())
+    }
+    fn synsets_remove_synset(&mut self, lexname : &str,  synset_id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
+        if let Some(synsets) = self.synsets.get_mut(lexname) {
+            return synsets.remove(lexname.to_string(), synset_id.clone());
+        }
+        Ok(None)
+    }
 
-    }
-    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
-        panic!("TODO")
+    //fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
+    //                     synset : Synset) -> Result<()> {
+    //    add_link_to(self, &synset_id, &synset)?;
+    //    self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
+    //    let db_clone = self.db.clone();
+    //    self.synsets.entry(lexname.clone()).or_insert_with(|| {
+    //        ReDBSynsets::new(db_clone, lexname.clone())
+    //    }).insert(lexname, synset_id, synset)?;
+    //    Ok(())
+    //}
+    //fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
+    //    let lexfile_opt : Option<String> = self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned());
+    //    if let Some(lexfile) = lexfile_opt {
+    //        let res = if let Some(synsets) = self.synsets.get_mut(&lexfile) {
+    //            synsets.remove_entry(synset_id)?;
+    //            Ok(())
+    //        } else {
+    //            Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
+    //        };
+    //        res
+    //    } else {
+    //        Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
+    //    }
 
-    }
+    //}
 
     fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>> {
         let txn = self.db.begin_read()?;
@@ -566,19 +607,34 @@ impl ReDBSynsets {
     pub fn new(db : Rc<Database>, lexname : String) -> ReDBSynsets {
         ReDBSynsets { db, lexname }
     }
-}
 
-impl Synsets for ReDBSynsets {
-    fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(SYNSETS_TABLE)?;
-        if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
-            let synset = deserialize_synset(synset_str.value())?;
-            Ok(Some(Cow::Owned(synset)))
-        } else {
-            Ok(None)
+    fn insert(&mut self, lexname : String, synset_id : SynsetId,
+                         synset : Synset) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(SYNSETS_TABLE)?;
+            table.insert((lexname, synset_id.to_string()), serialize_synset(&synset)?)?;
         }
+        txn.commit()?;
+        Ok(())
     }
+
+    fn remove(&mut self, lexname : String, synset_id : SynsetId) -> Result<Option<(SynsetId, Synset)>> {
+        let txn = self.db.begin_write()?;
+        let result = {
+            let mut table = txn.open_table(SYNSETS_TABLE)?;
+            let res = if let Some(s) = table.remove((lexname, synset_id.to_string()))? {
+                let synset = deserialize_synset(s.value())?;
+                Ok(Some((synset_id, synset)))
+            } else {
+                Ok(None)
+            };
+            res
+        };
+        txn.commit()?;
+        result
+    }
+
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
         let txn = self.db.begin_write()?;
         let (result, synset) = {
@@ -602,7 +658,20 @@ impl Synsets for ReDBSynsets {
         }
         result
     }
-    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
+ }
+
+impl Synsets for ReDBSynsets {
+    fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
+            let synset = deserialize_synset(synset_str.value())?;
+            Ok(Some(Cow::Owned(synset)))
+        } else {
+            Ok(None)
+        }
+    }
+   fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(SynsetIterator::new(txn, table, |table| {
