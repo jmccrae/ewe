@@ -8,3 +8,4 @@ yaml
 yaml2
 apply_python_yaml.py
 deprecations.csv
+Cargo.lock
