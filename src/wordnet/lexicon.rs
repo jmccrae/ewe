@@ -16,34 +16,32 @@ pub trait Lexicon : Sized {
     type E : Entries + Clone;
     type S : Synsets + Clone;
     // Data access methods
-    fn entries_get<'a>(&'a self, lemma : &str) -> Result<Option<Cow<'a, Self::E>>>;
-    fn entries_insert(&mut self, key : String, entries : BTEntries) -> Result<()>;
-    fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::E>)>>>;
-    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut Self::E)) -> Result<()>;
+    fn entries_get<'a>(&'a self, key : char) -> Result<Option<Cow<'a, Self::E>>>;
+    fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()>;
+    fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, Self::E>)>>>;
+    fn entries_update(&mut self, key : char, f : impl FnOnce(&mut Self::E)) -> Result<()>;
     fn synsets_get<'a>(&'a self, lexname : &str) -> Result<Option<Cow<'a, Self::S>>>;
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()>;
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::S>)>>>;
-    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut Self::S) -> X) -> Result<X>;
     fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
         Ok(self.synsets_get(lexname)?.is_some())
     }
-    fn synset_id_to_lexfile_get(&self, synset_id : &SynsetId) -> Result<Option<&String>>;
+    fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>>;
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()>;
-    fn sense_links_to_get(&self, sense_id : &SenseId) -> Result<Option<&Vec<(SenseRelType, SenseId)>>>;
+    fn sense_links_to_get<'a>(&'a self, sense_id : &SenseId) -> Result<Option<Cow<'a, Vec<(SenseRelType, SenseId)>>>>;
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) 
-        -> Result<&mut Vec<(SenseRelType, SenseId)>>;
+        -> Result<Vec<(SenseRelType, SenseId)>>;
     fn sense_links_to_update(&mut self, sense_id : &SenseId, f : impl FnOnce(&mut Vec<(SenseRelType, SenseId)>)) -> Result<()>;
     fn sense_links_to_push(&mut self, sense_id : SenseId, rel : SenseRelType, target : SenseId) -> Result<()>;
     fn set_sense_links_to(&mut self, links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>) -> Result<()>;
-    fn links_to_get(&self, synset_id : &SynsetId) -> Result<Option<&Vec<(SynsetRelType, SynsetId)>>>;
-    fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) 
-        -> Result<&mut Vec<(SynsetRelType, SynsetId)>>;
+    fn links_to_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, Vec<(SynsetRelType, SynsetId)>>>>;
+    fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) -> Result<Vec<(SynsetRelType, SynsetId)>>;
     fn links_to_update(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Vec<(SynsetRelType, SynsetId)>)) -> Result<()>;
     fn links_to_push(&mut self, synset_id : SynsetId, rel : SynsetRelType, target : SynsetId) -> Result<()>;
     fn set_links_to(&mut self, links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>) -> Result<()>;
-    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<&(String, PosKey)>>;
+    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<(String, PosKey)>>;
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()>;
-    fn deprecations_get(&self) -> Result<&Vec<DeprecationRecord>>;
+    fn deprecations_get<'a>(&'a self) -> Result<Cow<'a, Vec<DeprecationRecord>>>;
     fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()>;
 
     /// Load a lexicon from a folder of YAML files
@@ -70,7 +68,7 @@ pub trait Lexicon : Sized {
                 map(|x| x.to_string()).
                 unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
-                let key = file_name[8..9].to_string();
+                let key = file_name[8..9].chars().into_iter().next().unwrap();
                 let entries2 : BTEntries =
                     serde_yaml::from_reader(File::open(file.path())
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
@@ -171,7 +169,7 @@ pub trait Lexicon : Sized {
 
     /// Get the lexicographer file name for a synset
     fn lex_name_for(&self, synset_id : &SynsetId) -> Result<Option<String>> {
-        Ok(self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.clone()))
+        Ok(self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned()))
     }
 
     /// Get the entry data for a lemma
@@ -179,7 +177,7 @@ pub trait Lexicon : Sized {
         if lemma.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(match self.entries_get(&entry_key(lemma))? {
+        Ok(match self.entries_get(entry_key(lemma))? {
             Some(Cow::Borrowed(v)) => v.entry_by_lemma(lemma)?,
             Some(Cow::Owned(v)) => v.entry_by_lemma(lemma)?.into_iter().map(|e| Cow::Owned(e.into_owned())).collect(),
             _ => Vec::new()
@@ -201,8 +199,8 @@ pub trait Lexicon : Sized {
     fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
         match lemma.chars().nth(0) {
             Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
-                let key = format!("{}", c.to_lowercase());
-                Ok(match self.entries_get(&key)? {
+                let key = c.to_ascii_lowercase();
+                Ok(match self.entries_get(key)? {
                     Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma)?,
                     Some(Cow::Owned(v)) => v.entry_by_lemma_with_pos(lemma)?
                         .into_iter().map(|(p,e)| (p, Cow::Owned(e.into_owned()))).collect(),
@@ -212,7 +210,7 @@ pub trait Lexicon : Sized {
                 })
             },
             Some(_) => {
-                Ok(match self.entries_get("0")? {
+                Ok(match self.entries_get('0')? {
                     Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma)?,
                     Some(Cow::Owned(v)) => v.entry_by_lemma_with_pos(lemma)?
                         .into_iter().map(|(p,e)| (p, Cow::Owned(e.into_owned()))).collect(),
@@ -227,7 +225,7 @@ pub trait Lexicon : Sized {
 
     /// Get the sense by lemma and synset id
     fn get_sense<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> Result<Vec<Cow<'a, Sense>>> {
-        Ok(match self.entries_get(&entry_key(&lemma))? {
+        Ok(match self.entries_get(entry_key(&lemma))? {
             Some(Cow::Borrowed(entries)) => entries.get_sense(lemma, synset_id)?,
             Some(Cow::Owned(entries)) => entries.get_sense(lemma, synset_id)?
                 .into_iter().map(|s| Cow::Owned(s.into_owned())).collect(),
@@ -239,8 +237,8 @@ pub trait Lexicon : Sized {
     #[allow(unused)]
     fn get_sense_by_id<'a>(&'a self, sense_id : &SenseId) -> Result<Option<(String, PosKey, Cow<'a, Sense>)>> {
         if let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id)? {
-            for (pos2, e) in self.entry_by_lemma_with_pos(lemma)? {
-                if *pos == pos2 {
+            for (pos2, e) in self.entry_by_lemma_with_pos(&lemma)? {
+                if pos == pos2 {
                     match e {
                         Cow::Borrowed(e) => {
                             for sense in e.sense.iter() {
@@ -294,19 +292,7 @@ pub trait Lexicon : Sized {
     }
 
     /// Update synset data by ID 
-    fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
-        match self.lex_name_for(synset_id)? {
-            Some(lex_name) => {
-                self.synsets_update(&lex_name, |sss| {
-                    sss.update(synset_id, |ss| {
-                        f(ss)
-                    })
-                })??;
-                Ok(())
-            },
-            None => Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
-        }
-    }
+    fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()>;
 
     /// Get synset data by ID (mutable)
     //fn synset_by_id_mut(&mut self, synset_id : &SynsetId) -> Option<&mut Synset> {
@@ -346,7 +332,7 @@ pub trait Lexicon : Sized {
         for sense in entry.sense.iter() {
             self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()))?;
         }
-        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
             e.insert_entry(lemma, pos, entry).unwrap();
         })?;
         Ok(())
@@ -354,20 +340,20 @@ pub trait Lexicon : Sized {
 
     /// Add a synset to WordNet
     fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
-                         synset : Synset) -> Result<()> {
-        add_link_to(self, &synset_id, &synset)?;
-        self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
-        self.synsets_update(&lexname, |s| {
-            s.insert(synset_id, synset.clone()).unwrap();
-        })?;
-        Ok(())
-    }
+                         synset : Synset) -> Result<()>;
+//        add_link_to(self, &synset_id, &synset)?;
+//        self.synset_id_to_lexfile_insert(synset_id.clone(), lexname.clone())?;
+//        self.synsets_update(&lexname, |s| {
+//            s.insert(synset_id, synset.clone()).unwrap();
+//        })?;
+//        Ok(())
+//    }
 
     /// Add a sense to an existing entry. This will not create an entry if it does not exist
     fn insert_sense(&mut self, lemma : String, pos : PosKey, sense : Sense) -> Result<()> {
         add_sense_link_to_sense(self, &sense)?;
         self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()))?;
-        self.entries_update(&entry_key(&lemma), |e| {
+        self.entries_update(entry_key(&lemma), |e| {
             e.insert_sense(lemma, pos, sense)
                 .unwrap_or_else(|_| {
                     eprintln!("Failed to insert sense as the entry does not exist");
@@ -389,7 +375,7 @@ pub trait Lexicon : Sized {
                         synset_id : &SynsetId) -> Result<Vec<SenseId>> {
         let v = self.sense_links_from(lemma, pos, synset_id)?;
         let mut keys  : Vec<SenseId> = Vec::new();
-        self.entries_update(&entry_key(lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(lemma), |e : &mut Self::E| {
                 keys.extend(e.remove_sense(lemma, pos, synset_id).unwrap()) })?;
         for source in keys.iter() {
             for (rel, target) in v.iter() {
@@ -403,26 +389,27 @@ pub trait Lexicon : Sized {
     }
 
     /// Remove a synset. This does not remove any senses or incoming links!
-    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
-        let mut removed = Vec::new();
-        match self.lex_name_for(synset_id)? {
-            Some(lexname) => {
-                self.synsets_update(&lexname, |m| {
-                    removed.extend(m.remove_entry(synset_id).unwrap());
-                })?;
-                for (_, ss) in removed.iter() {
-                    remove_link_to(self, synset_id, &ss)?;
-                }
-            },
-            None => {}
-        }
-        Ok(())
-    }
+    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()>;
+    //{
+    //    let mut removed = Vec::new();
+    //    match self.lex_name_for(synset_id)? {
+    //        Some(lexname) => {
+    //            self.synsets_update(&lexname, |m| {
+    //                removed.extend(m.remove_entry(synset_id).unwrap());
+    //            })?;
+    //            for (_, ss) in removed.iter() {
+    //                remove_link_to(self, synset_id, &ss)?;
+    //            }
+    //        },
+    //        None => {}
+    //    }
+    //    Ok(())
+    //}
 
     /// For a given sense, get all links from this sense
     fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
                             synset_id : &SynsetId) -> Result<Vec<(SenseRelType, SenseId)>> {
-        Ok(match self.entries_get(&entry_key(lemma))? {
+        Ok(match self.entries_get(entry_key(lemma))? {
             Some(e) => e.sense_links_from(lemma, pos, synset_id)?,
             None => Vec::new()
         })
@@ -434,7 +421,7 @@ pub trait Lexicon : Sized {
         Ok(match self.get_sense_id(lemma, pos, synset_id)? {
             Some(sense_id) => {
                 match self.sense_links_to_get(&sense_id)? {
-                    Some(v) => v.clone(),
+                    Some(v) => v.into_owned(),
                     None => Vec::new()
                 }
             },
@@ -447,8 +434,8 @@ pub trait Lexicon : Sized {
                         -> Result<Vec<(SenseRelType, SenseId)>> {
         Ok(match self.sense_id_to_lemma_pos_get(sense_id)? {
             Some((lemma, pos)) => {
-                match self.entries_get(&entry_key(lemma))? {
-                    Some(e) => e.sense_links_from_id(lemma, pos, sense_id)?,
+                match self.entries_get(entry_key(&lemma))? {
+                    Some(e) => e.sense_links_from_id(&lemma, &pos, sense_id)?,
                     None => Vec::new()
                 }
             },
@@ -488,7 +475,7 @@ pub trait Lexicon : Sized {
     /// For a synset, find all backlinks referring to this synset
     fn links_to(&self, synset_id : &SynsetId) -> Result<Vec<(SynsetRelType, SynsetId)>> {
         Ok(match self.links_to_get(synset_id)? {
-            Some(s) => s.clone(),
+            Some(s) => s.into_owned(),
             None => Vec::new()
         })
     }
@@ -504,7 +491,7 @@ pub trait Lexicon : Sized {
     /// Get a sense ID for a lemma, POS key and synset
     fn get_sense_id<'a>(&'a self, lemma : &str, pos : &PosKey, synset_id : &SynsetId) -> 
         Result<Option<SenseId>> {
-        Ok(match self.entries_get(&entry_key(lemma))? {
+        Ok(match self.entries_get(entry_key(lemma))? {
             Some(e) => e.get_sense_id(lemma, pos, synset_id)?,
             None => None
         })
@@ -513,7 +500,7 @@ pub trait Lexicon : Sized {
     // Get a sense ID for a lemma and synset
     fn get_sense_id2<'a>(&'a self, lemma : &str, synset_id : &SynsetId) -> 
         Result<Option<SenseId>> {
-        Ok(match self.entries_get(&entry_key(lemma))? {
+        Ok(match self.entries_get(entry_key(lemma))? {
             Some(e) => e.get_sense_id2(lemma, synset_id)?,
             None => None
         })
@@ -539,7 +526,7 @@ pub trait Lexicon : Sized {
             }
             match lemma_pos {
                 Some((lemma, pos)) => {
-                    self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+                    self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
                         e.add_rel(&lemma, &pos, source, rel, target).
                             unwrap_or_else(|_| {
                                 eprintln!("Failed to update entry");
@@ -569,7 +556,7 @@ pub trait Lexicon : Sized {
         }
         match lemma_pos {
             Some ((lemma, pos)) => {
-                self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+                self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
                     e.remove_rel(&lemma, &pos, source, target).
                         unwrap_or_else(|_| {
                             eprintln!("Could not remove sense rel");
@@ -612,7 +599,7 @@ pub trait Lexicon : Sized {
 
     /// Get the list of variant forms of an entry
     fn get_forms(&self, lemma : &str, pos : &PosKey) -> Result<Vec<String>> {
-        Ok(match self.entries_get(&entry_key(&lemma))? {
+        Ok(match self.entries_get(entry_key(&lemma))? {
             Some(e) => e.get_forms(lemma, pos)?,
             None => Vec::new()
         })
@@ -620,7 +607,7 @@ pub trait Lexicon : Sized {
 
     /// Add a variant form to an entry
     fn add_form(&mut self, lemma : &str, pos : &PosKey, form : String) -> Result<()> {
-        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
             e.add_form(lemma, pos, form)
                 .unwrap_or_else(|_| {
                     eprintln!("Could not find form");
@@ -631,7 +618,7 @@ pub trait Lexicon : Sized {
 
     /// Get the list of pronunications of an entry
     fn get_pronunciations(&self, lemma : &str, pos : &PosKey) -> Result<Vec<Pronunciation>> {
-        Ok(match self.entries_get(&entry_key(&lemma))? {
+        Ok(match self.entries_get(entry_key(&lemma))? {
             Some(e) => e.get_pronunciations(lemma, pos)?,
             None => Vec::new()
         })
@@ -639,7 +626,7 @@ pub trait Lexicon : Sized {
 
     /// Add a pronunciation to an entry
     fn add_pronunciation(&mut self, lemma : &str, pos : &PosKey, pronunciation : Pronunciation) -> Result<()> {
-        self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
             e.add_pronunciation(lemma, pos, pronunciation).
                 unwrap_or_else(|_| {
                     eprintln!("Could not remove pronunciation");
@@ -684,7 +671,7 @@ pub trait Lexicon : Sized {
             None => {}
         };
         if let Some((lemma, pos)) = lemma_pos {
-            self.entries_update(&entry_key(&lemma), |e : &mut Self::E| {
+            self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
                 e.update_sense_key(&lemma, &pos, old_key, new_key)
                     .unwrap_or_else(|_| {
                         eprintln!("Could not remove sense key");
@@ -693,7 +680,7 @@ pub trait Lexicon : Sized {
         }
         match self.sense_links_to_get(old_key)?.map(|x| x.clone()) {
             Some(links_to) => {
-                for (rel, source) in links_to {
+                for (rel, source) in links_to.into_owned() {
                     self.remove_sense_rel(&source, old_key)?;
                     self.add_sense_rel(&source, rel.clone(), old_key)?;
                 }
@@ -772,6 +759,17 @@ pub trait Lexicon : Sized {
         Ok(self.synsets_iter()?.map(|v| v.unwrap().1.len().unwrap()).sum())
     }
 
+    /// Get the synset augmented with the member data
+    fn get_member_synset(&self, id : &SynsetId) -> Result<MemberSynset> {
+        if let Some(synset) = self.synset_by_id(id)? {
+            let synset = synset.into_owned();
+            MemberSynset::from_synset(id, synset, self)
+        } else {
+           Err(LexiconError::SynsetIdNotFound(id.clone())) 
+        }
+    }
+
+
     //#[cfg(test)]
     //fn add_lexfile(&mut self, lexfile : &str) -> Result<()> {
     //    self.synsets_insert(lexfile.to_owned(), Synsets::new());
@@ -816,12 +814,12 @@ fn remove_link_to<L : Lexicon>(backend : &mut L,
     Ok(())
 }
 
-pub(crate) fn entry_key(lemma : &str) -> String {
+pub(crate) fn entry_key(lemma : &str) -> char {
     let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
     if key < 'a' || key > 'z' {
-        '0'.to_string()
+        '0'
     } else {
-        key.to_string()
+        key
     }
 }
 

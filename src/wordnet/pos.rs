@@ -2,7 +2,7 @@ use serde::{Serialize,Deserialize};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
-pub struct PosKey(String);
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]pub struct PosKey(String);
 
 impl PosKey {
     pub fn new(s : String) -> PosKey { PosKey(s) }
@@ -41,6 +41,7 @@ impl fmt::Display for PosKey {
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub enum PartOfSpeech { n, v, a, r, s }
 
 impl PartOfSpeech {

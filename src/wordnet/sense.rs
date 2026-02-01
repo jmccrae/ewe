@@ -5,7 +5,9 @@ use crate::wordnet::*;
 use crate::wordnet::util::{write_prop_sense, escape_yaml_string};
 use std::fmt;
 
+
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Sense {
     pub id : SenseId,
     pub synset : SynsetId,
@@ -296,6 +298,7 @@ impl Sense {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct SenseId(String);
 
 impl SenseId {

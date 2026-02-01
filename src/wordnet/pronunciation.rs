@@ -3,6 +3,7 @@ use std::io::Write;
 use crate::wordnet::util::escape_yaml_string;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Pronunciation {
     value : String,
     variety : Option<String>

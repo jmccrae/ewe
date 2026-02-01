@@ -7,7 +7,7 @@ use crate::wordnet::util::escape_yaml_string;
 
 
 #[derive(Debug, PartialEq,Clone)]
-pub struct Example {
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]pub struct Example {
     pub text : String,
     pub source : Option<String>
 }

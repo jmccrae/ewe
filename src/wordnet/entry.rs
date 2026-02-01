@@ -279,6 +279,7 @@ impl Entries for BTEntries {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone,Default)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Entry {
     pub sense : Vec<Sense>,
     #[serde(default)]

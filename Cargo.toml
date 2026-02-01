@@ -19,7 +19,8 @@ csv = "*"
 sha2 = "*"
 redb = { version = "3.1.0", optional = true }
 ouroboros = "0.18.5"
+speedy = "0.8.7"
 
 [features]
-default = []
+default = ["redb"]
 redb = ["dep:redb"]

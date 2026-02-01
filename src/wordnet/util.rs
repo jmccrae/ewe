@@ -159,7 +159,16 @@ pub enum LexiconError {
     DBTransactionError(#[from] redb::TransactionError),
     #[cfg(feature="redb")]
     #[error("DB error: {0}")]
-    DBTableError(#[from] redb::TableError)
+    DBTableError(#[from] redb::TableError),
+    #[cfg(feature="redb")]
+    #[error("DB error: {0}")]
+    DBCommitError(#[from] redb::CommitError),
+    #[cfg(feature="redb")]
+    #[error("DB error: {0}")]
+    DBDatabaseError(#[from] redb::DatabaseError),
+    #[cfg(feature="redb")]
+    #[error("Speedy error: {0}")]
+    SpeedyError(#[from] speedy::Error),
 }
 
 #[derive(Error,Debug)]

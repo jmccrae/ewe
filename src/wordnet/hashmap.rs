@@ -5,7 +5,7 @@ use crate::wordnet::entry::BTEntries;
 use std::borrow::Cow;
 
 pub struct LexiconHashMapBackend {
-    entries : HashMap<String, BTEntries>,
+    entries : HashMap<char, BTEntries>,
     synsets : HashMap<String, BTSynsets>,
     synset_id_to_lexfile : HashMap<SynsetId, String>,
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
@@ -37,23 +37,23 @@ impl LexiconHashMapBackend {
 impl Lexicon for LexiconHashMapBackend {
     type E = BTEntries;
     type S = BTSynsets;
-    fn entries_get<'a>(&'a self, lemma : &str) -> Result<Option<Cow<'a, BTEntries>>> {
-        Ok(self.entries.get(lemma).map(|x| Cow::Borrowed(x)))
+    fn entries_get<'a>(&'a self, key : char) -> Result<Option<Cow<'a, BTEntries>>> {
+        Ok(self.entries.get(&key).map(|x| Cow::Borrowed(x)))
     }
-    fn entries_insert(&mut self, key : String, entries : BTEntries) -> Result<()> {
+    fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()> {
         self.entries.insert(key, entries);
         Ok(())
     }
-    fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, BTEntries>)>>> {
-        Ok(self.entries.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
+    fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, BTEntries>)>>> {
+        Ok(self.entries.iter().map(|(k, v)| Ok((*k, Cow::Borrowed(v)))))
     }
-    fn entries_update(&mut self, lemma : &str, f : impl FnOnce(&mut BTEntries)) -> Result<()> {
-        if let Some(e) = self.entries.get_mut(lemma) {
+    fn entries_update(&mut self, key : char, f : impl FnOnce(&mut BTEntries)) -> Result<()> {
+        if let Some(e) = self.entries.get_mut(&key) {
             f(e);
         } else {
             let mut e = BTEntries::new();
             f(&mut e);
-            self.entries.insert(lemma.to_string(), e);
+            self.entries.insert(key, e);
         }
         Ok(())
     }
@@ -67,29 +67,44 @@ impl Lexicon for LexiconHashMapBackend {
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, BTSynsets>)>>> {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
-    fn synsets_update<X>(&mut self, lexname : &str, f : impl FnOnce(&mut BTSynsets) -> X) -> Result<X> {
-        if let Some(s) = self.synsets.get_mut(lexname) {
-            Ok(f(s))
+    fn remove_synset(&mut self, synset_id : &SynsetId) -> Result<()> {
+        for synsets in self.synsets.values_mut() {
+            synsets.remove_entry(synset_id)?;
+        }
+        Ok(())
+    }
+    fn insert_synset(&mut self, lexname : String, synset_id : SynsetId,
+                         synset : Synset) -> Result<()> {
+        if let Some(synsets) = self.synsets.get_mut(&lexname) {
+            synsets.insert(synset_id, synset)?;
+            Ok(())
         } else {
-            let mut s = BTSynsets::new();
-            let result = f(&mut s);
-            self.synsets.insert(lexname.to_string(), s);
-            Ok(result)
+            Err(LexiconError::SynsetIdNotFound(synset_id))
         }
     }
-    fn synset_id_to_lexfile_get(&self, synset_id : &SynsetId) -> Result<Option<&String>> {
-        Ok(self.synset_id_to_lexfile.get(synset_id))
+    fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
+        for synsets in self.synsets.values_mut() {
+            if let Some(synset) = synsets.get_mut(synset_id) {
+                f(synset);
+                return Ok(());
+            }
+        }
+        Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
+    }
+
+    fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>> {
+        Ok(self.synset_id_to_lexfile.get(synset_id).map(Cow::Borrowed))
     }
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()> {
         self.synset_id_to_lexfile.insert(synset_id, lexfile);
         Ok(())
     }
-    fn sense_links_to_get(&self, sense_id : &SenseId) -> Result<Option<&Vec<(SenseRelType, SenseId)>>> {
-        Ok(self.sense_links_to.get(sense_id))
+    fn sense_links_to_get<'a>(&'a self, sense_id : &SenseId) -> Result<Option<Cow<'a, Vec<(SenseRelType, SenseId)>>>> {
+        Ok(self.sense_links_to.get(sense_id).map(Cow::Borrowed))
     }
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) 
-        -> Result<&mut Vec<(SenseRelType, SenseId)>> {
-        Ok(self.sense_links_to.entry(sense_id).or_insert_with(f))
+        -> Result<Vec<(SenseRelType, SenseId)>> {
+        Ok(self.sense_links_to.entry(sense_id).or_insert_with(f).clone())
     }
     fn sense_links_to_update(&mut self, sense_id : &SenseId, f : impl FnOnce(&mut Vec<(SenseRelType, SenseId)>)) -> Result<()> {
         if let Some(v) = self.sense_links_to.get_mut(sense_id) {
@@ -110,12 +125,11 @@ impl Lexicon for LexiconHashMapBackend {
         self.sense_links_to = links_to;
         Ok(())
     }
-    fn links_to_get(&self, synset_id : &SynsetId) -> Result<Option<&Vec<(SynsetRelType, SynsetId)>>> {
-        Ok(self.links_to.get(synset_id))
+    fn links_to_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, Vec<(SynsetRelType, SynsetId)>>>> {
+        Ok(self.links_to.get(synset_id).map(Cow::Borrowed))
     }
-    fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) 
-        -> Result<&mut Vec<(SynsetRelType, SynsetId)>> {
-        Ok(self.links_to.entry(synset_id).or_insert_with(f))
+    fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) -> Result<Vec<(SynsetRelType, SynsetId)>> {
+        Ok(self.links_to.entry(synset_id).or_insert_with(f).clone())
     }
     fn links_to_update(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Vec<(SynsetRelType, SynsetId)>)) -> Result<()> {
         if let Some(v) = self.links_to.get_mut(synset_id) {
@@ -136,15 +150,15 @@ impl Lexicon for LexiconHashMapBackend {
         self.links_to = links_to;
         Ok(())
     }
-    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<&(String, PosKey)>> {
-        Ok(self.sense_id_to_lemma_pos.get(sense_id))
+    fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<(String, PosKey)>> {
+        Ok(self.sense_id_to_lemma_pos.get(sense_id).cloned())
     }
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
         self.sense_id_to_lemma_pos.insert(sense_id, lemma_pos);
         Ok(())
     }
-    fn deprecations_get(&self) -> Result<&Vec<DeprecationRecord>> {
-        Ok(&self.deprecations)
+    fn deprecations_get<'a>(&'a self) -> Result<Cow<'a, Vec<DeprecationRecord>>> {
+        Ok(Cow::Borrowed(&self.deprecations))
     }
     fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()> {
         self.deprecations.push(record);

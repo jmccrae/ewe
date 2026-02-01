@@ -11,7 +11,7 @@ use std::result;
 
 pub trait Synsets : Sized {
     fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>>;
-    fn insert(&mut self, id : SynsetId, sysnet : Synset) -> Result<Option<Synset>>;
+    //fn insert<L : Lexicon>(&mut self, id : SynsetId, synset : Synset, lexicon : &L) -> Result<Option<Synset>>;
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X>;
     fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a>;
     fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>> + 'static>;
@@ -34,6 +34,12 @@ pub struct BTSynsets(pub(crate) BTreeMap<SynsetId, Synset>);
 
 impl BTSynsets {
     pub(crate) fn new() -> BTSynsets { BTSynsets(BTreeMap::new()) }
+    pub(crate) fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
+        Ok(self.0.insert(id, synset))
+    }
+    pub(crate) fn get_mut(&mut self, id : &SynsetId) -> Option<&mut Synset> {
+        self.0.get_mut(id)
+    }
 }
     
    
@@ -41,9 +47,9 @@ impl Synsets for BTSynsets {
     fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
         Ok(self.0.get(id).map(|x| Cow::Borrowed(x)))
     }
-    fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
-        Ok(self.0.insert(id, synset))
-    }
+    //fn insert(&mut self, id : SynsetId, synset : Synset) -> Result<Option<Synset>> {
+    //    Ok(self.0.insert(id, synset))
+    //}
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
         if let Some(x) = self.0.get_mut(id) {
             Ok(f(x))
@@ -67,6 +73,7 @@ impl Synsets for BTSynsets {
  
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Synset {
     pub definition : Vec<String>,
     #[serde(default)]
@@ -415,6 +422,7 @@ fn write_prop_synset<W : Write>(w : &mut W, synsets : &Vec<SynsetId>, name : &st
 
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct ILIID(String);
 
 impl ILIID {
@@ -423,6 +431,7 @@ impl ILIID {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct SynsetId(String);
 
 impl SynsetId {

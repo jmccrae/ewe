@@ -1,6 +1,7 @@
 use crate::wordnet::PartOfSpeech;
 
 #[derive(Clone,PartialEq,Debug,Eq,Hash)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub enum SynsetRelType { 
 //  Agent,
     Also,
@@ -440,6 +441,7 @@ pub enum YamlSynsetRelType {
 //}
 
 #[derive(Clone,PartialEq,Debug,Eq,Hash)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub enum SenseRelType {
     Antonym,
     Also,

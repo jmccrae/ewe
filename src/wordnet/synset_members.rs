@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::rels::{SynsetRelType,SenseRelType};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct MemberSynset {
     pub id : SynsetId,
     pub lexname : String,
@@ -158,6 +159,7 @@ pub struct MemberSynset {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Member {
     pub lemma : String,
     pub sense : MemberSense,
@@ -174,12 +176,14 @@ pub struct Member {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct MemberSense {
     pub id : SenseId,
     pub subcat: Vec<String>,
 }
  
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct SenseRelation {
     pub target_synset: SynsetId,
     pub source_lemma: String,
@@ -188,7 +192,7 @@ pub struct SenseRelation {
 
 impl MemberSynset {
     pub fn from_synset<L : Lexicon>(synset_id : &SynsetId, 
-        synset : Synset, lexicon : L) -> Result<MemberSynset> {
+        synset : Synset, lexicon : &L) -> Result<MemberSynset> {
         let mut members = Vec::new();
         let mut sense_links = HashMap::new();
         let mut inv_sense_links = HashMap::new();
@@ -244,10 +248,10 @@ impl MemberSynset {
                     extract_sense_rel!(body_part,BodyPart);
                     extract_sense_rel!(vehicle,Vehicle);
                     if let Some(sense_links_to) = lexicon.sense_links_to_get(&sense.id)? {
-                        for (rel, target_sense_id) in sense_links_to {
-                            if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target_sense_id)? {
+                        for (rel, target_sense_id) in sense_links_to.iter() {
+                            if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
                                 inv_sense_links.
-                                    entry(rel).
+                                    entry(rel.clone()).
                                     or_insert_with(|| Vec::new()).
                                     push(SenseRelation {
                                         target_synset: target_sense.synset.clone(),
@@ -263,8 +267,8 @@ impl MemberSynset {
         let links_to = lexicon.links_to_get(synset_id)?;
         let mut links = HashMap::new();
         if let Some(links_to) = links_to {
-            for (rel, target) in links_to.into_iter() {
-                links.entry(rel).or_insert_with(|| Vec::new()).push(target.clone());
+            for (rel, target) in links_to.into_owned().into_iter() {
+                links.entry(rel).or_insert_with(|| Vec::new()).push(target);
             }
         }
 
