@@ -19,7 +19,7 @@ pub trait Lexicon : Sized {
     fn entries_get<'a>(&'a self, key : char) -> Result<Option<Cow<'a, Self::E>>>;
     fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()>;
     fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, Self::E>)>>>;
-    fn entries_update(&mut self, key : char, f : impl FnOnce(&mut Self::E)) -> Result<()>;
+    fn entries_update<X>(&mut self, key : char, f : impl FnOnce(&mut Self::E) -> X) -> Result<X>;
     fn synsets_get<'a>(&'a self, lexname : &str) -> Result<Option<Cow<'a, Self::S>>>;
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()>;
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::S>)>>>;
@@ -70,7 +70,7 @@ pub trait Lexicon : Sized {
                 map(|x| x.to_string()).
                 unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
-                let key = file_name[8..9].chars().into_iter().next().unwrap();
+                let key = file_name[8..9].chars().into_iter().next().expect("Unreachable as file_name must be at least 10 chars long");
                 let entries2 : BTEntries =
                     serde_yaml::from_reader(File::open(file.path())
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
@@ -188,12 +188,15 @@ pub trait Lexicon : Sized {
 
     /// Get the entry data for a lemma, ignoring case 
     fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
-        Ok(self.entries_iter()?.flat_map(|v| match v {
-                Ok((_, Cow::Borrowed(v))) => v.entry_by_lemma_ignore_case(lemma).unwrap(),
-                Ok((_, Cow::Owned(v))) => v.entry_by_lemma_ignore_case(lemma).unwrap().
-                    into_iter().map(|e| Cow::Owned(e.into_owned())).collect(),
-                _ => Vec::new()
+        Ok(self.entries_iter()?.map(|v| match v {
+                Ok((_, Cow::Borrowed(v))) => Ok(v.entry_by_lemma_ignore_case(lemma)?),
+                Ok((_, Cow::Owned(v))) => Ok(v.entry_by_lemma_ignore_case(lemma)?.
+                    into_iter().map(|e| Cow::Owned(e.into_owned())).collect()),
+                _ => Ok(Vec::new())
             })
+            .collect::<Result<Vec<Vec<Cow<'a, Entry>>>>>()?
+            .into_iter()
+            .flatten()
             .collect())
     }
 
@@ -335,8 +338,8 @@ pub trait Lexicon : Sized {
             self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()))?;
         }
         self.entries_update(entry_key(&lemma), |e| {
-            e.insert_entry(lemma, pos, entry).unwrap();
-        })?;
+            e.insert_entry(lemma, pos, entry)
+        })??;
         Ok(())
     }
 
@@ -355,10 +358,7 @@ pub trait Lexicon : Sized {
         self.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos.clone()))?;
         self.entries_update(entry_key(&lemma), |e| {
             e.insert_sense(lemma, pos, sense)
-                .unwrap_or_else(|_| {
-                    eprintln!("Failed to insert sense as the entry does not exist");
-                });
-        })?;
+        })??;
         Ok(())
     }
 
@@ -375,8 +375,8 @@ pub trait Lexicon : Sized {
                         synset_id : &SynsetId) -> Result<Vec<SenseId>> {
         let v = self.sense_links_from(lemma, pos, synset_id)?;
         let mut keys  : Vec<SenseId> = Vec::new();
-        self.entries_update(entry_key(lemma), |e : &mut Self::E| {
-                keys.extend(e.remove_sense(lemma, pos, synset_id).unwrap()) })?;
+        self.entries_update(entry_key(lemma), |e| {
+                Ok::<(),LexiconError>(keys.extend(e.remove_sense(lemma, pos, synset_id)?)) })??;
         for source in keys.iter() {
             for (rel, target) in v.iter() {
                 self.sense_links_to_update(target, |key| {
@@ -521,12 +521,9 @@ pub trait Lexicon : Sized {
             }
             match lemma_pos {
                 Some((lemma, pos)) => {
-                    self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
-                        e.add_rel(&lemma, &pos, source, rel, target).
-                            unwrap_or_else(|_| {
-                                eprintln!("Failed to update entry");
-                            });
-                    })?;
+                    self.entries_update(entry_key(&lemma), |e| {
+                        e.add_rel(&lemma, &pos, source, rel, target)
+                    })??;
                 },
                 None => {}
             }
@@ -551,12 +548,9 @@ pub trait Lexicon : Sized {
         }
         match lemma_pos {
             Some ((lemma, pos)) => {
-                self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
-                    e.remove_rel(&lemma, &pos, source, target).
-                        unwrap_or_else(|_| {
-                            eprintln!("Could not remove sense rel");
-                        });
-                })?;
+                self.entries_update(entry_key(&lemma), |e| {
+                    e.remove_rel(&lemma, &pos, source, target)
+                })??;
             },
             None => {}
         }
@@ -602,12 +596,9 @@ pub trait Lexicon : Sized {
 
     /// Add a variant form to an entry
     fn add_form(&mut self, lemma : &str, pos : &PosKey, form : String) -> Result<()> {
-        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
+        self.entries_update(entry_key(&lemma), |e| {
             e.add_form(lemma, pos, form)
-                .unwrap_or_else(|_| {
-                    eprintln!("Could not find form");
-                });
-        })?;
+        })??;
         Ok(())
     }
 
@@ -621,13 +612,9 @@ pub trait Lexicon : Sized {
 
     /// Add a pronunciation to an entry
     fn add_pronunciation(&mut self, lemma : &str, pos : &PosKey, pronunciation : Pronunciation) -> Result<()> {
-        self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
-            e.add_pronunciation(lemma, pos, pronunciation).
-                unwrap_or_else(|_| {
-                    eprintln!("Could not remove pronunciation");
-                });
-
-        })?;
+        self.entries_update(entry_key(&lemma), |e| {
+            e.add_pronunciation(lemma, pos, pronunciation)
+        })??;
         Ok(())
     }
 
@@ -666,12 +653,9 @@ pub trait Lexicon : Sized {
             None => {}
         };
         if let Some((lemma, pos)) = lemma_pos {
-            self.entries_update(entry_key(&lemma), |e : &mut Self::E| {
+            self.entries_update(entry_key(&lemma), |e| {
                 e.update_sense_key(&lemma, &pos, old_key, new_key)
-                    .unwrap_or_else(|_| {
-                        eprintln!("Could not remove sense key");
-                    });
-            })?;
+            })??;
         }
         match self.sense_links_to_get(old_key)?.map(|x| x.clone()) {
             Some(links_to) => {
@@ -688,40 +672,68 @@ pub trait Lexicon : Sized {
     /// Get all the entries
     fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>>> {
         Ok(self.entries_iter()?.flat_map(|e| {
-            let (_,e) = e.unwrap(); // TODO: Fix this as inside closure
-            let it = match e {
-                Cow::Borrowed(v) => Box::new(v.entries().unwrap()),
-                Cow::Owned(v) => {
-                    Box::new(v.into_entries().unwrap().into_iter()
-                        .map(|r| {
-                            match r {
-                                Ok((s, p, e)) => Ok((s, p, Cow::Owned(e))),
-                                Err(e) => Err(e)
+            match e {
+                Ok((_, e)) => {
+                    let it = match e {
+                        Cow::Borrowed(v) => {
+                            match v.entries() {
+                                Ok(e) => Box::new(e),
+                                Err(e) => Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>>
                             }
-                        })) as Box<dyn Iterator<Item = _>>
-                }
-            };
-            it
+                        },
+                        Cow::Owned(v) => {
+                            match v.into_entries() {
+                                Ok(e) => Box::new(e.into_iter()
+                                .map(|r| {
+                                    match r {
+                                        Ok((s, p, e)) => Ok((s, p, Cow::Owned(e))),
+                                        Err(e) => Err(e)
+                                    }
+                                })) as Box<dyn Iterator<Item = _>>,
+                                Err(e) => {
+                                    Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>>
+                                }
+                            }
+                        }
+                    };
+                    it
+                },
+                Err(e) => { Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>> }
+            }
         }))
     }
 
     /// Get all synsets
     fn synsets<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>>> {
         Ok(self.synsets_iter()?.flat_map(|e| {
-            let (_, e) = e.unwrap();
-            let it = match e {
-                Cow::Borrowed(v) => Box::new(v.iter().unwrap()),
-                Cow::Owned(v) => {
-                    Box::new(v.into_iter().unwrap()
-                        .map(|s| {
-                            match s {
-                                Ok((sid, ss)) => Ok((sid, Cow::Owned(ss))),
-                                Err(e) => Err(e)
+            match e {
+                Ok((_, e)) => {
+                    let it = match e {
+                        Cow::Borrowed(v) => {
+                            match v.iter() {
+                                Ok(it) => Box::new(it),
+                                Err(e) => Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>>
                             }
-                        })) as Box<dyn Iterator<Item = _>> 
-                }
-            };
-            it
+                        },
+                        Cow::Owned(v) => {
+                            match v.into_iter() {
+                                Ok(it) => Box::new(it
+                                .map(|s| {
+                                    match s {
+                                        Ok((sid, ss)) => Ok((sid, Cow::Owned(ss))),
+                                        Err(e) => Err(e)
+                                    }
+                                })) as Box<dyn Iterator<Item = _>>,
+                                Err(e) => {
+                                    Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>>
+                                }
+                            }
+                        }
+                    };
+                    it
+                },
+                Err(e) => { Box::new(vec![Err(e)].into_iter()) as Box<dyn Iterator<Item = _>> }
+            }
         }))
     }
                 
@@ -743,15 +755,28 @@ pub trait Lexicon : Sized {
             Vec::new()
         })
     }
-
-    /// Number of entries in the dictionary
+   /// Number of entries in the dictionary
     fn n_entries(&self) -> Result<usize> {
-        Ok(self.entries_iter()?.map(|v| v.unwrap().1.n_entries().unwrap()).sum())
-    }
+        let counts: Vec<usize> = self.entries_iter()?
+            .map(|v| {
+                let (_, entry) = v?; 
+                entry.n_entries() // This returns Result<usize>
+            })
+        .collect::<Result<Vec<usize>>>()?; 
+
+        Ok(counts.into_iter().sum())
+    } 
 
     /// Number of synsets in the dictionary
     fn n_synsets(&self) -> Result<usize> {
-        Ok(self.synsets_iter()?.map(|v| v.unwrap().1.len().unwrap()).sum())
+        let counts: Vec<usize> = self.synsets_iter()?
+            .map(|v| {
+                let (_, synsets) = v?; 
+                synsets.len() 
+            })
+        .collect::<Result<Vec<usize>>>()?;
+
+        Ok(counts.into_iter().sum())
     }
 
     /// Get the synset augmented with the member data

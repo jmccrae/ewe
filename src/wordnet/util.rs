@@ -151,6 +151,8 @@ pub enum LexiconError {
     SynsetIdNotFound(SynsetId),
     #[error("No such entry: ({0}, {1})")]
     EntryNotFound(String, PosKey),
+    #[error("Generic error: {0}")]
+    GenericError(String),
     #[cfg(feature="redb")]
     #[error("DB error: {0}")]
     DBStorageError(#[from] redb::StorageError),

@@ -47,15 +47,15 @@ impl Lexicon for LexiconHashMapBackend {
     fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, BTEntries>)>>> {
         Ok(self.entries.iter().map(|(k, v)| Ok((*k, Cow::Borrowed(v)))))
     }
-    fn entries_update(&mut self, key : char, f : impl FnOnce(&mut BTEntries)) -> Result<()> {
+    fn entries_update<X>(&mut self, key : char, f : impl FnOnce(&mut BTEntries) -> X) -> Result<X> {
         if let Some(e) = self.entries.get_mut(&key) {
-            f(e);
+            Ok(f(e))
         } else {
             let mut e = BTEntries::new();
-            f(&mut e);
+            let res = f(&mut e);
             self.entries.insert(key, e);
+            Ok(res)
         }
-        Ok(())
     }
     fn synsets_get<'a>(&'a self, lexname : &str) -> Result<Option<Cow<'a, BTSynsets>>> {
         Ok(self.synsets.get(lexname).map(|x| Cow::Borrowed(x)))

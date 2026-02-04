@@ -10,6 +10,7 @@ use crate::rels::{SenseRelType, SynsetRelType};
 use std::borrow::Cow;
 use std::path::Path;
 use speedy::{Readable, Writable};
+use std::result;
 
 const INITIAL_CHARS : [char;27] = ['0', 'a','b', 'c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'];
 /// (initial character, lemma) -> HashMap<PosKey, Entry>
@@ -118,15 +119,15 @@ impl Lexicon for ReDBLexicon {
     fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, ReDBEntries>)>>> {
         Ok(self.entries.iter().map(|(k, v)| Ok((*k, Cow::Borrowed(v)))))
     }
-    fn entries_update(&mut self, key : char, f : impl FnOnce(&mut Self::E)) -> Result<()> {
+    fn entries_update<X>(&mut self, key : char, f : impl FnOnce(&mut Self::E) -> X) -> Result<X> {
         if let Some(e) = self.entries.get_mut(&key) {
-            f(e);
+            Ok(f(e))
         } else {
             let mut e = ReDBEntries::new(self.db.clone(), key);
-            f(&mut e);
+            let res = f(&mut e);
             self.entries.insert(key, e);
+            Ok(res)
         }
-        Ok(())
     }
     fn synsets_get<'a>(&'a self, lexname : &str) -> Result<Option<Cow<'a, Self::S>>> {
         Ok(self.synsets.get(lexname).map(Cow::Borrowed))
@@ -559,8 +560,9 @@ impl Entries for ReDBEntries {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         Ok(EntryIterator::new(txn, table, |table| {
-            let next_char = std::char::from_u32(self.key as u32 + 1).unwrap();
-            table.range((self.key,"".to_string())..(next_char,"".to_string())).unwrap()
+            let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
+            table.range((self.key,"".to_string())..(next_char,"".to_string()))
+                .map_err(|e| e.to_string())
         }).flat_map(|e| {
             let it = match e {
                 Ok((l,dict)) => Box::new(dict.into_iter().map(move |(p,e)| {
@@ -576,8 +578,9 @@ impl Entries for ReDBEntries {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         Ok(EntryIterator::new(txn, table, |table| {
-            let next_char = std::char::from_u32(self.key as u32 + 1).unwrap();
-            table.range((self.key,"".to_string())..(next_char,"".to_string())).unwrap()
+            let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
+            table.range((self.key,"".to_string())..(next_char,"".to_string()))
+                .map_err(|e| e.to_string())
         }).flat_map(|e| {
             let it = match e {
                 Ok((l,dict)) => Box::new(dict.into_iter().map(move |(p,e)| {
@@ -676,7 +679,8 @@ impl Synsets for ReDBSynsets {
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(SynsetIterator::new(txn, table, |table| {
             let next_string = format!("{}a", self.lexname);
-            table.range((self.lexname.clone(),"".to_string())..(next_string,"".to_string())).unwrap()
+            table.range((self.lexname.clone(),"".to_string())..(next_string,"".to_string()))
+                .map_err(|e| e.to_string())
         }).map(|kv| {
             let (k, v) = kv?;
             Ok((k, Cow::Owned(v)))
@@ -686,7 +690,7 @@ impl Synsets for ReDBSynsets {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(SynsetIterator::new(txn, table, |table| {
-            table.iter().unwrap()
+            table.iter().map_err(|e| e.to_string())
         }).map(|kv| {
             let (k, v) = kv?;
             Ok((k, v))
@@ -720,7 +724,7 @@ pub struct SynsetIterator {
     table: ReadOnlyTable<(String, String), Vec<u8>>,
     #[borrows(table)]
     #[covariant]
-    inner: Range<'this, (String, String), Vec<u8>>
+    inner: result::Result<Range<'this, (String, String), Vec<u8>>, String>
 }
 
 impl Iterator for SynsetIterator {
@@ -728,10 +732,15 @@ impl Iterator for SynsetIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.with_inner_mut(|inner| {
-            inner.next().map(|res| {
-                let (k, v) = res?;
-                Ok((SynsetId::new_owned(k.value().1), deserialize_synset(v.value())?))
-            })
+            match inner {
+                Ok(inner) => {
+                    inner.next().map(|res| {
+                        let (k, v) = res?;
+                        Ok((SynsetId::new_owned(k.value().1), deserialize_synset(v.value())?))
+                    })
+                },
+                Err(e) => Some(Err(LexiconError::GenericError(e.clone())))
+            }
         })
     }
 }
@@ -743,7 +752,7 @@ pub struct EntryIterator {
     table: ReadOnlyTable<(char, String), Vec<u8>>,
     #[borrows(table)]
     #[covariant]
-    inner: Range<'this, (char, String), Vec<u8>>
+    inner: result::Result<Range<'this, (char, String), Vec<u8>>, String>
 }
 
 impl Iterator for EntryIterator {
@@ -751,12 +760,15 @@ impl Iterator for EntryIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.with_inner_mut(|inner| {
-            inner.next().map(|res| {
-                let (ks, v) = res?;
-                let (k1, k2) = ks.value();
-                Ok((k2,
-                    deserialize_entry(v.value())?))
-            })
+            match inner {
+                Ok(inner) => inner.next().map(|res| {
+                    let (ks, v) = res?;
+                    let (k1, k2) = ks.value();
+                    Ok((k2,
+                        deserialize_entry(v.value())?))
+                }),
+                Err(e) => Some(Err(LexiconError::GenericError(e.clone())))
+            }
         })
     }
 }
