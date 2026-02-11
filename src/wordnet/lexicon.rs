@@ -757,26 +757,16 @@ pub trait Lexicon : Sized {
     }
    /// Number of entries in the dictionary
     fn n_entries(&self) -> Result<usize> {
-        let counts: Vec<usize> = self.entries_iter()?
-            .map(|v| {
-                let (_, entry) = v?; 
-                entry.n_entries() // This returns Result<usize>
-            })
-        .collect::<Result<Vec<usize>>>()?; 
-
-        Ok(counts.into_iter().sum())
-    } 
+        self.entries_iter()?
+            .map(|v| v.and_then(|(_, entry)| entry.n_entries()))
+            .sum()
+    }
 
     /// Number of synsets in the dictionary
     fn n_synsets(&self) -> Result<usize> {
-        let counts: Vec<usize> = self.synsets_iter()?
-            .map(|v| {
-                let (_, synsets) = v?; 
-                synsets.len() 
-            })
-        .collect::<Result<Vec<usize>>>()?;
-
-        Ok(counts.into_iter().sum())
+        self.synsets_iter()?
+            .map(|v| v.and_then(|(_, synsets)| synsets.len()))
+            .sum()
     }
 
     /// Get the synset augmented with the member data

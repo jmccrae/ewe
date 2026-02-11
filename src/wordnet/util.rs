@@ -151,6 +151,7 @@ pub enum LexiconError {
     SynsetIdNotFound(SynsetId),
     #[error("No such entry: ({0}, {1})")]
     EntryNotFound(String, PosKey),
+    #[cfg(feature="redb")]
     #[error("Generic error: {0}")]
     GenericError(String),
     #[cfg(feature="redb")]

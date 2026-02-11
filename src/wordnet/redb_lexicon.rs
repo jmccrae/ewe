@@ -408,6 +408,23 @@ impl Lexicon for ReDBLexicon {
         txn.commit()?;
         Ok(())
     }
+
+
+    /// Number of entries in the dictionary
+    fn n_entries(&self) -> Result<usize> {
+        // More efficient implementation
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ENTRIES_TABLE)?;
+        Ok(table.len()? as usize)
+    }
+
+    /// Number of synsets in the dictionary
+    fn n_synsets(&self) -> Result<usize> {
+        // More efficient implementation
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        Ok(table.len()? as usize)
+    }
 }
 
 #[derive(Clone)]
@@ -595,7 +612,8 @@ impl Entries for ReDBEntries {
     fn n_entries(&self) -> Result<usize> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
-        Ok(table.len()? as usize)
+        let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
+        Ok(table.range((self.key,"".to_string())..(next_char,"".to_string()))?.count())
     }
  
 }
@@ -699,7 +717,9 @@ impl Synsets for ReDBSynsets {
     fn len(&self) -> Result<usize> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
-        Ok(table.len()? as usize)
+        let next_string = format!("{}a", self.lexname);
+        let range = table.range((self.lexname.clone(),"".to_string())..(next_string,"".to_string()))?;
+        Ok(range.count())
     }
     fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
         let txn = self.db.begin_write()?;
