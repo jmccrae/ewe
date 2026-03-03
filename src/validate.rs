@@ -13,7 +13,8 @@ pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
     println!("Validating");
     let bar = ProgressBar::new((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
     bar.set_style(ProgressStyle::default_bar()
-                  .template("{wide_bar} {percent}%"));
+                  .template("{wide_bar} {percent}%")
+                  .expect("Could not set progress bar style"));
     let mut sense_keys = HashSet::new();
     for entry in wn.entries()? {
         let (lemma, poskey, entry) = entry?;
