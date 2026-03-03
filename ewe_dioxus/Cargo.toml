@@ -1,0 +1,8 @@
+[package]
+name = "ewe_dioxus"
+version = "0.2.0"
+authors = ["John P. McCrae <john@mccr.ae>"]
+edition = "2018"
+
+[dependencies]
+oewn_lib = { workspace = true }

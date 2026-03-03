@@ -4,9 +4,9 @@ use std::path::Path;
 use std::fs::File;
 use crate::rels::{SenseRelType,SynsetRelType};
 use crate::wordnet::util::LexiconSaveError;
-use indicatif::ProgressBar;
 use crate::wordnet::*;
 use crate::wordnet::entry::BTEntries;
+use crate::progress::Progress;
 use std::borrow::Cow;
 use std::result;
 
@@ -47,7 +47,7 @@ pub trait Lexicon : Sized {
     fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()>;
 
     /// Load a lexicon from a folder of YAML files
-    fn load<P: AsRef<Path>>(mut self, folder : P) -> result::Result<Self, WordNetYAMLIOError> {
+    fn load<P: AsRef<Path>, Pr : Progress>(mut self, folder : P, bar : &mut Pr) -> result::Result<Self, WordNetYAMLIOError> {
         let dep_file = folder.as_ref().join("../deprecations.csv");
         if dep_file.exists() {
             let mut reader = csv::Reader::from_path(dep_file)
@@ -61,7 +61,7 @@ pub trait Lexicon : Sized {
         let folder_files = fs::read_dir(folder)
             .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
         println!("Loading WordNet");
-        let bar = ProgressBar::new(73);
+        bar.start(73);
         for file in folder_files {
             let file = file.map_err(|e|
                 WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
@@ -132,9 +132,9 @@ pub trait Lexicon : Sized {
     }
 
     /// Save a lexicon to a set of files
-    fn save<P: AsRef<Path>>(&self, folder : P) -> result::Result<(), LexiconSaveError> {
+    fn save<P: AsRef<Path>, Bar : Progress>(&self, folder : P, bar : &mut Bar) -> result::Result<(), LexiconSaveError> {
         println!("Saving WordNet");
-        let bar = ProgressBar::new(73);
+        bar.start(73);
         for entries in self.entries_iter()? {
             let (ekey, entries) = entries?;
             let mut w = File::create(folder.as_ref().join(

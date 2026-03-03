@@ -1,20 +1,18 @@
 use crate::wordnet::*;
 use crate::rels::*;
 use crate::sense_keys::get_sense_key2;
+use crate::progress::Progress;
 use std::fmt;
 use std::collections::{HashSet,HashMap};
-use indicatif::{ProgressBar,ProgressStyle};
 use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
 
-pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
+pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<Vec<ValidationError>> {
     let mut errors = Vec::new();
     println!("Validating");
-    let bar = ProgressBar::new((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
-    bar.set_style(ProgressStyle::default_bar()
-                  .template("{wide_bar} {percent}%")
-                  .expect("Could not set progress bar style"));
+    bar.start((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
+    bar.set_percent_mode(true);
     let mut sense_keys = HashSet::new();
     for entry in wn.entries()? {
         let (lemma, poskey, entry) = entry?;
@@ -291,7 +289,7 @@ pub fn validate<L : Lexicon>(wn : &L) -> Result<Vec<ValidationError>> {
         check_transitive(wn, &mut errors, &synset_id, &synset)?;
 
     }
-    check_no_loops(wn, &mut errors, &bar)?;
+    check_no_loops(wn, &mut errors, bar)?;
     bar.finish();
     Ok(errors)
 }
@@ -318,9 +316,9 @@ fn check_transitive<L : Lexicon>(wn : &L,
     Ok(())
 }
 
-fn check_no_loops<L : Lexicon>(wn : &L,
+fn check_no_loops<L : Lexicon, ProgressBar : Progress>(wn : &L,
                   errors : &mut Vec<ValidationError>,
-                  bar : &ProgressBar) -> Result<()> {
+                  bar : &mut ProgressBar) -> Result<()> {
     let mut hypernyms = HashMap::new();
     let mut domains = HashMap::new();
     for synsets in wn.synsets()? {

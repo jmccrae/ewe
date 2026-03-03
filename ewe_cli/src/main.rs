@@ -1,24 +1,18 @@
-extern crate lazy_static;
-extern crate serde;
-extern crate serde_yaml;
 extern crate indicatif;
+extern crate lazy_static;
 extern crate regex;
-extern crate csv;
-extern crate sha2;
+extern crate serde_yaml;
 
-mod rels;
-mod change_manager;
-mod wordnet;
-mod sense_keys;
-mod validate;
-mod automaton;
+mod indicatif_progress;
 
-use crate::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey,LexiconHashMapBackend};
-use crate::rels::{SenseRelType, SynsetRelType};
-use crate::validate::{validate, fix};
+use oewn_lib::wordnet::{Lexicon,SynsetId,Synset,Sense,SenseId,PosKey,LexiconHashMapBackend};
+use oewn_lib::rels::{SenseRelType, SynsetRelType};
+use oewn_lib::validate::{validate, fix};
 use std::io;
 use std::io::Write;
-use crate::change_manager::{ChangeList};
+use oewn_lib::change_manager;
+use oewn_lib::change_manager::ChangeList;
+use indicatif_progress::IndicatifProgress;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::path::Path;
@@ -490,8 +484,9 @@ fn change_relation<L : Lexicon>(wn : &mut L,
 }
 
 fn save<L : Lexicon>(wn : &L,
-    path : &str) -> result::Result<bool, crate::wordnet::LexiconSaveError> {
-    let errors = validate(wn)?;
+    path : &str) -> result::Result<bool, oewn_lib::wordnet::LexiconSaveError> {
+    let mut progress = IndicatifProgress::new();
+    let errors = validate(wn, &mut progress)?;
     if !errors.is_empty() {
         println!("There were validation errors");
         for error in errors {
@@ -499,13 +494,15 @@ fn save<L : Lexicon>(wn : &L,
         }
         let really_save = input("Do you really want to save [y/N]? ").to_lowercase();
         if really_save == "y" {
-            wn.save(path)?;
+            let mut progress = IndicatifProgress::new();
+            wn.save(path, &mut progress)?;
             Ok(true)
         } else {
             Ok(false)
         }
     } else {
-        wn.save(path)?;
+        let mut progress = IndicatifProgress::new();
+        wn.save(path, &mut progress)?;
         Ok(true)
     }
 }
@@ -544,7 +541,8 @@ fn main_menu<L : Lexicon>(wn : &mut L,
         "4" => change_example(wn, ewe_changed),
         "5" => change_relation(wn, ewe_changed),
         "6" => {
-            let errors = validate(wn).expect("Could not complete validation");
+            let mut progress = IndicatifProgress::new();
+            let errors = validate(wn, &mut progress).expect("Could not complete validation");
             for error in errors.iter() {
                 println!("{}", error);
             }
@@ -555,7 +553,8 @@ fn main_menu<L : Lexicon>(wn : &mut L,
             }
         },
         "7" => {
-            let errors = validate(wn).expect("Could not complete validation");
+            let mut progress = IndicatifProgress::new();
+            let errors = validate(wn, &mut progress).expect("Could not complete validation");
             let mut fixed = 0;
             for error in errors.iter() {
                 if fix(wn, error, ewe_changed).expect("Could not fix error") {
@@ -598,7 +597,7 @@ fn main() {
             eprintln!("Could not open automaton file: {}", automaton_file);
             exit(-1);
         });
-        let actions : Vec<automaton::Action> = 
+        let actions : Vec<oewn_lib::automaton::Action> = 
         serde_yaml::from_reader(f).unwrap_or_else(|e| {
             eprintln!("Could not parse automaton file: {}", e);
             exit(-1);
@@ -619,15 +618,16 @@ fn main() {
             eprintln!("Please specify WordNet home as 2nd argument");
             exit(-1);
         };
+        let mut progress = IndicatifProgress::new();
         let mut wn = LexiconHashMapBackend::new().
-            load(&path).unwrap_or_else(|e| {
+            load(&path, &mut progress).unwrap_or_else(|e| {
                 eprintln!("Could not load WordNet from {}: {}", path, e);
                 exit(-1);
             });
 
         let mut ewe_changed = ChangeList::new();
 
-        automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
+        oewn_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
             eprintln!("Could not apply automaton: {}", e);
             exit(-1);
         });
@@ -659,8 +659,9 @@ fn main() {
             }
         };
 
+        let mut progress = IndicatifProgress::new();
         let mut wn = LexiconHashMapBackend::new().
-            load(&path).unwrap();
+            load(&path, &mut progress).unwrap();
 
         let mut ewe_changed = ChangeList::new();
 

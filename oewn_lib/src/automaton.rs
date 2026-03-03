@@ -2,7 +2,8 @@ use crate::change_manager;
 use crate::wordnet::{Lexicon,SynsetId,PosKey,SenseId,ILIID};
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::change_manager::{ChangeList, RelationUpdate};
-use crate::validate;
+use crate::validate::validate;
+use crate::progress::NullProgress;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
@@ -209,7 +210,8 @@ pub fn apply_automaton<L : Lexicon>(actions : Vec<Action>, wn : &mut L,
                     relations2, changes).map_err(|e| e.to_string())?;
             },
             Action::Validate => {
-                let errors = validate(wn).map_err(|e| e.to_string())?;
+                let mut progress = NullProgress;
+                let errors = validate(wn, &mut progress).map_err(|e| e.to_string())?;
                 for error in errors.iter() {
                     println!("{}", error);
                 }
