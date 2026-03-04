@@ -20,6 +20,9 @@ pub trait Entries : Sized {
 
     fn n_entries(&self) -> Result<usize>;
     
+    /// Get the list of entries by the prefix
+    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>>;
+    
     fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         let mut last_lemma = None;
         for entry in self.entries()? {
@@ -192,6 +195,8 @@ pub trait Entries : Sized {
     fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>> + 'a>;
 
     fn into_entries(self) -> Result<impl Iterator<Item=Result<(String, PosKey, Entry)>>>;
+
+
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
@@ -276,6 +281,10 @@ impl Entries for BTEntries {
             })
         }))
     } 
+
+    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        Ok(self.0.keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone,Default)]

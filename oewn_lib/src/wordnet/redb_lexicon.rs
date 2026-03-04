@@ -615,6 +615,23 @@ impl Entries for ReDBEntries {
         let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
         Ok(table.range((self.key,"".to_string())..(next_char,"".to_string()))?.count())
     }
+
+    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(ENTRIES_TABLE)?;
+        let next_prefix = format!("{}{}", prefix, char::MAX);
+        let range = table.range((self.key, prefix.to_string())..(self.key, next_prefix))?;
+        let mut results = Vec::new();
+        for kv in range {
+            let (k, v) = kv?;
+            let lemma = k.1.value();
+            let entry_map = deserialize_entry(v.value())?;
+            for (pos_key, entry) in entry_map {
+                results.push(lemma.clone());
+            }
+        }
+        Ok(results)
+    }
  
 }
 
@@ -678,6 +695,20 @@ impl ReDBSynsets {
             table.insert((self.lexname.clone(), id.to_string()), serialize_synset(&synset)?)?;
         }
         result
+    }
+
+    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<SynsetId>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        let next_prefix = format!("{}{}", prefix, char::MAX);
+        let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?;
+        let mut results = Vec::new();
+        for kv in range {
+            let (k, _) = kv?;
+            let synset_id_str = k.1.value();
+            results.push(SynsetId::new_owned(synset_id_str));
+        }
+        Ok(results)
     }
  }
 

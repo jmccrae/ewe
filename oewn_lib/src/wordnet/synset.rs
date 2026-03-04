@@ -26,6 +26,7 @@ pub trait Synsets : Sized {
         }
         Ok(())
     }
+    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>>;
 }
 
 
@@ -68,6 +69,10 @@ impl Synsets for BTSynsets {
     }
     fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
         Ok(self.0.remove_entry(id))
+    }
+
+    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        Ok(self.0.keys().filter(|id| id.as_str().starts_with(prefix)).map(|id| id.as_str().to_string()).collect())
     }
 }
  
@@ -430,6 +435,13 @@ impl ILIID {
     pub fn new(s : &str) -> ILIID { ILIID(s.to_string()) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
+
+impl fmt::Display for ILIID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
 #[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct SynsetId(String);

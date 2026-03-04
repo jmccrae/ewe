@@ -4,6 +4,7 @@ members = [
     "ewe_cli",
     "ewe_dioxus"
     ]
+resolver = "2"
 
 [workspace.dependencies]
 oewn_lib = { path = "oewn_lib" }

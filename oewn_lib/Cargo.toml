@@ -2,7 +2,7 @@
 name = "oewn_lib"
 version = "0.1.0"
 authors = ["John P. McCrae <john@mccr.ae>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 thiserror = "1.0.26"

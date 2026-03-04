@@ -1,0 +1,151 @@
+body {
+    font-family: 'Dosis', sans-serif;
+    border-top: 4px solid #bf0a30;
+    margin-bottom: 60px;
+    margin-top: 0px;
+}
+
+.container {
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: left;
+    align-items: left;
+    max-width: 1170px;
+
+}
+
+h1.en-title {
+    line-height: 1.1em;
+    padding-left: 20px;
+    font-size: 42pt;
+    font-family: 'Arvo',  serif;
+    font-weight: 700;
+    color: #002868;
+    margin-top: 10px;
+}
+
+#logo {
+    display:flex;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+#logo-img {
+    flex: 0 0 125px;
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+#logo-title {
+    width: 600px;
+}
+
+.wordnet-lemma {
+  width: 100%;
+  border: 1px solid #ccc;
+  color: rgb(85,85,85);
+  padding: 10px;
+  margin: 10px 0;
+}
+    
+.wordnet-input {
+  flex-direction: row;
+  display: flex;
+  margin-right: 15px;
+  margin-left: 15px;
+}
+
+.suggestions-span {
+  position: relative;
+  width: 100%;
+}
+
+.wordnet-search-label {
+  margin: 20px;
+  color: #333;
+}
+
+@media screen and (max-width: 600px) {
+  .wordnet-input span {
+    display: none;
+  }
+}  
+
+@media screen and (max-width: 725px) {
+  #logo-img {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  #logo-title {
+    text-align: center;
+  }
+}
+
+/* The Dropdown List */
+.suggestions {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    z-index: 1000;
+}
+
+.suggestions:empty {
+  display: none;
+}
+
+/* Individual Suggestions */
+.suggestions li {
+    padding: 10px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.suggestions li:hover {
+    background-color: #f0f0f0;
+}
+
+/* Optional: style for when no results are found */
+.no-results {
+    padding: 10px;
+    color: #888;
+    font-style: italic;
+}
+
+@font-face {
+  font-family: 'Arvo';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/arvo/v20/tDbD2oWUg0MKqScQ6A.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Arvo';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/arvo/v20/tDbM2oWUg0MKoZw1-LPK9g.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Dosis';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/dosis/v27/HhyJU5sn9vOmLxNkIwRSjTVNWLEJN7Ml2xMB.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Scope One';
+  font-style: normal;
+  font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/scopeone/v14/WBLnrEXKYFlGHrOKmGDFXEXI.ttf) format('truetype');
+}

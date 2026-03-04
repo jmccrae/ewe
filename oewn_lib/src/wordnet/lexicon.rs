@@ -780,6 +780,36 @@ pub trait Lexicon : Sized {
         }
     }
 
+    /// Get the list of entries starting with a prefix
+    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        Ok(match prefix.chars().nth(0) {
+            Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
+                let key = c.to_ascii_lowercase();
+                match self.entries_get(key)? {
+                    Some(e) => e.entries_by_prefix(prefix)?,
+                    None => Vec::new()
+                }
+            },
+            Some(_) => {
+                match self.entries_get('0')? {
+                    Some(e) => e.entries_by_prefix(prefix)?,
+                    None => Vec::new()
+                }
+            },
+            None => Vec::new()
+        })
+    }
+
+    /// Get the list of synsets starting with a prefix
+    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        Ok(self.synsets_iter()?
+            .filter_map(|v| match v {
+                Ok((_, synsets)) => synsets.ssid_by_prefix(prefix).ok(),
+                Err(_) => None
+            })
+            .flatten()
+            .collect())
+    }
 
     //#[cfg(test)]
     //fn add_lexfile(&mut self, lexfile : &str) -> Result<()> {

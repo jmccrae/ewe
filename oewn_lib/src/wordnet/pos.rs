@@ -98,4 +98,10 @@ impl PartOfSpeech {
     }
 }
 
+impl fmt::Display for PartOfSpeech {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value())
+    }
+}
+
 

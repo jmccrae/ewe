@@ -23,11 +23,11 @@ pub struct MemberSynset {
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
-    also : Vec<SynsetId>,
+    pub also : Vec<SynsetId>,
     #[serde(default)]
-    attribute : Vec<SynsetId>,
+    pub attribute : Vec<SynsetId>,
     #[serde(default)]
-    causes : Vec<SynsetId>,
+    pub causes : Vec<SynsetId>,
     #[serde(default)]
     pub domain_region : Vec<SynsetId>,
     #[serde(default)]
@@ -35,23 +35,23 @@ pub struct MemberSynset {
     #[serde(default)]
     pub exemplifies : Vec<SynsetId>,
     #[serde(default)]
-    entails : Vec<SynsetId>,
+    pub entails : Vec<SynsetId>,
     #[serde(default)]
     pub hypernym : Vec<SynsetId>,
     #[serde(default)]
     pub instance_hypernym : Vec<SynsetId>,
     #[serde(default)]
-    mero_location : Vec<SynsetId>,
+    pub mero_location : Vec<SynsetId>,
     #[serde(default)]
-    mero_member : Vec<SynsetId>,
+    pub mero_member : Vec<SynsetId>,
     #[serde(default)]
-    mero_part : Vec<SynsetId>,
+    pub mero_part : Vec<SynsetId>,
     #[serde(default)]
-    mero_portion : Vec<SynsetId>,
+    pub mero_portion : Vec<SynsetId>,
     #[serde(default)]
-    mero_substance : Vec<SynsetId>,
+    pub mero_substance : Vec<SynsetId>,
     #[serde(default)]
-    meronym : Vec<SynsetId>,
+    pub meronym : Vec<SynsetId>,
     #[serde(default)]
     pub similar : Vec<SynsetId>,
     #[serde(default)]
@@ -59,103 +59,103 @@ pub struct MemberSynset {
     #[serde(default)]
     pub masculine : Vec<SynsetId>,
     #[serde(default)]
-    other : Vec<SynsetId>,
+    pub other : Vec<SynsetId>,
 
     // Inverse fields
     #[serde(default)]
-    hyponym : Vec<SynsetId>,
+    pub hyponym : Vec<SynsetId>,
     #[serde(default)]
-    is_caused_by: Vec<SynsetId>,
+    pub is_caused_by: Vec<SynsetId>,
     #[serde(default)]
-    has_domain_region: Vec<SynsetId>,
+    pub has_domain_region: Vec<SynsetId>,
     #[serde(default)]
-    has_domain_topic: Vec<SynsetId>,
+    pub has_domain_topic: Vec<SynsetId>,
     #[serde(default)]
-    is_exemplified_by: Vec<SynsetId>,
+    pub is_exemplified_by: Vec<SynsetId>,
     #[serde(default)]
-    is_entailed_by: Vec<SynsetId>,
+    pub is_entailed_by: Vec<SynsetId>,
     #[serde(default)]
-    instance_hyponym: Vec<SynsetId>,
+    pub instance_hyponym: Vec<SynsetId>,
     #[serde(default)]
-    holo_member: Vec<SynsetId>,
+    pub holo_member: Vec<SynsetId>,
     #[serde(default)]
-    holo_part: Vec<SynsetId>,
+    pub holo_part: Vec<SynsetId>,
     #[serde(default)]
-    holo_substance: Vec<SynsetId>,
+    pub holo_substance: Vec<SynsetId>,
 
     // Sense Relations
     #[serde(default)]
-    antonym: Vec<SenseRelation>,
+    pub antonym: Vec<SenseRelation>,
     #[serde(default)]
-    participle: Vec<SenseRelation>,
+    pub participle: Vec<SenseRelation>,
     #[serde(default)]
-    is_participle_of: Vec<SenseRelation>,
+    pub is_participle_of: Vec<SenseRelation>,
     #[serde(default)]
-    pertainym: Vec<SenseRelation>,
+    pub pertainym: Vec<SenseRelation>,
     #[serde(default)]
-    is_pertainym_of: Vec<SenseRelation>,
+    pub is_pertainym_of: Vec<SenseRelation>,
     #[serde(default)]
-    derivation: Vec<SenseRelation>,
+    pub derivation: Vec<SenseRelation>,
     #[serde(default)]
-    exemplifies_sense: Vec<SenseRelation>,
+    pub exemplifies_sense: Vec<SenseRelation>,
     #[serde(default)]
-    is_exemplified_by_sense: Vec<SenseRelation>,
+    pub is_exemplified_by_sense: Vec<SenseRelation>,
     #[serde(default)]
-    agent: Vec<SenseRelation>,
+    pub agent: Vec<SenseRelation>,
     #[serde(default)]
-    is_agent_of: Vec<SenseRelation>,
+    pub is_agent_of: Vec<SenseRelation>,
     #[serde(default)]
-    material: Vec<SenseRelation>,
+    pub material: Vec<SenseRelation>,
     #[serde(default)]
-    is_material_of: Vec<SenseRelation>,
+    pub is_material_of: Vec<SenseRelation>,
     #[serde(default)]
-    event: Vec<SenseRelation>,
+    pub event: Vec<SenseRelation>,
     #[serde(default)]
-    is_event_of: Vec<SenseRelation>,
+    pub is_event_of: Vec<SenseRelation>,
     #[serde(default)]
-    instrument: Vec<SenseRelation>,
+    pub instrument: Vec<SenseRelation>,
     #[serde(default)]
-    is_instrument_of: Vec<SenseRelation>,
+    pub is_instrument_of: Vec<SenseRelation>,
     #[serde(default)]
-    location: Vec<SenseRelation>,
+    pub location: Vec<SenseRelation>,
     #[serde(default)]
-    is_location_of: Vec<SenseRelation>,
+    pub is_location_of: Vec<SenseRelation>,
     #[serde(default)]
-    by_means_of: Vec<SenseRelation>,
+    pub by_means_of: Vec<SenseRelation>,
     #[serde(default)]
-    is_by_means_of: Vec<SenseRelation>,
+    pub is_by_means_of: Vec<SenseRelation>,
     #[serde(default)]
-    undergoer: Vec<SenseRelation>,
+    pub undergoer: Vec<SenseRelation>,
     #[serde(default)]
-    is_undergoer_of: Vec<SenseRelation>,
+    pub is_undergoer_of: Vec<SenseRelation>,
     #[serde(default)]
-    property: Vec<SenseRelation>,
+    pub property: Vec<SenseRelation>,
     #[serde(default)]
-    is_property_of: Vec<SenseRelation>,
+    pub is_property_of: Vec<SenseRelation>,
     #[serde(default)]
-    result: Vec<SenseRelation>,
+    pub result: Vec<SenseRelation>,
     #[serde(default)]
-    is_result_of: Vec<SenseRelation>,
+    pub is_result_of: Vec<SenseRelation>,
     #[serde(default)]
-    state: Vec<SenseRelation>,
+    pub state: Vec<SenseRelation>,
     #[serde(default)]
-    is_state_of: Vec<SenseRelation>,
+    pub is_state_of: Vec<SenseRelation>,
     #[serde(default)]
-    uses: Vec<SenseRelation>,
+    pub uses: Vec<SenseRelation>,
     #[serde(default)]
-    is_used_by: Vec<SenseRelation>,
+    pub is_used_by: Vec<SenseRelation>,
     #[serde(default)]
-    destination: Vec<SenseRelation>,
+    pub destination: Vec<SenseRelation>,
     #[serde(default)]
-    is_destination_of: Vec<SenseRelation>,
+    pub is_destination_of: Vec<SenseRelation>,
     #[serde(default)]
-    body_part: Vec<SenseRelation>,
+    pub body_part: Vec<SenseRelation>,
     #[serde(default)]
-    is_body_part_of: Vec<SenseRelation>,
+    pub is_body_part_of: Vec<SenseRelation>,
     #[serde(default)]
-    vehicle: Vec<SenseRelation>,
+    pub vehicle: Vec<SenseRelation>,
     #[serde(default)]
-    is_vehicle_of: Vec<SenseRelation>
+    pub is_vehicle_of: Vec<SenseRelation>
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
