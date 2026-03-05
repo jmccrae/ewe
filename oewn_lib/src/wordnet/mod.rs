@@ -33,6 +33,7 @@ pub use synset_members::{MemberSynset, SenseRelation};
 
 #[cfg(feature = "redb")]
 pub mod redb_lexicon;
+pub use redb_lexicon::ReDBLexicon;
 
 #[cfg(test)]
 #[allow(unused_variables)]

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 
 use views::{Home, WNLayout, ByLemma};
 #[cfg(feature="server")]
-use oewn_lib::wordnet::Lexicon;
+use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
 #[cfg(feature="server")]
 use dioxus_fullstack::Lazy;
 
@@ -40,9 +40,9 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
 #[cfg(feature="server")]
-static LEXICON : Lazy<Lexicon> = Lazy::new(|| async move {
+static LEXICON : Lazy<ReDBLexicon> = Lazy::new(|| async move {
     eprintln!("Loading lexicon...");
-    dioxus::Ok(Lexicon::from_disk())
+    dioxus::Ok(ReDBLexicon::open("wordnet.db").expect("Failed to load lexicon"))
 });
 
 fn main() {

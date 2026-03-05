@@ -21,7 +21,7 @@ pub trait Entries : Sized {
     fn n_entries(&self) -> Result<usize>;
     
     /// Get the list of entries by the prefix
-    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>>;
+    fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>>;
     
     fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         let mut last_lemma = None;
@@ -282,7 +282,7 @@ impl Entries for BTEntries {
         }))
     } 
 
-    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
         Ok(self.0.keys().filter(|k| k.starts_with(prefix)).cloned().collect())
     }
 }

@@ -2,7 +2,7 @@
 use ouroboros::self_referencing;
 use redb::{Database, TableDefinition, ReadableDatabase, ReadableTable, ReadOnlyTable, Range, ReadTransaction, ReadableTableMetadata};
 use crate::wordnet::*;
-use std::rc::Rc;
+use std::sync::Arc;
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::synset::BTSynsets;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::ne
 const DEPRECATION_KEY:&'static str = "deprecations";
 
 pub struct ReDBLexicon {
-    db: Rc<Database>,
+    db: Arc<Database>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
     lexnames: Vec<String>
@@ -42,7 +42,7 @@ impl ReDBLexicon {
     pub fn open<P: AsRef<Path>>(path : P) -> Result<ReDBLexicon> {
         // create database
         //
-        let db = Rc::new(Database::open(path)?);
+        let db = Arc::new(Database::open(path)?);
         // Intialize entries as '0' and 'a'..'z'
         //
         let mut entries = HashMap::new();
@@ -82,7 +82,7 @@ impl ReDBLexicon {
 
     /// Create a new database, deleting the existing file if necessary
     pub fn create<P: AsRef<Path>>(path : P) -> Result<ReDBLexicon> {
-        let db = Rc::new(Database::create(path)?);
+        let db = Arc::new(Database::create(path)?);
         // Intialize entries as '0' and 'a'..'z'
         let mut entries = HashMap::new();
         for c in INITIAL_CHARS.iter() {
@@ -429,12 +429,12 @@ impl Lexicon for ReDBLexicon {
 
 #[derive(Clone)]
 pub struct ReDBEntries {
-    db: Rc<Database>,
+    db: Arc<Database>,
     key : char
 }
 
 impl ReDBEntries {
-    fn new(db : Rc<Database>, key : char) -> ReDBEntries {
+    fn new(db : Arc<Database>, key : char) -> ReDBEntries {
         ReDBEntries { db, key }
     }
     
@@ -616,7 +616,7 @@ impl Entries for ReDBEntries {
         Ok(table.range((self.key,"".to_string())..(next_char,"".to_string()))?.count())
     }
 
-    fn entries_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         let next_prefix = format!("{}{}", prefix, char::MAX);
@@ -624,7 +624,7 @@ impl Entries for ReDBEntries {
         let mut results = Vec::new();
         for kv in range {
             let (k, v) = kv?;
-            let lemma = k.1.value();
+            let lemma = k.value().1;
             let entry_map = deserialize_entry(v.value())?;
             for (pos_key, entry) in entry_map {
                 results.push(lemma.clone());
@@ -637,12 +637,12 @@ impl Entries for ReDBEntries {
 
 #[derive(Clone)]
 pub struct ReDBSynsets {
-    db: Rc<Database>,
+    db: Arc<Database>,
     lexname : String
 }
 
 impl ReDBSynsets {
-    pub fn new(db : Rc<Database>, lexname : String) -> ReDBSynsets {
+    pub fn new(db : Arc<Database>, lexname : String) -> ReDBSynsets {
         ReDBSynsets { db, lexname }
     }
 
@@ -695,20 +695,6 @@ impl ReDBSynsets {
             table.insert((self.lexname.clone(), id.to_string()), serialize_synset(&synset)?)?;
         }
         result
-    }
-
-    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<SynsetId>> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(SYNSETS_TABLE)?;
-        let next_prefix = format!("{}{}", prefix, char::MAX);
-        let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?;
-        let mut results = Vec::new();
-        for kv in range {
-            let (k, _) = kv?;
-            let synset_id_str = k.1.value();
-            results.push(SynsetId::new_owned(synset_id_str));
-        }
-        Ok(results)
     }
  }
 
@@ -766,6 +752,20 @@ impl Synsets for ReDBSynsets {
         };
         txn.commit()?;
         result
+    }
+
+    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(SYNSETS_TABLE)?;
+        let next_prefix = format!("{}{}", prefix, char::MAX);
+        let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?;
+        let mut results = Vec::new();
+        for kv in range {
+            let (k, _) = kv?;
+            let synset_id_str = k.value().1;
+            results.push(synset_id_str);
+        }
+        Ok(results)
     }
 }
 
