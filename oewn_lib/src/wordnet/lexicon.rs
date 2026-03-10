@@ -60,7 +60,7 @@ pub trait Lexicon : Sized {
         } 
         let folder_files = fs::read_dir(folder)
             .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
-        println!("Loading WordNet");
+        //println!("Loading WordNet");
         bar.start(73);
         for file in folder_files {
             let file = file.map_err(|e|
@@ -69,12 +69,14 @@ pub trait Lexicon : Sized {
                 and_then(|x| x.to_str()).
                 map(|x| x.to_string()).
                 unwrap_or_else(|| "".to_string());
+            eprintln!("Loading file {}", file_name);
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
                 let key = file_name[8..9].chars().into_iter().next().expect("Unreachable as file_name must be at least 10 chars long");
                 let entries2 : BTEntries =
                     serde_yaml::from_reader(File::open(file.path())
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
                         .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
+                eprintln!("Loaded entries for key {}, now building indices", key);
                 for (lemma, map) in entries2.0.iter() {
                     for (pos, entry) in map.iter() {
                         for sense in entry.sense.iter() {

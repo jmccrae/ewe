@@ -27,7 +27,7 @@ const LINKS_TO: TableDefinition<String, Vec<u8>> = TableDefinition::new("links_t
 /// (sense_id) -> (lemma, pos)
 const SENSE_ID_TO_LEMMA_POS: TableDefinition<String, (String, String)> = TableDefinition::new("sense_id_to_lemma_pos");
 /// DEPRECATION_KEY -> Vec<DeprecationRecord>
-const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("deprectaions");
+const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("deprecations");
 const DEPRECATION_KEY:&'static str = "deprecations";
 
 pub struct ReDBLexicon {
@@ -72,6 +72,7 @@ impl ReDBLexicon {
                 }
             }
         }
+
         Ok(ReDBLexicon {
             db,
             entries,
@@ -91,6 +92,20 @@ impl ReDBLexicon {
             //
             entries.insert(*c, ReDBEntries::new(db.clone(), *c));
         }
+        // Create the tables as empty tables
+        let txn = db.begin_write()?;
+        txn.open_table(ENTRIES_TABLE)?;
+        txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
+        txn.open_table(SYNSETS_TABLE)?;
+        txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+        txn.open_table(SENSE_LINKS)?;
+        txn.open_table(LINKS_TO)?;
+        txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
+        txn.open_table(DEPRECATIONS)?;
+        txn.commit()?;
+
+
+
         Ok(ReDBLexicon {
             db,
             entries,
@@ -209,6 +224,7 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()> {
+        eprintln!("Registering synset_id_to_lexfile for synset_id '{}'", synset_id);
         let txn = self.db.begin_write()?;
         {
             let mut table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
@@ -379,6 +395,7 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
+        eprintln!("Registering sense_id_to_lemma_pos for sense_id '{}'", sense_id);
         let txn = self.db.begin_write()?;
         {
             let mut table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
@@ -476,6 +493,7 @@ impl Entries for ReDBEntries {
         }
     }
     fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) -> Result<()> {
+        eprintln!("Registering entry for lemma '{}'", lemma);
         self.register_entry(&lemma)?;
         let txn = self.db.begin_write()?;
         {

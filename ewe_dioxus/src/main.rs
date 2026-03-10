@@ -5,8 +5,8 @@ use dioxus::prelude::*;
 use views::{Home, WNLayout, ByLemma};
 #[cfg(feature="server")]
 use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
-#[cfg(feature="server")]
 use dioxus_fullstack::Lazy;
+use oewn_lib::progress::NullProgress;
 
 /// Define a components module that contains all shared components for our app.
 mod components;
@@ -14,6 +14,10 @@ mod components;
 mod views;
 /// Define a backend module that contains all business logic for our app.
 mod backend;
+/// The settings file
+mod settings;
+
+use settings::EweSettings;
 
 /// The Route enum is used to define the structure of internal routes in our app. All route enums need to derive
 /// the [`Routable`] trait, which provides the necessary methods for the router to work.
@@ -39,9 +43,28 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
+static SETTINGS : Lazy<settings::EweSettings> = Lazy::new(|| async move {
+    let settings = if std::path::Path::new("settings.toml").exists() {
+        EweSettings::load("settings.toml").expect("Failed to load settings")
+    } else {
+        EweSettings::default()
+    };
+    dioxus::Ok(settings)
+});
+
 #[cfg(feature="server")]
 static LEXICON : Lazy<ReDBLexicon> = Lazy::new(|| async move {
     eprintln!("Loading lexicon...");
+    if !std::path::Path::new(&SETTINGS.database).exists() {
+        if let Some(source) = &SETTINGS.wordnet_source {
+            eprintln!("Database not found, loading from source...");
+            let lexicon = ReDBLexicon::create(&SETTINGS.database).expect("Failed to create lexicon");
+            lexicon.load(source, &mut NullProgress).expect("Failed to load lexicon from source");
+            eprintln!("Lexicon loaded successfully");
+        } else {
+            panic!("Database not found and no source provided in settings, please configure the settings or provide a database file at the path specified in the settings");
+        }
+    }
     dioxus::Ok(ReDBLexicon::open("wordnet.db").expect("Failed to load lexicon"))
 });
 

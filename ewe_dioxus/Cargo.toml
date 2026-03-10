@@ -10,6 +10,8 @@ edition = "2021"
 dioxus = { version = "0.7.1", features = ["router", "fullstack"] }
 phf = { version = "0.13.1", features = ["macros"] }
 oewn_lib = { workspace = true , features = ["redb"] }
+toml = "1.0.4"
+serde = "1.0.228"
 #redb = "2.2.0"
 #serde = "1.0.228"
 #serde_yaml = "0.9.34"
@@ -26,3 +28,7 @@ desktop = ["dioxus/desktop"]
 mobile = ["dioxus/mobile"]
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
 server = ["dioxus/server"]
+
+[[bin]]
+name = "load"
+path = "src/load.rs"
