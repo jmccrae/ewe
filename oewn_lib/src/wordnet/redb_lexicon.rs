@@ -631,13 +631,14 @@ impl Entries for ReDBEntries {
         Ok(table.range((self.key,"".to_string())..(next_char,"".to_string()))?.count())
     }
 
-    fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn lemma_by_prefix(&self, prefix : &str, limit : usize) -> Result<Vec<String>> {
         let prefix = prefix.to_lowercase();
         let mut manager = self.txn_manager.lock().unwrap();
         let txn = manager.begin_read()?;
         let table = txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
         let next_prefix = format!("{}{}", prefix, char::MAX);
-        let range = table.range(prefix.to_string()..next_prefix)?;
+        let range = table.range(prefix.to_string()..next_prefix)?
+            .take(limit);
         let mut results = Vec::new();
         for kv in range {
             results.push(kv?.0.value());
@@ -765,12 +766,12 @@ impl Synsets for ReDBSynsets {
         }
     }
 
-    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn ssid_by_prefix(&self, prefix : &str, limit : usize) -> Result<Vec<String>> {
         let mut manager = self.txn_manager.lock().unwrap();
         let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         let next_prefix = format!("{}{}", prefix, char::MAX);
-        let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?;
+        let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?.take(limit);
         let mut results = Vec::new();
         for kv in range {
             let (k, _) = kv?;

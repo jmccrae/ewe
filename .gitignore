@@ -10,3 +10,4 @@ apply_python_yaml.py
 deprecations.csv
 Cargo.lock
 ewe_dioxus/wordnet.db
+.vscode

@@ -26,7 +26,7 @@ pub trait Synsets : Sized {
         }
         Ok(())
     }
-    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>>;
+    fn ssid_by_prefix(&self, prefix : &str, max_results : usize) -> Result<Vec<String>>;
 }
 
 
@@ -71,8 +71,10 @@ impl Synsets for BTSynsets {
         Ok(self.0.remove_entry(id))
     }
 
-    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
-        Ok(self.0.keys().filter(|id| id.as_str().starts_with(prefix)).map(|id| id.as_str().to_string()).collect())
+    fn ssid_by_prefix(&self, prefix : &str, limit : usize) -> Result<Vec<String>> {
+        Ok(self.0.keys().filter(|id| id.as_str().starts_with(prefix))
+            .take(limit)
+            .map(|id| id.as_str().to_string()).collect())
     }
 }
  

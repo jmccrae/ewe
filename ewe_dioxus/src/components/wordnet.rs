@@ -7,7 +7,7 @@ pub fn WordNet() -> Element {
     let mut lemma = use_signal(|| String::new());
     let mut show_suggestions = use_signal(|| false);
     let mut suggestions = use_action(move |query| async move {
-        autocomplete(query).await
+        autocomplete(query, None).await
     });
 
     let update_lemma = move |e: FormEvent| async move {

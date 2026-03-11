@@ -19,13 +19,16 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     }
 }
 
-#[get("/api/autocomplete/{query}")]
-pub async fn autocomplete(query: String) -> Result<Vec<String>> {
+#[get("/api/autocomplete/{query}?{max_results}")]
+pub async fn autocomplete(query: String, max_results : Option<usize>) -> Result<Vec<String>> {
+    let max_results = max_results.unwrap_or(100);
     if let Some(lexicon) = crate::LEXICON.get() {
         let mut results = Vec::new();
-        results.extend(lexicon.lemma_by_prefix(&query)?);
+        results.extend(lexicon.lemma_by_prefix(&query, Some(max_results))?);
         //results.extend(lexicon.ili_by_prefix(&query));
-        results.extend(lexicon.ssid_by_prefix(&query)?);
+        results.extend(lexicon.ssid_by_prefix(&query, Some(max_results))?);
+        
+        let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
         results.sort_by(|a, b| {
             match a.to_lowercase().cmp(&b.to_lowercase()) {
                 std::cmp::Ordering::Equal => a.cmp(b).reverse(),

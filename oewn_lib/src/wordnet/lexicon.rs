@@ -780,18 +780,19 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the list of entries starting with a prefix
-    fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn lemma_by_prefix(&self, prefix : &str, max_results : Option<usize>) -> Result<Vec<String>> {
+        let limit = max_results.unwrap_or(usize::MAX);
         Ok(match prefix.chars().nth(0) {
             Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
                 let key = c.to_ascii_lowercase();
                 match self.entries_get(key)? {
-                    Some(e) => e.lemma_by_prefix(prefix)?,
+                    Some(e) => e.lemma_by_prefix(prefix, limit)?,
                     None => Vec::new()
                 }
             },
             Some(_) => {
                 match self.entries_get('0')? {
-                    Some(e) => e.lemma_by_prefix(prefix)?,
+                    Some(e) => e.lemma_by_prefix(prefix, limit)?,
                     None => Vec::new()
                 }
             },
@@ -800,13 +801,15 @@ pub trait Lexicon : Sized {
     }
 
     /// Get the list of synsets starting with a prefix
-    fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
+    fn ssid_by_prefix(&self, prefix : &str, max_results : Option<usize>) -> Result<Vec<String>> {
+        let limit = max_results.unwrap_or(usize::MAX);
         Ok(self.synsets_iter()?
             .filter_map(|v| match v {
-                Ok((_, synsets)) => synsets.ssid_by_prefix(prefix).ok(),
+                Ok((_, synsets)) => synsets.ssid_by_prefix(prefix, limit).ok(),
                 Err(_) => None
             })
             .flatten()
+            .take(limit)
             .collect())
     }
 
