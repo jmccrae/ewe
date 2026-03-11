@@ -35,6 +35,9 @@ pub use synset_members::{MemberSynset, SenseRelation};
 pub mod redb_lexicon;
 pub use redb_lexicon::ReDBLexicon;
 
+#[cfg(feature = "redb")]
+pub mod transaction_manager;
+
 #[cfg(test)]
 #[allow(unused_variables)]
 mod tests {

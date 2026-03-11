@@ -1,8 +1,12 @@
 #![allow(unused_variables)]
 use ouroboros::self_referencing;
-use redb::{Database, TableDefinition, ReadableDatabase, ReadableTable, ReadOnlyTable, Range, ReadTransaction, ReadableTableMetadata};
+use redb::{
+    Database, TableDefinition, ReadableTable, ReadOnlyTable, Range,
+    ReadTransaction, ReadableTableMetadata,
+};
 use crate::wordnet::*;
-use std::sync::Arc;
+use crate::wordnet::transaction_manager::TransactionManager;
+use std::sync::{Arc, Mutex};
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::synset::BTSynsets;
 use std::collections::HashMap;
@@ -31,7 +35,7 @@ const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::ne
 const DEPRECATION_KEY:&'static str = "deprecations";
 
 pub struct ReDBLexicon {
-    db: Arc<Database>,
+    txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
     lexnames: Vec<String>
@@ -43,6 +47,7 @@ impl ReDBLexicon {
         // create database
         //
         let db = Arc::new(Database::open(path)?);
+        let txn_manager = Arc::new(Mutex::new(TransactionManager::new(db.clone())));
         // Intialize entries as '0' and 'a'..'z'
         //
         let mut entries = HashMap::new();
@@ -50,7 +55,7 @@ impl ReDBLexicon {
             //
             // Create an entries for each initial character
             //
-            entries.insert(*c, ReDBEntries::new(db.clone(), *c));
+            entries.insert(*c, ReDBEntries::new(txn_manager.clone(), *c));
         }
         // Read all the lexnames from the DB
         //
@@ -58,7 +63,9 @@ impl ReDBLexicon {
         // Assume lexnames is sorted
         let mut lexnames = Vec::new();
         {
-            let txn = db.begin_read()?;
+            // Any outstanding writes should be committed before we read.
+            let mut manager = txn_manager.lock().unwrap();
+            let txn = manager.begin_read()?;
             let table = txn.open_table(SYNSETS_TABLE)?;
             for kv in table.iter()? {
                 let (lexname, _) = kv?.0.value();
@@ -67,14 +74,14 @@ impl ReDBLexicon {
                     Ok(_) => {}
                     Err(idx) => {
                         lexnames.insert(idx, lexname.clone());
-                        synsets.insert(lexname.clone(), ReDBSynsets::new(db.clone(), lexname.clone()));
+                        synsets.insert(lexname.clone(), ReDBSynsets::new(txn_manager.clone(), lexname.clone()));
                     }
                 }
             }
         }
 
         Ok(ReDBLexicon {
-            db,
+            txn_manager,
             entries,
             synsets,
             lexnames
@@ -84,30 +91,33 @@ impl ReDBLexicon {
     /// Create a new database, deleting the existing file if necessary
     pub fn create<P: AsRef<Path>>(path : P) -> Result<ReDBLexicon> {
         let db = Arc::new(Database::create(path)?);
+        let txn_manager = Arc::new(Mutex::new(TransactionManager::new(db.clone())));
         // Intialize entries as '0' and 'a'..'z'
         let mut entries = HashMap::new();
         for c in INITIAL_CHARS.iter() {
             //
             // Create an entries for each initial character
             //
-            entries.insert(*c, ReDBEntries::new(db.clone(), *c));
+            entries.insert(*c, ReDBEntries::new(txn_manager.clone(), *c));
         }
         // Create the tables as empty tables
-        let txn = db.begin_write()?;
-        txn.open_table(ENTRIES_TABLE)?;
-        txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
-        txn.open_table(SYNSETS_TABLE)?;
-        txn.open_table(SYNSET_ID_TO_LEXFILE)?;
-        txn.open_table(SENSE_LINKS)?;
-        txn.open_table(LINKS_TO)?;
-        txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
-        txn.open_table(DEPRECATIONS)?;
-        txn.commit()?;
+        {
+            let mut manager = txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            txn.open_table(ENTRIES_TABLE)?;
+            txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
+            txn.open_table(SYNSETS_TABLE)?;
+            txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+            txn.open_table(SENSE_LINKS)?;
+            txn.open_table(LINKS_TO)?;
+            txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
+            txn.open_table(DEPRECATIONS)?;
+        }
 
 
 
         Ok(ReDBLexicon {
-            db,
+            txn_manager,
             entries,
             synsets: HashMap::new(),
             lexnames: Vec::new()
@@ -138,7 +148,7 @@ impl Lexicon for ReDBLexicon {
         if let Some(e) = self.entries.get_mut(&key) {
             Ok(f(e))
         } else {
-            let mut e = ReDBEntries::new(self.db.clone(), key);
+            let mut e = ReDBEntries::new(self.txn_manager.clone(), key);
             let res = f(&mut e);
             self.entries.insert(key, e);
             Ok(res)
@@ -175,9 +185,8 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn synsets_insert_synset(&mut self, lexname : &str, synset_id : SynsetId, synset : Synset) -> Result<()> {
-        let db_clone = self.db.clone();
         self.synsets.entry(lexname.to_owned()).or_insert_with(|| {
-            ReDBSynsets::new(db_clone, lexname.to_owned())
+            ReDBSynsets::new(self.txn_manager.clone(), lexname.to_owned())
         }).insert(lexname.to_owned(), synset_id.clone(), synset.clone())?;
         Ok(())
     }
@@ -215,7 +224,8 @@ impl Lexicon for ReDBLexicon {
     //}
 
     fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
         if let Some(lexfile) = table.get(synset_id.to_string())? {
             Ok(Some(Cow::Owned(lexfile.value())))
@@ -224,17 +234,15 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()> {
-        eprintln!("Registering synset_id_to_lexfile for synset_id '{}'", synset_id);
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
-            table.insert(synset_id.to_string(), lexfile)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+        table.insert(synset_id.to_string(), lexfile)?;
         Ok(())
     }
     fn sense_links_to_get<'a>(&'a self, sense_id : &SenseId) -> Result<Option<Cow<'a, Vec<(SenseRelType, SenseId)>>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SENSE_LINKS)?;
         if let Some(links_str) = table.get(sense_id.to_string())? {
             let links = deserialize_sense_links(links_str.value())?;
@@ -244,7 +252,8 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) -> Result<Vec<(SenseRelType, SenseId)>> {
-        let txn = self.db.begin_write()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
         let table = txn.open_table(SENSE_LINKS)?;
         let mut new_links = None;
         let result = if let Some(links_str) = table.get(sense_id.to_string())? {
@@ -252,25 +261,25 @@ impl Lexicon for ReDBLexicon {
             Some(links)
         } else {
             let links = f();
+            // We want to do this:
             //table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
+            // but we can't because we are in a read transaction, so we defer the insertion until later
             new_links = Some(links);
             None
         };
+        // Now we are outside the read transaction, so we can do the write if necessary
         match result {
             Some(r) => Ok(r),
             None => {
-                let txn = self.db.begin_write()?;
-                let result = { 
-                    let mut table = txn.open_table(SENSE_LINKS)?;
-                    if let Some(links) = new_links {
-                        table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
-                        Ok(links)
-                    } else {
-                        unreachable!()
-                    }
-                };
-                txn.commit()?;
-                result
+                let mut manager = self.txn_manager.lock().unwrap();
+                let txn = manager.begin_write()?;
+                let mut table = txn.open_table(SENSE_LINKS)?;
+                if let Some(links) = new_links {
+                    table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
+                    Ok(links)
+                } else {
+                    unreachable!()
+                }
             }
         }
     }
@@ -278,39 +287,34 @@ impl Lexicon for ReDBLexicon {
     fn sense_links_to_update(&mut self, sense_id : &SenseId, f : impl FnOnce(&mut Vec<(SenseRelType, SenseId)>)) -> Result<()> {
         let mut links = self.sense_links_to_get_or(sense_id.clone(), || Vec::new())?;
         f(&mut links);
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SENSE_LINKS)?;
-            table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_LINKS)?;
+        table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
         Ok(())
     }
     fn sense_links_to_push(&mut self, sense_id : SenseId, rel : SenseRelType, target : SenseId) -> Result<()> {
         let mut links = self.sense_links_to_get_or(sense_id.clone(), || Vec::new())?;
         links.push((rel, target));
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SENSE_LINKS)?;
-            table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_LINKS)?;
+        table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
         Ok(())
     }
     fn set_sense_links_to(&mut self, links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>) -> Result<()> {
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SENSE_LINKS)?;
-            table.retain(|_,_| false)?; // Clear all existing entries
-            for (sense_id, links) in links_to {
-                table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
-            }
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_LINKS)?;
+        table.retain(|_,_| false)?; // Clear all existing entries
+        for (sense_id, links) in links_to {
+            table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
         }
-        txn.commit()?;
         Ok(())
     }
     fn links_to_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, Vec<(SynsetRelType, SynsetId)>>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(LINKS_TO)?;
         if let Some(links_str) = table.get(synset_id.to_string())? {
             let links = deserialize_links(links_str.value())?;
@@ -320,72 +324,61 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn links_to_get_or(&mut self, synset_id : SynsetId, f : impl FnOnce() -> Vec<(SynsetRelType, SynsetId)>) -> Result<Vec<(SynsetRelType, SynsetId)>> {
-        let txn = self.db.begin_write()?;
-        let table = txn.open_table(LINKS_TO)?;
-        let mut new_links = None;
-        let result = if let Some(links_str) = table.get(synset_id.to_string())? {
-            let links = deserialize_links(links_str.value())?;
-            Some(links)
+        let links = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(LINKS_TO)?;
+            let x = if let Some(links_str) = table.get(synset_id.to_string())? {
+                Some(deserialize_links(links_str.value())?)
+            } else {
+                None
+            };
+            x
+        };
+        // We need to do this is two steps as calling f() with the 
+        // manager lock held would cause a deadlock if f() tries to access the DB
+        if let Some(links) = links {
+            Ok(links)
         } else {
             let links = f();
-            //table.insert(synset_id.to_string(), serialize_links(links.clone())?)?;
-            new_links = Some(links);
-            None
-        };
-        match result {
-            Some(r) => Ok(r),
-            None => {
-                let txn = self.db.begin_write()?;
-                let result = { 
-                    let mut table = txn.open_table(LINKS_TO)?;
-                    if let Some(links) = new_links {
-                        table.insert(synset_id.to_string(), serialize_links(links.clone())?)?;
-                        Ok(links)
-                    } else {
-                        unreachable!()
-                    }
-                };
-                txn.commit()?;
-                result
-            }
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let mut table = txn.open_table(LINKS_TO)?;
+            table.insert(synset_id.to_string(), serialize_links(links.clone())?)?;
+            Ok(links)
         }
     }
     fn links_to_update(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Vec<(SynsetRelType, SynsetId)>)) -> Result<()> {
         let mut links = self.links_to_get_or(synset_id.clone(), || Vec::new())?;
         f(&mut links);
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(LINKS_TO)?;
-            table.insert(synset_id.to_string(), serialize_links(links)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(LINKS_TO)?;
+        table.insert(synset_id.to_string(), serialize_links(links)?)?;
         Ok(())
     }
     fn links_to_push(&mut self, synset_id : SynsetId, rel : SynsetRelType, target : SynsetId) -> Result<()> {
         let mut links = self.links_to_get_or(synset_id.clone(), || Vec::new())?;
         links.push((rel, target));
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(LINKS_TO)?;
-            table.insert(synset_id.to_string(), serialize_links(links)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(LINKS_TO)?;
+        table.insert(synset_id.to_string(), serialize_links(links)?)?;
         Ok(())
     }
     fn set_links_to(&mut self, links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>) -> Result<()> {
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(LINKS_TO)?;
-            table.retain(|_,_| false)?; // Clear all existing entries
-            for (synset_id, links) in links_to {
-                table.insert(synset_id.to_string(), serialize_links(links)?)?;
-            }
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(LINKS_TO)?;
+        table.retain(|_,_| false)?; // Clear all existing entries
+        for (synset_id, links) in links_to {
+            table.insert(synset_id.to_string(), serialize_links(links)?)?;
         }
-        txn.commit()?;
         Ok(())
     }
     fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<(String, PosKey)>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
         if let Some(lemma_pos) = table.get(sense_id.to_string())? {
             let (lemma, pos_str) = lemma_pos.value();
@@ -395,17 +388,18 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
-        eprintln!("Registering sense_id_to_lemma_pos for sense_id '{}'", sense_id);
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
-            table.insert(sense_id.to_string(), (lemma_pos.0, lemma_pos.1.as_str().to_string()))?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
+        table.insert(
+            sense_id.to_string(),
+            (lemma_pos.0, lemma_pos.1.as_str().to_string()),
+        )?;
         Ok(())
     }
     fn deprecations_get<'a>(&'a self) -> Result<Cow<'a, Vec<DeprecationRecord>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(DEPRECATIONS)?;
         if let Some(deprecations_str) = table.get(DEPRECATION_KEY)? {
             let deprecations = deserialize_deprecation(deprecations_str.value())?;
@@ -415,14 +409,12 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()> {
-        let txn = self.db.begin_write()?;
-        { 
-            let mut table = txn.open_table(DEPRECATIONS)?;
-            let mut deprecations = self.deprecations_get()?.into_owned();
-            deprecations.push(record);
-            table.insert(DEPRECATION_KEY, serialize_deprecations(deprecations)?)?;
-        }
-        txn.commit()?;
+        let mut deprecations = self.deprecations_get()?.into_owned();
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(DEPRECATIONS)?;
+        deprecations.push(record);
+        table.insert(DEPRECATION_KEY, serialize_deprecations(deprecations)?)?;
         Ok(())
     }
 
@@ -430,7 +422,8 @@ impl Lexicon for ReDBLexicon {
     /// Number of entries in the dictionary
     fn n_entries(&self) -> Result<usize> {
         // More efficient implementation
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         Ok(table.len()? as usize)
     }
@@ -438,7 +431,8 @@ impl Lexicon for ReDBLexicon {
     /// Number of synsets in the dictionary
     fn n_synsets(&self) -> Result<usize> {
         // More efficient implementation
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(table.len()? as usize)
     }
@@ -446,32 +440,30 @@ impl Lexicon for ReDBLexicon {
 
 #[derive(Clone)]
 pub struct ReDBEntries {
-    db: Arc<Database>,
+    txn_manager: Arc<Mutex<TransactionManager>>,
     key : char
 }
 
 impl ReDBEntries {
-    fn new(db : Arc<Database>, key : char) -> ReDBEntries {
-        ReDBEntries { db, key }
+    fn new(txn_manager : Arc<Mutex<TransactionManager>>, key : char) -> ReDBEntries {
+        ReDBEntries { txn_manager, key }
     }
     
     /// Add the lowercase form of the lemma to the lowercase index
     fn register_entry(&mut self, lemma : &str) -> Result<()> {
         let lower_lemma = lemma.to_lowercase();
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
-            let mut lemmas = if let Some(lemmas_str) = table.get(lower_lemma.clone())? {
-                lemmas_str.value()
-            } else {
-                Vec::new()
-            };
-            if !lemmas.contains(&lemma.to_string()) {
-                lemmas.push(lemma.to_string());
-                table.insert(lower_lemma, lemmas)?;
-            }
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
+        let mut lemmas = if let Some(lemmas_str) = table.get(lower_lemma.clone())? {
+            lemmas_str.value()
+        } else {
+            Vec::new()
+        };
+        if !lemmas.contains(&lemma.to_string()) {
+            lemmas.push(lemma.to_string());
+            table.insert(lower_lemma, lemmas)?;
         }
-        txn.commit()?;
         Ok(())
     }
 }
@@ -479,7 +471,8 @@ impl ReDBEntries {
 
 impl Entries for ReDBEntries {
     fn entry<'a>(&'a self, lemma : &str, pos_key : &PosKey) -> Result<Option<Cow<'a, Entry>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
             let entry_map = deserialize_entry(entry_str.value())?;
@@ -493,68 +486,67 @@ impl Entries for ReDBEntries {
         }
     }
     fn insert_entry(&mut self, lemma : String, pos : PosKey, entry : Entry) -> Result<()> {
-        eprintln!("Registering entry for lemma '{}'", lemma);
         self.register_entry(&lemma)?;
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(ENTRIES_TABLE)?;
-            let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.clone()))? {
-                deserialize_entry(entry_str.value())?
-            } else {
-                HashMap::new()
-            };
-            entry_map.insert(pos, entry);
-            table.insert((self.key, lemma), serialize_entry(&entry_map)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(ENTRIES_TABLE)?;
+        let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.clone()))? {
+            deserialize_entry(entry_str.value())?
+        } else {
+            HashMap::new()
+        };
+        entry_map.insert(pos, entry);
+        table.insert((self.key, lemma), serialize_entry(&entry_map)?)?;
         Ok(())
     }
     fn update_entry<X>(&mut self, lemma : &str, pos_key : &PosKey,
         f : impl FnOnce(&mut Entry) -> X) -> Result<X> {
-        let txn = self.db.begin_write()?;
-        let result = {
-            let mut table = txn.open_table(ENTRIES_TABLE)?;
-            let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
+        let mut entry_map = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(ENTRIES_TABLE)?;
+            let x = if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
                 deserialize_entry(entry_str.value())?
             } else {
                 return Err(LexiconError::EntryNotFound(lemma.to_string(), pos_key.clone()));
             };
-            if let Some(mut entry) = entry_map.get_mut(pos_key) {
-                let res = f(&mut entry);
-                table.insert((self.key, lemma.to_string()), serialize_entry(&entry_map)?)?;
-                Ok(res)
-            } else {
-                return Err(LexiconError::EntryNotFound(lemma.to_string(), pos_key.clone()));
-            }
+            x
         };
-        txn.commit()?;
-        result
+        if let Some(mut entry) = entry_map.get_mut(pos_key) {
+            // Call f without holding the manager lock
+            let res = f(&mut entry);
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let mut table = txn.open_table(ENTRIES_TABLE)?;
+            table.insert((self.key, lemma.to_string()), serialize_entry(&entry_map)?)?;
+            Ok(res)
+        } else {
+            return Err(LexiconError::EntryNotFound(lemma.to_string(), pos_key.clone()));
+        }
     }
 
     fn remove_entry(&mut self, lemma : &str, pos_key : &PosKey) -> Result<Option<Entry>> {
         // Note: we don't deregister lemmas, which could lead to some DB bloat over time
-        let txn = self.db.begin_write()?;
-        let result = {
-            let mut table = txn.open_table(ENTRIES_TABLE)?;
-            let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
-                deserialize_entry(entry_str.value())?
-            } else {
-                return Ok(None);
-            };
-            let removed_entry = entry_map.remove(pos_key);
-            if entry_map.is_empty() {
-                table.remove((self.key, lemma.to_string()))?;
-            } else {
-                table.insert((self.key, lemma.to_string()), serialize_entry(&entry_map)?)?;
-            }
-            Ok(removed_entry)
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(ENTRIES_TABLE)?;
+        let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
+            deserialize_entry(entry_str.value())?
+        } else {
+            return Ok(None);
         };
-        txn.commit()?;
-        result
+        let removed_entry = entry_map.remove(pos_key);
+        if entry_map.is_empty() {
+            table.remove((self.key, lemma.to_string()))?;
+        } else {
+            table.insert((self.key, lemma.to_string()), serialize_entry(&entry_map)?)?;
+        }
+        Ok(removed_entry)
     }
 
     fn entry_by_lemma<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
             let entry_map = deserialize_entry(entry_str.value())?;
@@ -564,7 +556,8 @@ impl Entries for ReDBEntries {
         }
     }
     fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
             let entry_map = deserialize_entry(entry_str.value())?;
@@ -575,7 +568,8 @@ impl Entries for ReDBEntries {
     }
     fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
         let lemmas = {
-            let txn = self.db.begin_read()?;
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_read()?;
             let table = txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
             if let Some(lemmas_str) = table.get(lemma.to_lowercase())? {
                 lemmas_str.value()
@@ -592,7 +586,8 @@ impl Entries for ReDBEntries {
     }
 
     fn entries<'a>(&'a self) -> Result<impl Iterator<Item=Result<(String, PosKey, Cow<'a, Entry>)>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         Ok(EntryIterator::new(txn, table, |table| {
             let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
@@ -610,7 +605,8 @@ impl Entries for ReDBEntries {
     }
 
     fn into_entries(self) -> Result<impl Iterator<Item=Result<(String, PosKey, Entry)>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         Ok(EntryIterator::new(txn, table, |table| {
             let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
@@ -628,25 +624,23 @@ impl Entries for ReDBEntries {
     }
 
     fn n_entries(&self) -> Result<usize> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(ENTRIES_TABLE)?;
         let next_char = std::char::from_u32(self.key as u32 + 1).expect("Impossible as we are only using ASCII");
         Ok(table.range((self.key,"".to_string())..(next_char,"".to_string()))?.count())
     }
 
     fn lemma_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(ENTRIES_TABLE)?;
+        let prefix = prefix.to_lowercase();
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        let table = txn.open_table(LOWERCASE_ENTRIES_TABLE)?;
         let next_prefix = format!("{}{}", prefix, char::MAX);
-        let range = table.range((self.key, prefix.to_string())..(self.key, next_prefix))?;
+        let range = table.range(prefix.to_string()..next_prefix)?;
         let mut results = Vec::new();
         for kv in range {
-            let (k, v) = kv?;
-            let lemma = k.value().1;
-            let entry_map = deserialize_entry(v.value())?;
-            for (pos_key, entry) in entry_map {
-                results.push(lemma.clone());
-            }
+            results.push(kv?.0.value());
         }
         Ok(results)
     }
@@ -655,70 +649,69 @@ impl Entries for ReDBEntries {
 
 #[derive(Clone)]
 pub struct ReDBSynsets {
-    db: Arc<Database>,
+    txn_manager: Arc<Mutex<TransactionManager>>,
     lexname : String
 }
 
 impl ReDBSynsets {
-    pub fn new(db : Arc<Database>, lexname : String) -> ReDBSynsets {
-        ReDBSynsets { db, lexname }
+    pub fn new(txn_manager : Arc<Mutex<TransactionManager>>, lexname : String) -> ReDBSynsets {
+        ReDBSynsets { txn_manager, lexname }
     }
 
     fn insert(&mut self, lexname : String, synset_id : SynsetId,
                          synset : Synset) -> Result<()> {
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SYNSETS_TABLE)?;
-            table.insert((lexname, synset_id.to_string()), serialize_synset(&synset)?)?;
-        }
-        txn.commit()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SYNSETS_TABLE)?;
+        table.insert((lexname, synset_id.to_string()), serialize_synset(&synset)?)?;
         Ok(())
     }
 
     fn remove(&mut self, lexname : String, synset_id : SynsetId) -> Result<Option<(SynsetId, Synset)>> {
-        let txn = self.db.begin_write()?;
-        let result = {
-            let mut table = txn.open_table(SYNSETS_TABLE)?;
-            let res = if let Some(s) = table.remove((lexname, synset_id.to_string()))? {
-                let synset = deserialize_synset(s.value())?;
-                Ok(Some((synset_id, synset)))
-            } else {
-                Ok(None)
-            };
-            res
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SYNSETS_TABLE)?;
+        let res = if let Some(s) = table.remove((lexname, synset_id.to_string()))? {
+            let synset = deserialize_synset(s.value())?;
+            Ok(Some((synset_id, synset)))
+        } else {
+            Ok(None)
         };
-        txn.commit()?;
-        result
+        res
     }
 
     fn update<X>(&mut self, id : &SynsetId, f : impl FnOnce(&mut Synset) -> X) -> Result<X> {
-        let txn = self.db.begin_write()?;
-        let (result, synset) = {
+        // Step 1: read the current synset under the transaction manager lock
+        let mut synset = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_read()?;
             let table = txn.open_table(SYNSETS_TABLE)?;
-            let x = {
-                if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
-                    let mut synset = deserialize_synset(synset_str.value())?;
-                    let res = f(&mut synset);
-                    (Ok(res), synset)
-                } else {
-                    return Err(LexiconError::SynsetIdNotFound(id.clone()));
-                }
-            };
-            x
+            if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
+                deserialize_synset(synset_str.value())?
+            } else {
+                return Err(LexiconError::SynsetIdNotFound(id.clone()));
+            }
         };
-        txn.commit()?;
-        let txn = self.db.begin_write()?;
-        {
-            let mut table = txn.open_table(SYNSETS_TABLE)?;
-            table.insert((self.lexname.clone(), id.to_string()), serialize_synset(&synset)?)?;
-        }
-        result
+
+        // Step 2: run the user callback *without* holding the lock
+        let res = f(&mut synset);
+
+        // Step 3: write the updated synset back under a fresh write transaction
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SYNSETS_TABLE)?;
+        table.insert(
+            (self.lexname.clone(), id.to_string()),
+            serialize_synset(&synset)?,
+        )?;
+        Ok(res)
     }
  }
 
 impl Synsets for ReDBSynsets {
     fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
             let synset = deserialize_synset(synset_str.value())?;
@@ -728,7 +721,8 @@ impl Synsets for ReDBSynsets {
         }
     }
    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(SynsetIterator::new(txn, table, |table| {
             let next_string = format!("{}a", self.lexname);
@@ -740,7 +734,8 @@ impl Synsets for ReDBSynsets {
         }))
     }
     fn into_iter(self) -> Result<impl Iterator<Item=Result<(SynsetId, Synset)>>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(SynsetIterator::new(txn, table, |table| {
             table.iter().map_err(|e| e.to_string())
@@ -750,30 +745,29 @@ impl Synsets for ReDBSynsets {
         }))
     }
     fn len(&self) -> Result<usize> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         let next_string = format!("{}a", self.lexname);
         let range = table.range((self.lexname.clone(),"".to_string())..(next_string,"".to_string()))?;
         Ok(range.count())
     }
     fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
-        let txn = self.db.begin_write()?;
-        let result = {
-            let mut table = txn.open_table(SYNSETS_TABLE)?;
-            let r = table.remove((self.lexname.clone(), id.to_string()))?;
-            if let Some(synset_str) = r {
-                let synset = deserialize_synset(synset_str.value())?;
-                Ok(Some((id.clone(), synset)))
-            } else {
-                Ok(None)
-            }
-        };
-        txn.commit()?;
-        result
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SYNSETS_TABLE)?;
+        let r = table.remove((self.lexname.clone(), id.to_string()))?;
+        if let Some(synset_str) = r {
+            let synset = deserialize_synset(synset_str.value())?;
+            Ok(Some((id.clone(), synset)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn ssid_by_prefix(&self, prefix : &str) -> Result<Vec<String>> {
-        let txn = self.db.begin_read()?;
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         let next_prefix = format!("{}{}", prefix, char::MAX);
         let range = table.range((self.lexname.clone(), prefix.to_string())..(self.lexname.clone(), next_prefix))?;

@@ -5,23 +5,25 @@ use oewn_lib::progress::Progress;
 mod settings;
 use settings::EweSettings;
 
-struct PrintlnProgress(u64);
+struct PrintlnProgress(u64,u64);
 
 impl Progress for PrintlnProgress {
     fn start(&mut self, total : u64) {
-        self.0 = total;
+        self.0 = 0;
+        self.1 = total;
         println!("Start loading");
     }
 
     fn inc(&mut self, amount : u64) {
-        let percent = (amount as f64 / self.0 as f64) * 100.0;
+        self.0 += amount;
+        let percent = (self.0 as f64 / self.1 as f64) * 100.0;
         println!("Loading... {:.2}%", percent);
     }
 
     fn finish(&mut self) {
         println!("Finished loading");
     }
-    fn set_percent_mode(&mut self, percent_mode: bool) {
+    fn set_percent_mode(&mut self, _: bool) {
         // This progress implementation always uses percent mode, so we can ignore this setting.
     }
 }
@@ -34,8 +36,9 @@ fn main() {
     };
 
     if let Some(source) = settings.wordnet_source {
-        let mut progress = PrintlnProgress(0);
+        let mut progress = PrintlnProgress(0,0);
         let lexicon = ReDBLexicon::create(&settings.database).expect("Failed to create lexicon");
+        eprintln!("Loading lexicon from source: {}", source);
         lexicon.load(source, &mut progress).expect("Failed to load lexicon from source");
         eprintln!("Lexicon loaded successfully");
     } else {
