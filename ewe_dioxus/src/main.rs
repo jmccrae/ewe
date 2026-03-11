@@ -53,19 +53,12 @@ static SETTINGS : Lazy<settings::EweSettings> = Lazy::new(|| async move {
 });
 
 #[cfg(feature="server")]
-static LEXICON : Lazy<ReDBLexicon> = Lazy::new(|| async move {
-    eprintln!("Loading lexicon...");
-    if !std::path::Path::new(&SETTINGS.database).exists() {
-        if let Some(source) = &SETTINGS.wordnet_source {
-            eprintln!("Database not found, loading from source...");
-            let lexicon = ReDBLexicon::create(&SETTINGS.database).expect("Failed to create lexicon");
-            lexicon.load(source, &mut NullProgress).expect("Failed to load lexicon from source");
-            eprintln!("Lexicon loaded successfully");
-        } else {
-            panic!("Database not found and no source provided in settings, please configure the settings or provide a database file at the path specified in the settings");
-        }
+static LEXICON : Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
+    if let Ok(lexicon) = ReDBLexicon::open("wordnet.db") {
+        dioxus::Ok(Some(lexicon))
+    } else {
+        dioxus::Ok(None)
     }
-    dioxus::Ok(ReDBLexicon::open("wordnet.db").expect("Failed to load lexicon"))
 });
 
 fn main() {
@@ -86,8 +79,31 @@ fn main() {
 /// that takes some props and returns an Element. In this case, App takes no props because it is the root of our app.
 ///
 /// Components should be annotated with `#[component]` to support props, better error messages, and autocomplete
+#[cfg(feature="server")]
 #[component]
 fn App() -> Element {
+    match LEXICON.get() {
+        Some(_) => {
+            App2()
+        },
+        None => {
+            rsx! {
+                div { class: "error",
+                    h1 { "Error loading lexicon" }
+                    p { "The lexicon failed to load. Please check the console for more details." }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(feature="server"))]
+#[component]
+fn App() -> Element {
+    App2()
+}
+
+fn App2() -> Element {
     // The `rsx!` macro lets us define HTML inside of rust. It expands to an Element with all of our HTML inside.
     rsx! {
         // In addition to element and text (which we will see later), rsx can contain other components. In this case,
