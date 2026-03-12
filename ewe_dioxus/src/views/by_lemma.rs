@@ -3,7 +3,8 @@ use crate::components::{WordNet, Synset};
 use crate::backend::api::get_lemma;
 
 #[component]
-pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
+pub fn ByLemma(lemma: String) -> Element {
+    let lemma = use_signal(|| lemma);
     let synsets = use_loader(move || async move  {
         get_lemma(lemma.cloned()).await
     });

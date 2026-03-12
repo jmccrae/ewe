@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::events::FormEvent;
 use crate::backend::api::autocomplete;
+use crate::Route;
 
 #[component]
 pub fn WordNet() -> Element {
@@ -43,16 +44,22 @@ pub fn WordNet() -> Element {
                                 Some(Ok(suggestions)) => {
                                     rsx! {
                                         for s in suggestions.cloned().into_iter() {
-                                            li { 
-                                                key: "{s}", 
-                                                onmousedown: move |_| {
-                                                    let navigator = navigator();
-                                                    lemma.set(s.clone());
-                                                    navigator.push(format!("/lemma/{}", s));
-                                                    show_suggestions.set(false);
-                                                },
-                                                "{s}"
+                                            a {
+                                                class: "suggestion-link",
+                                                    href: "/lemma/{s}",
+                                                li { "{s}" }
                                             }
+                                                    // This might be a better way to
+                                                    // do it but it seems that it 
+                                                    // doesn't work as it should
+                                                //key: "{s}", 
+                                                //onmousedown: move |_| {
+                                                //    let navigator = navigator();
+                                                //    lemma.set(s.clone());
+                                                //    navigator.push(Route::ByLemma { lemma: s.clone() });
+                                                //    show_suggestions.set(false);
+                                                //},
+
                                         }
                                     }
                                 },

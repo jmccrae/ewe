@@ -317,6 +317,41 @@ impl SynsetRelType {
             SynsetRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s]
         }
     }
+
+    pub fn inverse(&self) -> Option<SynsetRelType> {
+        match self {
+            SynsetRelType::Also => Some(SynsetRelType::Also),
+            SynsetRelType::Attribute => Some(SynsetRelType::Attribute),
+            SynsetRelType::Causes => Some(SynsetRelType::IsCausedBy),
+            SynsetRelType::DomainRegion => Some(SynsetRelType::HasDomainRegion),
+            SynsetRelType::DomainTopic => Some(SynsetRelType::HasDomainTopic),
+            SynsetRelType::Exemplifies => Some(SynsetRelType::IsExemplifiedBy),
+            SynsetRelType::Entails => Some(SynsetRelType::IsEntailedBy),
+            SynsetRelType::HasDomainRegion => Some(SynsetRelType::DomainRegion),
+            SynsetRelType::HasDomainTopic => Some(SynsetRelType::DomainTopic),
+            SynsetRelType::IsExemplifiedBy => Some(SynsetRelType::Exemplifies),
+            SynsetRelType::HoloLocation => Some(SynsetRelType::MeroLocation),
+            SynsetRelType::HoloMember => Some(SynsetRelType::MeroMember),
+            SynsetRelType::HoloPart => Some(SynsetRelType::MeroPart),
+            SynsetRelType::HoloPortion => Some(SynsetRelType::MeroPortion),
+            SynsetRelType::HoloSubstance => Some(SynsetRelType::MeroSubstance),
+            SynsetRelType::Holonym => Some(SynsetRelType::Meronym),
+            SynsetRelType::Hypernym => Some(SynsetRelType::Hyponym),
+            SynsetRelType::Hyponym => Some(SynsetRelType::Hypernym),
+            SynsetRelType::InstanceHypernym => Some(SynsetRelType::InstanceHyponym),
+            SynsetRelType::InstanceHyponym => Some(SynsetRelType::InstanceHypernym),
+            SynsetRelType::IsCausedBy => Some(SynsetRelType::Causes),
+            SynsetRelType::IsEntailedBy => Some(SynsetRelType::Entails),
+            SynsetRelType::MeroLocation => Some(SynsetRelType::HoloLocation),
+            SynsetRelType::MeroMember => Some(SynsetRelType::HoloMember),
+            SynsetRelType::MeroPart => Some(SynsetRelType::HoloPart),
+            SynsetRelType::MeroPortion => Some(SynsetRelType::HoloPortion),
+            SynsetRelType::MeroSubstance => Some(SynsetRelType::HoloSubstance),
+            SynsetRelType::Meronym => Some(SynsetRelType::Holonym),
+            SynsetRelType::Similar => Some(SynsetRelType::Similar),
+            _ => None
+        }
+    }
 }
 
 pub enum YamlSynsetRelType {
@@ -590,7 +625,17 @@ impl SenseRelType {
     /// not directly stored
     pub fn inverse(&self) -> Option<SenseRelType> {
         match self {
+            SenseRelType::Antonym => Some(SenseRelType::Antonym),
+            SenseRelType::Also => Some(SenseRelType::Also),
             SenseRelType::IsPertainymOf => Some(SenseRelType::Pertainym),
+            SenseRelType::Pertainym => Some(SenseRelType::IsPertainymOf),
+            SenseRelType::DomainTopic => Some(SenseRelType::HasDomainTopic),
+            SenseRelType::HasDomainTopic => Some(SenseRelType::DomainTopic),
+            SenseRelType::DomainRegion => Some(SenseRelType::HasDomainRegion),
+            SenseRelType::HasDomainRegion => Some(SenseRelType::DomainRegion),
+            SenseRelType::Exemplifies => Some(SenseRelType::IsExemplifiedBy),
+            SenseRelType::IsExemplifiedBy => Some(SenseRelType::Exemplifies),
+            SenseRelType::Similar => Some(SenseRelType::Similar),
             _ => None
         }
     }

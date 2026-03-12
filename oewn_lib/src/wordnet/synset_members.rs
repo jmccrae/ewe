@@ -77,11 +77,17 @@ pub struct MemberSynset {
     #[serde(default)]
     pub instance_hyponym: Vec<SynsetId>,
     #[serde(default)]
+    pub holo_location: Vec<SynsetId>,
+    #[serde(default)]
     pub holo_member: Vec<SynsetId>,
     #[serde(default)]
     pub holo_part: Vec<SynsetId>,
     #[serde(default)]
+    pub holo_portion: Vec<SynsetId>,
+    #[serde(default)]
     pub holo_substance: Vec<SynsetId>,
+    #[serde(default)]
+    pub holonym: Vec<SynsetId>,
 
     // Sense Relations
     #[serde(default)]
@@ -250,14 +256,16 @@ impl MemberSynset {
                     if let Some(sense_links_to) = lexicon.sense_links_to_get(&sense.id)? {
                         for (rel, target_sense_id) in sense_links_to.iter() {
                             if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
-                                inv_sense_links.
-                                    entry(rel.clone()).
-                                    or_insert_with(|| Vec::new()).
-                                    push(SenseRelation {
-                                        target_synset: target_sense.synset.clone(),
-                                        source_lemma: m.clone(),
-                                        target_lemma: target_lemma.clone()
-                                    });
+                                if let Some(inv_rel) = rel.inverse() {
+                                    inv_sense_links.
+                                        entry(inv_rel).
+                                        or_insert_with(|| Vec::new()).
+                                        push(SenseRelation {
+                                            target_synset: target_sense.synset.clone(),
+                                            source_lemma: m.clone(),
+                                            target_lemma: target_lemma.clone()
+                                        });
+                                }
                             }
                         }
                     }
@@ -268,7 +276,9 @@ impl MemberSynset {
         let mut links = HashMap::new();
         if let Some(links_to) = links_to {
             for (rel, target) in links_to.into_owned().into_iter() {
-                links.entry(rel).or_insert_with(|| Vec::new()).push(target);
+                if let Some(inv_rel) = rel.inverse() {
+                    links.entry(inv_rel).or_insert_with(|| Vec::new()).push(target.clone());
+                }
             }
         }
 
@@ -308,9 +318,12 @@ impl MemberSynset {
             is_exemplified_by: links.remove(&SynsetRelType::IsExemplifiedBy).unwrap_or_else(|| Vec::new()),
             is_entailed_by: links.remove(&SynsetRelType::IsEntailedBy).unwrap_or_else(|| Vec::new()),
             instance_hyponym: links.remove(&SynsetRelType::InstanceHyponym).unwrap_or_else(|| Vec::new()),
+            holo_location: links.remove(&SynsetRelType::HoloLocation).unwrap_or_else(|| Vec::new()),
             holo_member: links.remove(&SynsetRelType::HoloMember).unwrap_or_else(|| Vec::new()),
             holo_part: links.remove(&SynsetRelType::HoloPart).unwrap_or_else(|| Vec::new()),
+            holo_portion: links.remove(&SynsetRelType::HoloPortion).unwrap_or_else(|| Vec::new()),
             holo_substance: links.remove(&SynsetRelType::HoloSubstance).unwrap_or_else(|| Vec::new()),
+            holonym: links.remove(&SynsetRelType::Holonym).unwrap_or_else(|| Vec::new()),
             antonym: sense_links.remove(&SenseRelType::Antonym).unwrap_or_else(|| Vec::new()),
             participle: sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
             is_participle_of: inv_sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
