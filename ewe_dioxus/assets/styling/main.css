@@ -50,6 +50,7 @@ h1.en-title {
   color: rgb(85,85,85);
   padding: 10px;
   margin: 10px 0;
+  box-sizing: border-box;
 }
     
 .wordnet-input {

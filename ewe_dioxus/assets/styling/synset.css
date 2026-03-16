@@ -5,6 +5,13 @@
 
 .lemmas {
     font-size: 14pt;
+    flex: 1;
+}
+
+.lemmas-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start; /* Keeps icon at the top */
 }
 
 .definition {
@@ -124,4 +131,18 @@
     color: #333;
     margin-top: 20px;
     margin-bottom: 10px;
+}
+
+.wikidata img {
+    height: 30px;
+}
+
+.wikidata {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    color: #555;
+    padding: 0;
+    transition: color 0.2s;
 }
