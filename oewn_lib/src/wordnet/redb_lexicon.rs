@@ -641,7 +641,7 @@ impl Entries for ReDBEntries {
             .take(limit);
         let mut results = Vec::new();
         for kv in range {
-            results.push(kv?.0.value());
+            results.extend(kv?.1.value());
         }
         Ok(results)
     }
