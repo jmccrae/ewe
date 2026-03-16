@@ -68,8 +68,11 @@ fn map_se_rels(rels : Vec<SenseRelation>) -> Vec<(SynsetId, Option<String>, Opti
 
 #[component]
 pub fn Synset(props : SynsetProps) -> Element {
-    let synset = use_loader(move || async move {
-        get_synset(props.synset_id.cloned()).await
+    let synset = use_loader(move || {
+        let synset_id = props.synset_id.cloned();
+        async move {
+            get_synset(synset_id).await
+        }
     });
 
     let mut show_relations = use_signal(|| false);
