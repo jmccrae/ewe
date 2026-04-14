@@ -7,6 +7,16 @@ body {
     margin-right: 0px;
 }
 
+a {
+    color: #002868;
+    text-decoration: none;
+}
+
+a:hover {
+    color: #bf0a30;
+    text-decoration: none;
+}   
+
 .container {
     margin-left: auto;
     margin-right: auto;
@@ -31,7 +41,7 @@ h1.en-title {
 #logo {
     display:flex;
     flex-wrap: wrap;
-    margin-top: 20px;
+    margin-top: 13px;
 }
 
 #logo-img {
@@ -42,6 +52,7 @@ h1.en-title {
 
 #logo-title {
     width: 600px;
+    height: 135px;
 }
 
 .wordnet-lemma {
@@ -131,6 +142,41 @@ h1.en-title {
     padding: 10px;
     color: #888;
     font-style: italic;
+}
+
+.download-btn {
+    padding: 12px 24px;
+    color: #eee;
+    background-color: #002868;
+    font-family: 'Arvo', serif;
+    font-size: 20px;
+    margin: 15px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+
+.download-btn a {
+    color: #eee;
+    text-decoration: none;
+}
+
+.footer1 {
+    font-size: 120%;
+    text-align: right;
+    padding-bottom : 20px;
+}
+
+.footer2 {
+    padding-bottom: 20px;
+    text-align: right;
+    color: #777;
+}
+
+footer {
+    font-size: 12px;
+    font-family: 'Arvo', serif;
+    line-height: 1.42;
+    color: #333;
 }
 
 @font-face {
