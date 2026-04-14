@@ -57,7 +57,12 @@ pub trait Lexicon : Sized {
                     WordNetYAMLIOError::Csv(format!("Error reading deprecations due to {}", e))
                 })?)?;
             }
-        } 
+            if self.deprecations_get()?.is_empty() {
+                eprintln!("No deprecation records found in file");
+            }
+        } else {
+            eprintln!("No deprecation file");
+        }
         let folder_files = fs::read_dir(folder)
             .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
         bar.start(75);
@@ -148,22 +153,20 @@ pub trait Lexicon : Sized {
             synsets.save(&mut w)?;
             bar.inc(1);
         }
-        match csv::WriterBuilder::new()
+        csv::WriterBuilder::new()
             .quote_style(csv::QuoteStyle::Always)
-            .from_path(folder.as_ref().join("../deprecations.csv")) {
-            Ok(mut csv_writer) => {
+            .from_path(folder.as_ref().join("../deprecations.csv"))
+            .and_then(|mut csv_writer| {
                 csv_writer.serialize(DeprecationRecord("ID".to_string(),
                     "ILI".to_string(), "SUPERSEDED_BY".to_string(),
-                    "SUPERSEDING_ILI".to_string(), "REASON".to_string()))
-                        .unwrap_or_else(|_| eprintln!("Cannot write CSV"));
+                    "SUPERSEDING_ILI".to_string(), "REASON".to_string()))?;
                 for dep in self.deprecations_get().iter() {
-                    csv_writer.serialize(dep).unwrap_or_else(|_| eprintln!("Cannot write CSV file"));
+                    for d in dep.iter() {
+                        csv_writer.serialize(d)?;
+                    }
                 }
-            },
-            Err(_) => {
-                eprintln!("Cannot write CSV file");
-            }
-        }
+                Ok(())
+            })?;
         bar.finish();
         Ok(())
     }

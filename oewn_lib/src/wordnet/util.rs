@@ -179,7 +179,9 @@ pub enum LexiconSaveError {
     #[error("Could not save WordNet: {0}")]
     Io(#[from] std::io::Error),
     #[error("Could not save WordNet: {0}")]
-    Lexicon(#[from] LexiconError)
+    Lexicon(#[from] LexiconError),
+    #[error(transparent)]
+    Csv(#[from] csv::Error)
 }
 
 /// Deserialize a string or a vector of strings
