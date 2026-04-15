@@ -96,6 +96,16 @@ impl PartOfSpeech {
             PartOfSpeech::s => 5
         }
     }
+
+    pub fn long_pos(&self) -> &'static str {
+        match self {
+            PartOfSpeech::n => "noun",
+            PartOfSpeech::v => "verb",
+            PartOfSpeech::a => "adjective",
+            PartOfSpeech::r => "adverb",
+            PartOfSpeech::s => "adjective_satellite"
+        }
+    }
 }
 
 impl fmt::Display for PartOfSpeech {

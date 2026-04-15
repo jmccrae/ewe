@@ -701,6 +701,6 @@ mod tests {
                 source_lemma: None,
                 target_lemma: None
         }];
-    apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
     }
 }

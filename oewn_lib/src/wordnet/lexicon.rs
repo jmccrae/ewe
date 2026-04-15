@@ -507,28 +507,30 @@ pub trait Lexicon : Sized {
     fn add_sense_rel(&mut self, source : &SenseId, rel : SenseRelType,
                    target : &SenseId) -> Result<()> {
         if let Some(inv) = rel.inverse() {
-            self.add_sense_rel(target, inv, source)?;
-        } else {
-            self.sense_links_to_get_or(target.clone(), || Vec::new())?.
-                push((rel.clone(), source.clone()));
-            let mut lemma_pos = None;
-            match self.sense_id_to_lemma_pos_get(source)? {
-                Some((lemma, pos)) => {
-                    lemma_pos = Some((lemma.clone(), pos.clone()));
-                }
-                None => {
-                    eprintln!("Could not map sense id to lemma, pos")
-                }
-                
+            if inv != rel {
+                self.add_sense_rel(target, inv, source)?;
+                return Ok(());
             }
-            match lemma_pos {
-                Some((lemma, pos)) => {
-                    self.entries_update(entry_key(&lemma), |e| {
-                        e.add_rel(&lemma, &pos, source, rel, target)
-                    })??;
-                },
-                None => {}
+        }
+        self.sense_links_to_get_or(target.clone(), || Vec::new())?.
+            push((rel.clone(), source.clone()));
+        let mut lemma_pos = None;
+        match self.sense_id_to_lemma_pos_get(source)? {
+            Some((lemma, pos)) => {
+                lemma_pos = Some((lemma.clone(), pos.clone()));
             }
+            None => {
+                eprintln!("Could not map sense id to lemma, pos")
+            }
+            
+        }
+        match lemma_pos {
+            Some((lemma, pos)) => {
+                self.entries_update(entry_key(&lemma), |e| {
+                    e.add_rel(&lemma, &pos, source, rel, target)
+                })??;
+            },
+            None => {}
         }
         Ok(())
     }

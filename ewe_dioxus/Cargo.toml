@@ -13,11 +13,9 @@ oewn_lib = { workspace = true , features = ["redb"] }
 toml = "1.0.4"
 serde = "1.0.228"
 thiserror = "2.0.18"
-#redb = "2.2.0"
-#serde = "1.0.228"
-#serde_yaml = "0.9.34"
-#speedy = "0.8.7"
-#thiserror = "2.0.18"
+oxrdf = { version = "0.3.3", optional = true }
+oxrdfio = { version = "0.2.4", optional = true }
+percent-encoding = "2.3.2"
 
 [features]
 default = ["web"]
@@ -28,7 +26,7 @@ desktop = ["dioxus/desktop"]
 # The feature that are only required for the mobile = ["dioxus/mobile"] build target should be optional and only enabled in the mobile = ["dioxus/mobile"] feature
 mobile = ["dioxus/mobile"]
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
-server = ["dioxus/server"]
+server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio"]
 
 [[bin]]
 name = "load"

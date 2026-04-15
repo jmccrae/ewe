@@ -175,8 +175,7 @@ pub struct Member {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pronunciation : Vec<Pronunciation>,
-    #[serde(default)]
-    pub poskey : Option<PosKey>,
+    pub poskey : PosKey,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_no : Option<u32>
 }
@@ -193,7 +192,8 @@ pub struct MemberSense {
 pub struct SenseRelation {
     pub target_synset: SynsetId,
     pub source_lemma: String,
-    pub target_lemma: String
+    pub target_lemma: String,
+    pub target_poskey: PosKey
 }
 
 impl MemberSynset {
@@ -216,19 +216,20 @@ impl MemberSynset {
                         },
                         form: entry.form.clone(),
                         pronunciation: entry.pronunciation.clone(),
-                        poskey: Some(poskey.clone()),
+                        poskey: poskey.clone(),
                         entry_no: poskey.entry_no()
                     });
                     macro_rules! extract_sense_rel {
                         ($rel:ident,$name:ident) => {
                             for target in sense.$rel.iter() {
-                                if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(target)? {
+                                if let Some((target_lemma, target_poskey, target_sense)) = lexicon.get_sense_by_id(target)? {
                                     sense_links.entry(SenseRelType::$name)
                                         .or_insert_with(|| Vec::new())
                                         .push(SenseRelation {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
-                                            target_lemma: target_lemma.clone()
+                                            target_lemma: target_lemma.clone(),
+                                            target_poskey: target_poskey.clone()
                                         });
                                 }
                             }
@@ -255,7 +256,7 @@ impl MemberSynset {
                     extract_sense_rel!(vehicle,Vehicle);
                     if let Some(sense_links_to) = lexicon.sense_links_to_get(&sense.id)? {
                         for (rel, target_sense_id) in sense_links_to.iter() {
-                            if let Some((target_lemma, _, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
+                            if let Some((target_lemma, target_poskey, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
                                 if let Some(inv_rel) = rel.inverse() {
                                     inv_sense_links.
                                         entry(inv_rel).
@@ -263,7 +264,8 @@ impl MemberSynset {
                                         push(SenseRelation {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
-                                            target_lemma: target_lemma.clone()
+                                            target_lemma: target_lemma.clone(),
+                                            target_poskey: target_poskey.clone()
                                         });
                                 }
                             }

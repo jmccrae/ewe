@@ -7,7 +7,8 @@ pub trait Progress {
     /// * `total` - The total number of steps to be completed.
     /// # Examples
     /// ```rust
-    /// let mut progress = NullProgress;
+    /// use oewn_lib::progress::Progress;
+    /// let mut progress = oewn_lib::progress::NullProgress;
     /// progress.start(100);
     /// ```
     fn start(&mut self, total : u64);
@@ -17,7 +18,8 @@ pub trait Progress {
     /// * `amount` - The amount to increment the progress by.
     /// # Examples
     /// ```rust
-    /// let mut progress = NullProgress;
+    /// use oewn_lib::progress::Progress;
+    /// let mut progress = oewn_lib::progress::NullProgress;
     /// progress.start(100);
     /// progress.inc(10);
     /// ```
@@ -26,7 +28,8 @@ pub trait Progress {
     /// Finish tracking progress. This can be used to clean up any resources used by the progress tracker.
     /// # Examples
     /// ```rust
-    /// let mut progress = NullProgress;
+    /// use oewn_lib::progress::Progress;
+    /// let mut progress = oewn_lib::progress::NullProgress;
     /// progress.start(100);
     /// progress.inc(100);
     /// progress.finish();
@@ -37,7 +40,8 @@ pub trait Progress {
     /// * `percent_mode` - Whether to display progress as a percentage.
     /// # Examples
     /// ```rust
-    /// let mut progress = NullProgress;
+    /// use oewn_lib::progress::Progress;
+    /// let mut progress = oewn_lib::progress::NullProgress;
     /// progress.start(100);
     /// progress.set_percent_mode(true);
     /// progress.inc(10);
