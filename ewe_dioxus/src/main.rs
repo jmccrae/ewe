@@ -2,26 +2,27 @@
 // need dioxus
 use dioxus::prelude::*;
 
-use views::{Home, WNLayout, ByLemma};
-#[cfg(feature="server")]
-use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
 use dioxus_fullstack::Lazy;
+#[allow(unused_imports)]
 use oewn_lib::progress::NullProgress;
+#[cfg(feature = "server")]
+use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
+use views::{ByLemma, Home, WNLayout};
 
-/// Define a components module that contains all shared components for our app.
-mod components;
-/// Define a views module that contains the UI for all Layouts and Routes for our app.
-mod views;
 /// Define a backend module that contains all business logic for our app.
 mod backend;
+/// Define a components module that contains all shared components for our app.
+mod components;
 /// The settings file
 mod settings;
+/// Define a views module that contains the UI for all Layouts and Routes for our app.
+mod views;
 
 use settings::EweSettings;
 
 /// The Route enum is used to define the structure of internal routes in our app. All route enums need to derive
 /// the [`Routable`] trait, which provides the necessary methods for the router to work.
-/// 
+///
 /// Each variant represents a different URL pattern that can be matched by the router. If that pattern is matched,
 /// the components for that route will be rendered.
 #[derive(Debug, Clone, Routable, PartialEq)]
@@ -43,7 +44,8 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
-static SETTINGS : Lazy<settings::EweSettings> = Lazy::new(|| async move {
+#[allow(dead_code)]
+static SETTINGS: Lazy<settings::EweSettings> = Lazy::new(|| async move {
     let settings = if std::path::Path::new("settings.toml").exists() {
         EweSettings::load("settings.toml").expect("Failed to load settings")
     } else {
@@ -52,8 +54,8 @@ static SETTINGS : Lazy<settings::EweSettings> = Lazy::new(|| async move {
     dioxus::Ok(settings)
 });
 
-#[cfg(feature="server")]
-static LEXICON : Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
+#[cfg(feature = "server")]
+static LEXICON: Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
     if let Ok(lexicon) = ReDBLexicon::open("wordnet.db") {
         dioxus::Ok(Some(lexicon))
     } else {
@@ -64,10 +66,10 @@ static LEXICON : Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
 fn main() {
     // The `launch` function is the main entry point for a dioxus app. It takes a component and renders it with the platform feature
     // you have enabled
-    #[cfg(not(feature="server"))]
+    #[cfg(not(feature = "server"))]
     dioxus::launch(App);
 
-    #[cfg(feature="server")]
+    #[cfg(feature = "server")]
     dioxus::serve(|| async move {
         let router = dioxus::server::router(App);
 
@@ -79,13 +81,11 @@ fn main() {
 /// that takes some props and returns an Element. In this case, App takes no props because it is the root of our app.
 ///
 /// Components should be annotated with `#[component]` to support props, better error messages, and autocomplete
-#[cfg(feature="server")]
+#[cfg(feature = "server")]
 #[component]
 fn App() -> Element {
     match LEXICON.get() {
-        Some(_) => {
-            App2()
-        },
+        Some(_) => App2(),
         None => {
             rsx! {
                 div { class: "error",
@@ -97,12 +97,13 @@ fn App() -> Element {
     }
 }
 
-#[cfg(not(feature="server"))]
+#[cfg(not(feature = "server"))]
 #[component]
 fn App() -> Element {
     App2()
 }
 
+#[allow(non_snake_case)]
 fn App2() -> Element {
     // The `rsx!` macro lets us define HTML inside of rust. It expands to an Element with all of our HTML inside.
     rsx! {

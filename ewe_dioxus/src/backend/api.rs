@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
-use oewn_lib::wordnet::{SynsetId, MemberSynset, Lexicon};
+#[allow(unused_imports)]
+use oewn_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 enum EweAPIError {
     #[error("Lexicon not available")]
     LexiconUnavailable,
@@ -12,7 +14,10 @@ enum EweAPIError {
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     if let Some(lexicon) = crate::LEXICON.get() {
         let lemmas = lexicon.entry_by_lemma(&lemma)?;
-        let synset_ids = lemmas.iter().flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone())).collect();
+        let synset_ids = lemmas
+            .iter()
+            .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+            .collect();
         Ok(synset_ids)
     } else {
         Err(EweAPIError::LexiconUnavailable.into())
@@ -20,20 +25,18 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
 }
 
 #[get("/api/autocomplete/{query}?{max_results}")]
-pub async fn autocomplete(query: String, max_results : Option<usize>) -> Result<Vec<String>> {
+pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<String>> {
     let max_results = max_results.unwrap_or(100);
     if let Some(lexicon) = crate::LEXICON.get() {
         let mut results = Vec::new();
         results.extend(lexicon.lemma_by_prefix(&query, Some(max_results))?);
         //results.extend(lexicon.ili_by_prefix(&query));
         results.extend(lexicon.ssid_by_prefix(&query, Some(max_results))?);
-        
+
         let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
-        results.sort_by(|a, b| {
-            match a.to_lowercase().cmp(&b.to_lowercase()) {
-                std::cmp::Ordering::Equal => a.cmp(b).reverse(),
-                x => x
-            }
+        results.sort_by(|a, b| match a.to_lowercase().cmp(&b.to_lowercase()) {
+            std::cmp::Ordering::Equal => a.cmp(b).reverse(),
+            x => x,
         });
         Ok(results)
     } else {
@@ -46,7 +49,11 @@ pub async fn get_synset(id: SynsetId) -> Result<Option<MemberSynset>> {
     if let Some(lexicon) = crate::LEXICON.get() {
         let synset = lexicon.synset_by_id(&id)?;
         if let Some(synset) = synset {
-            Ok(Some(MemberSynset::from_synset(&id, synset.into_owned(), lexicon)?))
+            Ok(Some(MemberSynset::from_synset(
+                &id,
+                synset.into_owned(),
+                lexicon,
+            )?))
         } else {
             Ok(None)
         }

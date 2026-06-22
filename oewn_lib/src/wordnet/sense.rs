@@ -1,18 +1,17 @@
-use serde::{Serialize,Deserialize};
-use std::io::Write;
 use crate::rels::SenseRelType;
+use crate::wordnet::util::{escape_yaml_string, write_prop_sense};
 use crate::wordnet::*;
-use crate::wordnet::util::{write_prop_sense, escape_yaml_string};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::io::Write;
 
-
-#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
-#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Sense {
-    pub id : SenseId,
-    pub synset : SynsetId,
+    pub id: SenseId,
+    pub synset: SynsetId,
     #[serde(default)]
-    pub adjposition : Option<String>,
+    pub adjposition: Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
@@ -100,13 +99,14 @@ pub struct Sense {
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    sent : Vec<String>
+    sent: Vec<String>,
 }
 
 impl Sense {
-    pub fn new(id : SenseId, synset : SynsetId) -> Sense {
+    pub fn new(id: SenseId, synset: SynsetId) -> Sense {
         Sense {
-            id, synset, 
+            id,
+            synset,
             subcat: Vec::new(),
             antonym: Vec::new(),
             also: Vec::new(),
@@ -121,26 +121,26 @@ impl Sense {
             is_exemplified_by: Vec::new(),
             similar: Vec::new(),
             other: Vec::new(),
-            agent : Vec::new(),
-            material : Vec::new(),
-            event : Vec::new(),
-            instrument : Vec::new(),
-            location : Vec::new(),
-            by_means_of : Vec::new(),
-            undergoer : Vec::new(),
-            property : Vec::new(),
-            result : Vec::new(),
-            state : Vec::new(),
-            uses : Vec::new(),
-            destination : Vec::new(),
-            body_part : Vec::new(),
-            vehicle : Vec::new(),
+            agent: Vec::new(),
+            material: Vec::new(),
+            event: Vec::new(),
+            instrument: Vec::new(),
+            location: Vec::new(),
+            by_means_of: Vec::new(),
+            undergoer: Vec::new(),
+            property: Vec::new(),
+            result: Vec::new(),
+            state: Vec::new(),
+            uses: Vec::new(),
+            destination: Vec::new(),
+            body_part: Vec::new(),
+            vehicle: Vec::new(),
             adjposition: None,
-            sent : Vec::new()
+            sent: Vec::new(),
         }
     }
 
-    pub fn remove_rel(&mut self, target : &SenseId) {
+    pub fn remove_rel(&mut self, target: &SenseId) {
         self.antonym.retain(|x| x != target);
         self.also.retain(|x| x != target);
         self.participle.retain(|x| x != target);
@@ -170,14 +170,14 @@ impl Sense {
         self.other.retain(|x| x != target);
     }
 
-    pub(crate) fn save<W : Write>(&self, w : &mut W) -> std::io::Result<()> {
+    pub(crate) fn save<W: Write>(&self, w: &mut W) -> std::io::Result<()> {
         write!(w, "\n    - ")?;
         let mut first = true;
         match self.adjposition {
-            Some(ref adjposition) => { 
+            Some(ref adjposition) => {
                 write!(w, "adjposition: {}", adjposition)?;
                 first = false
-            },
+            }
             None => {}
         };
         first = write_prop_sense(w, &self.agent, "agent", first)?;
@@ -197,7 +197,11 @@ impl Sense {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
         } else {
-            write!(w, "\n      id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
+            write!(
+                w,
+                "\n      id: {}",
+                escape_yaml_string(self.id.as_str(), 8, 8)
+            )?;
         }
         write_prop_sense(w, &self.instrument, "instrument", first)?;
         write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
@@ -226,7 +230,7 @@ impl Sense {
         write_prop_sense(w, &self.undergoer, "undergoer", first)?;
         write_prop_sense(w, &self.uses, "uses", first)?;
         write_prop_sense(w, &self.vehicle, "vehicle", first)?;
-     
+
         Ok(())
     }
 
@@ -260,56 +264,161 @@ impl Sense {
         self.vehicle.iter().map(|id| (SenseRelType::Vehicle, id.clone()))
                                                     )))))))))))))))))))))))))).collect()
     }
- 
-    
-    pub(crate) fn add_rel(&mut self, rel : SenseRelType, target : SenseId) {
-        match rel {
-            SenseRelType::Antonym => if !self.antonym.iter().any(|x| *x == target) { self.antonym.push(target) },
-            SenseRelType::Also => if !self.also.iter().any(|x| *x == target) { self.also.push(target) },
-            SenseRelType::Participle => if !self.participle.iter().any(|x| *x == target) { self.participle.push(target) },
-            SenseRelType::Pertainym => if !self.pertainym.iter().any(|x| *x == target) { self.pertainym.push(target) },
-            SenseRelType::Derivation => if !self.derivation.iter().any(|x| *x == target) { self.derivation.push(target) },
-            SenseRelType::DomainTopic => if !self.domain_topic.iter().any(|x| *x == target) { self.domain_topic.push(target) },
-            SenseRelType::HasDomainTopic => if !self.has_domain_topic.iter().any(|x| *x == target) { self.has_domain_topic.push(target) },
-            SenseRelType::DomainRegion => if !self.domain_region.iter().any(|x| *x == target) { self.domain_region.push(target) },
-            SenseRelType::HasDomainRegion => if !self.has_domain_region.iter().any(|x| *x == target) { self.has_domain_region.push(target) },
-            SenseRelType::Exemplifies => if !self.exemplifies.iter().any(|x| *x == target) { self.exemplifies.push(target) },
-            SenseRelType::IsExemplifiedBy => if !self.is_exemplified_by.iter().any(|x| *x == target) { self.is_exemplified_by.push(target) },
-            SenseRelType::IsPertainymOf => {},
-            SenseRelType::Similar => if !self.similar.iter().any(|x| *x == target) { self.similar.push(target) },
-            SenseRelType::Agent => if !self.agent.iter().any(|x| *x == target) { self.agent.push(target) },
-            SenseRelType::Material => if !self.material.iter().any(|x| *x == target) { self.material.push(target) },
-            SenseRelType::Event => if !self.event.iter().any(|x| *x == target) { self.event.push(target) },
-            SenseRelType::Instrument => if !self.instrument.iter().any(|x| *x == target) { self.instrument.push(target) },
-            SenseRelType::Location => if !self.location.iter().any(|x| *x == target) { self.location.push(target) },
-            SenseRelType::ByMeansOf => if !self.by_means_of.iter().any(|x| *x == target) { self.by_means_of.push(target) },
-            SenseRelType::Undergoer => if !self.undergoer.iter().any(|x| *x == target) { self.undergoer.push(target) },
-            SenseRelType::Property => if !self.property.iter().any(|x| *x == target) { self.property.push(target) },
-            SenseRelType::Result => if !self.result.iter().any(|x| *x == target) { self.result.push(target) },
-            SenseRelType::State => if !self.state.iter().any(|x| *x == target) { self.state.push(target) },
-            SenseRelType::Uses => if !self.uses.iter().any(|x| *x == target) { self.uses.push(target) },
-            SenseRelType::Destination => if !self.destination.iter().any(|x| *x == target) { self.destination.push(target) },
-            SenseRelType::BodyPart => if !self.body_part.iter().any(|x| *x == target) { self.body_part.push(target) },
-            SenseRelType::Vehicle => if !self.vehicle.iter().any(|x| *x == target) { self.vehicle.push(target) },
 
-            SenseRelType::Other => self.other.push(target)
+    pub(crate) fn add_rel(&mut self, rel: SenseRelType, target: SenseId) {
+        match rel {
+            SenseRelType::Antonym => {
+                if !self.antonym.iter().any(|x| *x == target) {
+                    self.antonym.push(target)
+                }
+            }
+            SenseRelType::Also => {
+                if !self.also.iter().any(|x| *x == target) {
+                    self.also.push(target)
+                }
+            }
+            SenseRelType::Participle => {
+                if !self.participle.iter().any(|x| *x == target) {
+                    self.participle.push(target)
+                }
+            }
+            SenseRelType::Pertainym => {
+                if !self.pertainym.iter().any(|x| *x == target) {
+                    self.pertainym.push(target)
+                }
+            }
+            SenseRelType::Derivation => {
+                if !self.derivation.iter().any(|x| *x == target) {
+                    self.derivation.push(target)
+                }
+            }
+            SenseRelType::DomainTopic => {
+                if !self.domain_topic.iter().any(|x| *x == target) {
+                    self.domain_topic.push(target)
+                }
+            }
+            SenseRelType::HasDomainTopic => {
+                if !self.has_domain_topic.iter().any(|x| *x == target) {
+                    self.has_domain_topic.push(target)
+                }
+            }
+            SenseRelType::DomainRegion => {
+                if !self.domain_region.iter().any(|x| *x == target) {
+                    self.domain_region.push(target)
+                }
+            }
+            SenseRelType::HasDomainRegion => {
+                if !self.has_domain_region.iter().any(|x| *x == target) {
+                    self.has_domain_region.push(target)
+                }
+            }
+            SenseRelType::Exemplifies => {
+                if !self.exemplifies.iter().any(|x| *x == target) {
+                    self.exemplifies.push(target)
+                }
+            }
+            SenseRelType::IsExemplifiedBy => {
+                if !self.is_exemplified_by.iter().any(|x| *x == target) {
+                    self.is_exemplified_by.push(target)
+                }
+            }
+            SenseRelType::IsPertainymOf => {}
+            SenseRelType::Similar => {
+                if !self.similar.iter().any(|x| *x == target) {
+                    self.similar.push(target)
+                }
+            }
+            SenseRelType::Agent => {
+                if !self.agent.iter().any(|x| *x == target) {
+                    self.agent.push(target)
+                }
+            }
+            SenseRelType::Material => {
+                if !self.material.iter().any(|x| *x == target) {
+                    self.material.push(target)
+                }
+            }
+            SenseRelType::Event => {
+                if !self.event.iter().any(|x| *x == target) {
+                    self.event.push(target)
+                }
+            }
+            SenseRelType::Instrument => {
+                if !self.instrument.iter().any(|x| *x == target) {
+                    self.instrument.push(target)
+                }
+            }
+            SenseRelType::Location => {
+                if !self.location.iter().any(|x| *x == target) {
+                    self.location.push(target)
+                }
+            }
+            SenseRelType::ByMeansOf => {
+                if !self.by_means_of.iter().any(|x| *x == target) {
+                    self.by_means_of.push(target)
+                }
+            }
+            SenseRelType::Undergoer => {
+                if !self.undergoer.iter().any(|x| *x == target) {
+                    self.undergoer.push(target)
+                }
+            }
+            SenseRelType::Property => {
+                if !self.property.iter().any(|x| *x == target) {
+                    self.property.push(target)
+                }
+            }
+            SenseRelType::Result => {
+                if !self.result.iter().any(|x| *x == target) {
+                    self.result.push(target)
+                }
+            }
+            SenseRelType::State => {
+                if !self.state.iter().any(|x| *x == target) {
+                    self.state.push(target)
+                }
+            }
+            SenseRelType::Uses => {
+                if !self.uses.iter().any(|x| *x == target) {
+                    self.uses.push(target)
+                }
+            }
+            SenseRelType::Destination => {
+                if !self.destination.iter().any(|x| *x == target) {
+                    self.destination.push(target)
+                }
+            }
+            SenseRelType::BodyPart => {
+                if !self.body_part.iter().any(|x| *x == target) {
+                    self.body_part.push(target)
+                }
+            }
+            SenseRelType::Vehicle => {
+                if !self.vehicle.iter().any(|x| *x == target) {
+                    self.vehicle.push(target)
+                }
+            }
+
+            SenseRelType::Other => self.other.push(target),
         };
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash)]
-#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone, Eq, Hash)]
+#[cfg_attr(feature = "redb", derive(speedy::Readable, speedy::Writable))]
 pub struct SenseId(String);
 
 impl SenseId {
-    pub fn new(s : String) -> SenseId { SenseId(s) }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn new(s: impl Into<String>) -> SenseId {
+        SenseId(s.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
-
 
 impl fmt::Display for SenseId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
-
