@@ -8,6 +8,7 @@ mod indicatif_progress;
 use clap::{Parser, Subcommand};
 use indicatif_progress::IndicatifProgress;
 use lazy_static::lazy_static;
+use oewn_lib::automaton::ActionWrapper;
 use oewn_lib::change_manager;
 use oewn_lib::change_manager::ChangeList;
 use oewn_lib::progress::NullProgress;
@@ -661,8 +662,7 @@ enum Command {
     /// Run an automaton script
     Automaton {
         /// The path to the script file to execute
-        #[arg(short, long, value_name = "FILE")]
-        script: PathBuf,
+        script: String,
     },
     /// Search for a specific word
     Word {
@@ -706,19 +706,25 @@ fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBacken
     Ok((path, wn))
 }
 
-fn run_automaton(script: impl AsRef<Path>, wordnet: Option<PathBuf>) {
-    let f = File::open(&script).unwrap_or_else(|_| {
-        eprintln!(
-            "Could not open automaton file: {}",
-            script.as_ref().display()
-        );
-        exit(-1);
-    });
-    let actions: Vec<oewn_lib::automaton::Action> =
-        serde_yaml::from_reader(f).unwrap_or_else(|e| {
+fn run_automaton(script: &str, wordnet: Option<PathBuf>) {
+    let actions = if script == "-" {
+        let wrapped: Vec<ActionWrapper> =
+            serde_yaml::from_reader(io::stdin()).unwrap_or_else(|e| {
+                eprintln!("Could not parse automaton file: {}", e);
+                exit(-1);
+            });
+        wrapped.into_iter().map(|x: ActionWrapper| x.0).collect()
+    } else {
+        let f = File::open(&script).unwrap_or_else(|_| {
+            eprintln!("Could not open automaton file: {}", script);
+            exit(-1);
+        });
+        let wrapped: Vec<ActionWrapper> = serde_yaml::from_reader(f).unwrap_or_else(|e| {
             eprintln!("Could not parse automaton file: {}", e);
             exit(-1);
         });
+        wrapped.into_iter().map(|x: ActionWrapper| x.0).collect()
+    };
     let (path, mut wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
