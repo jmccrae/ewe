@@ -11,14 +11,12 @@ use lazy_static::lazy_static;
 use oewn_lib::change_manager;
 use oewn_lib::change_manager::ChangeList;
 use oewn_lib::progress::NullProgress;
-use oewn_lib::rels::SynsetRelType::Entails;
 use oewn_lib::rels::{SenseRelType, SynsetRelType};
 use oewn_lib::validate::{fix, validate};
 use oewn_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, Synset, SynsetId};
 use regex::Regex;
 use std::borrow::Cow;
-use std::env;
-use std::f32::consts::E;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -736,7 +734,20 @@ fn run_automaton(script: impl AsRef<Path>, wordnet: Option<PathBuf>) {
     save(&wn, &path).expect("Could not save");
 }
 
-fn print_synset(synset_id: &SynsetId, synset: &Synset) {
+fn group_by_key<A, B>(pairs: Vec<(A, B)>) -> HashMap<A, Vec<B>>
+where
+    A: Eq + std::hash::Hash,
+{
+    let mut map = HashMap::new();
+
+    for (a, b) in pairs {
+        map.entry(a).or_insert_with(Vec::new).push(b);
+    }
+
+    map
+}
+
+fn print_synset(synset_id: &SynsetId, synset: &Synset, lexicon: &impl Lexicon) {
     println!("{}: {}", synset_id, synset.members.join(", "));
     println!("    {}", synset.definition[0]);
     if !synset.example.is_empty() {
@@ -750,6 +761,53 @@ fn print_synset(synset_id: &SynsetId, synset: &Synset) {
                 .join("; ")
         );
     }
+    let links_from = lexicon.links_from(synset_id).expect("Cannot read lexicon");
+    for (rel, targets) in group_by_key(links_from) {
+        let target_strs: Vec<String> = targets
+            .into_iter()
+            .map(|t| {
+                let s: String = format!(
+                    "{} ({})",
+                    t,
+                    lexicon
+                        .synset_by_id(&t)
+                        .expect("Cannot read lexicon")
+                        .expect("ID not in lexicon")
+                        .members
+                        .join(", ")
+                );
+                s
+            })
+            .collect();
+        let target_str = target_strs.join("; ");
+        println!("    {}: {}", rel.value(), target_str);
+    }
+    let links_to = lexicon.links_to(synset_id).expect("Cannot read lexicon");
+    for (rel, targets) in group_by_key(links_to) {
+        let target_strs: Vec<String> = targets
+            .into_iter()
+            .map(|t| {
+                let s: String = format!(
+                    "{} ({})",
+                    t,
+                    lexicon
+                        .synset_by_id(&t)
+                        .expect("Cannot read lexicon")
+                        .expect("ID not in lexicon")
+                        .members
+                        .join(", ")
+                );
+                s
+            })
+            .collect();
+        let target_str = target_strs.join("; ");
+        if let Some(inv_rel) = rel.inverse() {
+            println!("    {}: {}", inv_rel.value(), target_str);
+        } else {
+            println!("    Inverse {}: {}", rel.value(), target_str);
+        }
+    }
+
     println!("");
 }
 
@@ -758,7 +816,12 @@ fn run_word(word: &str, ignore_case: bool, wordnet: Option<PathBuf>) {
         eprintln!("{}", e);
         exit(-1);
     });
-    let entries = wn.entry_by_lemma(word).expect("Cannot read wordnet");
+    let entries = if ignore_case {
+        wn.entry_by_lemma_ignore_case(word)
+            .expect("Cannot read wordnet")
+    } else {
+        wn.entry_by_lemma(word).expect("Cannot read wordnet")
+    };
     if entries.is_empty() {
         println!("No entries found for '{}'", word);
     } else {
@@ -768,7 +831,7 @@ fn run_word(word: &str, ignore_case: bool, wordnet: Option<PathBuf>) {
                     .synset_by_id(&sense.synset)
                     .expect("Cannot read wordnet")
                     .unwrap();
-                print_synset(&sense.synset, &synset);
+                print_synset(&sense.synset, &synset, &wn);
             }
         }
     }
@@ -783,16 +846,16 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
         .synset_by_id(&SynsetId::new(&id))
         .expect("Cannot read wordnet")
     {
-        print_synset(&SynsetId::new(&id), &synset);
+        print_synset(&SynsetId::new(&id), &synset, &wn);
     } else if let Some((_, _, sense)) = wn
-        .get_sense_by_id(&SenseId::new(id.clone()))
+        .get_sense_by_id(&SenseId::new(id))
         .expect("Cannot read wordnet")
     {
         let synset = wn
             .synset_by_id(&sense.synset)
             .expect("Cannot read wordnet")
             .unwrap();
-        print_synset(&sense.synset, &synset);
+        print_synset(&sense.synset, &synset, &wn);
     } else {
         println!("No synset or sense found for '{}'", id);
     }
