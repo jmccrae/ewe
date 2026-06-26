@@ -789,7 +789,7 @@ fn print_synset(synset_id: &SynsetId, synset: &Synset, lexicon: &impl Lexicon) {
         println!("    {}: {}", rel.value(), target_str);
     }
     let links_to = lexicon.links_to(synset_id).expect("Cannot read lexicon");
-    for (rel, targets) in group_by_key(links_to) {
+    for (rel, targets) in group_by_key(links_to.into_iter().filter(|(r, _)| !r.is_symmetric()).collect()) {
         let target_strs: Vec<String> = targets
             .into_iter()
             .map(|t| {
