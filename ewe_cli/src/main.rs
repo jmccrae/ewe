@@ -672,6 +672,10 @@ enum Command {
         /// Perform a case-insensitive search
         #[arg(short, long)]
         ignore_case: bool,
+
+        /// Show the sense ID for each sense
+        #[arg(short, long)]
+        sense_ids: bool,
     },
     /// Search for an item by its unique ID
     Id {
@@ -753,8 +757,11 @@ where
     map
 }
 
-fn print_synset(synset_id: &SynsetId, synset: &Synset, lexicon: &impl Lexicon) {
+fn print_synset(synset_id: &SynsetId, synset: &Synset, lexicon: &impl Lexicon, sense_id: Option<&SenseId>) {
     println!("{}: {}", synset_id, synset.members.join(", "));
+    if let Some(sid) = sense_id {
+        println!("    Sense: {}", sid);
+    }
     println!("    {}", synset.definition[0]);
     if !synset.example.is_empty() {
         println!(
@@ -817,7 +824,7 @@ fn print_synset(synset_id: &SynsetId, synset: &Synset, lexicon: &impl Lexicon) {
     println!("");
 }
 
-fn run_word(word: &str, ignore_case: bool, wordnet: Option<PathBuf>) {
+fn run_word(word: &str, ignore_case: bool, sense_ids: bool, wordnet: Option<PathBuf>) {
     let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
@@ -837,7 +844,8 @@ fn run_word(word: &str, ignore_case: bool, wordnet: Option<PathBuf>) {
                     .synset_by_id(&sense.synset)
                     .expect("Cannot read wordnet")
                     .unwrap();
-                print_synset(&sense.synset, &synset, &wn);
+                let sid = if sense_ids { Some(&sense.id) } else { None };
+                print_synset(&sense.synset, &synset, &wn, sid);
             }
         }
     }
@@ -852,7 +860,7 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
         .synset_by_id(&SynsetId::new(&id))
         .expect("Cannot read wordnet")
     {
-        print_synset(&SynsetId::new(&id), &synset, &wn);
+        print_synset(&SynsetId::new(&id), &synset, &wn, None);
     } else if let Some((_, _, sense)) = wn
         .get_sense_by_id(&SenseId::new(id))
         .expect("Cannot read wordnet")
@@ -861,7 +869,7 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
             .synset_by_id(&sense.synset)
             .expect("Cannot read wordnet")
             .unwrap();
-        print_synset(&sense.synset, &synset, &wn);
+        print_synset(&sense.synset, &synset, &wn, Some(&sense.id));
     } else {
         println!("No synset or sense found for '{}'", id);
     }
@@ -919,8 +927,9 @@ fn main() {
         Some(Command::Word {
             ref word,
             ignore_case,
+            sense_ids,
         }) => {
-            run_word(word, *ignore_case, cli.wordnet);
+            run_word(word, *ignore_case, *sense_ids, cli.wordnet);
         }
         None => {
             run_tui();
