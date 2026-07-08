@@ -1,58 +1,105 @@
-# Development
+# ewe-dioxus
 
-Your new jumpstart project includes basic organization with an organized `assets` folder and a `components` folder.
-If you chose to develop with the router feature, you will also have a `views` folder.
+A [Dioxus](https://dioxuslabs.com/) web interface for the [Open English Wordnet](https://github.com/globalwordnet/english-wordnet). This crate is the frontend/fullstack app that (will) power [https://en-word.net/](https://en-word.net/), letting users search and browse lemmas, synsets, and their relations.
+
+It is one member of the `ewe` Cargo workspace:
+
+- `oewn_lib` — the core Wordnet data model and storage (ReDB-backed lexicon).
+- `ewe_cli` — a command-line client for querying the Wordnet.
+- `ewe_dioxus` (this crate) — the web/desktop UI, built with Dioxus.
+
+## Prerequisites
+
+- A recent Rust toolchain (`rustup`).
+- The Dioxus CLI:
+
+  ```bash
+  cargo install dioxus-cli
+  ```
+
+- A built Wordnet database (see [Loading the Wordnet database](#loading-the-wordnet-database) below) — the app has nothing to serve without it.
+
+## Project layout
 
 ```
-project/
-├─ assets/ # Any assets that are used by the app should be placed here
-├─ src/
-│  ├─ main.rs # The entrypoint for the app. It also defines the routes for the app.
-│  ├─ components/
-│  │  ├─ mod.rs # Defines the components module
-│  │  ├─ hero.rs # The Hero component for use in the home page
-│  │  ├─ echo.rs # The echo component uses server functions to communicate with the server
-│  ├─ views/ # The views each route will render in the app.
-│  │  ├─ mod.rs # Defines the module for the views route and re-exports the components for each route
-│  │  ├─ blog.rs # The component that will render at the /blog/:id route
-│  │  ├─ home.rs # The component that will render at the / route
-├─ Cargo.toml # The Cargo.toml file defines the dependencies and feature flags for your project
+ewe_dioxus/
+├─ Cargo.toml       # Dependencies and platform feature flags (web/desktop/mobile/server)
+├─ Dioxus.toml       # Dioxus build/app configuration (title, web resources)
+├─ settings.toml     # Runtime configuration for this app — see below
+├─ assets/            # Static assets (favicon, styling)
+└─ src/
+   ├─ main.rs          # App entrypoint, routes, and the fullstack server bootstrap
+   ├─ load.rs           # Standalone `load` binary that builds the Wordnet database
+   ├─ settings.rs        # `EweSettings` struct — loads and parses settings.toml
+   ├─ backend/            # Server-only logic: API endpoints (`#[get]` server functions)
+   ├─ components/          # Shared UI components (synsets, relations, subcat frames, ...)
+   └─ views/                # Route-level views (Home, ByLemma) and the shared layout/navbar
 ```
 
-### Automatic Tailwind (Dioxus 0.7+)
+## Configuration (`settings.toml`)
 
-As of Dioxus 0.7, there no longer is a need to manually install tailwind. Simply `dx serve` and you're good to go!
-
-Automatic tailwind is supported by checking for a file called `tailwind.css` in your app's manifest directory (next to Cargo.toml). To customize the file, use the dioxus.toml:
+The app looks for a `settings.toml` file in the current working directory when it starts. If the file is missing, it falls back to defaults (`database = "wordnet.db"`, no `wordnet_source`).
 
 ```toml
-[application]
-tailwind_input = "my.css"
-tailwind_output = "assets/out.css"
+database = "wordnet.db"
+wordnet_source = "/path/to/english-wordnet/src/yaml/"
 ```
 
-### Tailwind Manual Install
+| Key              | Type             | Description |
+|------------------|------------------|-------------|
+| `database`       | string           | Path to the ReDB database file. Used by the `load` binary as the output path, and expected by the server as its input path. |
+| `wordnet_source` | string, optional | Path to a directory of Wordnet YAML source files (from the [english-wordnet](https://github.com/globalwordnet/english-wordnet) repo). Only used by the `load` binary; leave unset if you're not (re)building the database. |
 
-To use tailwind plugins or manually customize tailwind, you can can install the Tailwind CLI and use it directly.
+> **Note:** the running app currently opens the ReDB database from the fixed path `wordnet.db` in the working directory, rather than reading `settings.database` dynamically. Keep `database = "wordnet.db"` in `settings.toml` (the default) so the path the `load` binary writes to matches what the server reads from.
 
-1. Install npm: https://docs.npmjs.com/downloading-and-installing-node-js-and-npm
-2. Install the Tailwind CSS CLI: https://tailwindcss.com/docs/installation/tailwind-cli
-3. Run the following command in the root of the project to start the Tailwind CSS compiler:
+`wordnet.db` is git-ignored — every developer builds their own copy locally.
+
+## Loading the Wordnet database
+
+Before serving the app for the first time, build the ReDB database from the Wordnet YAML sources using the `load` binary:
+
+1. Clone the [english-wordnet](https://github.com/globalwordnet/english-wordnet) source repo somewhere locally.
+2. Point `wordnet_source` in `settings.toml` at its `src/yaml/` directory.
+3. Run:
+
+   ```bash
+   cargo run --bin load
+   ```
+
+This creates (or overwrites) the database at the path given by `database` in `settings.toml`, printing load progress as it goes. You only need to redo this when the source data changes.
+
+## Running the interface with Dioxus
+
+This crate uses Dioxus's `fullstack` feature, so `dx serve` builds and runs both the server (which exposes the `/api/...` server functions in `src/backend/api.rs`) and the client in one step.
+
+From the `ewe_dioxus` directory, with a `wordnet.db` already built:
 
 ```bash
-npx @tailwindcss/cli -i ./input.css -o ./assets/tailwind.css --watch
+dx serve
 ```
 
-### Serving Your App
-
-Run the following command in the root of your project to start developing with the default platform:
+By default this serves the `web` platform. To target a different platform, pass `--platform`:
 
 ```bash
+dx serve --platform desktop
 dx serve --platform web
 ```
 
-To run for a different platform, use the `--platform platform` flag. E.g.
+(`mobile` is also defined as a Cargo feature but is not currently wired up as a first-class target here.)
+
+For a production build:
+
 ```bash
-dx serve --platform desktop
+dx build --platform web --release
 ```
 
+Styling is hand-written CSS under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`), linked directly via `document::Link` in `src/main.rs`. This project does not use Tailwind.
+
+## Routes
+
+Defined in `src/main.rs`:
+
+- `/` — `Home` (search/landing page)
+- `/lemma/:lemma` — `ByLemma` (lists synsets for a given lemma)
+
+Both are rendered inside the shared `WNLayout` (navbar) defined in `src/views/wn_layout.rs`.
