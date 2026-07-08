@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::{WordNet, Synset};
+use crate::components::{WordNet, Synset, DisplayOptions};
 use crate::backend::api::get_lemma;
 
 #[component]
@@ -10,7 +10,8 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
             get_lemma(value).await
         }
     })?;
-    
+    let options = use_context::<Signal<DisplayOptions>>();
+
     let x = if let Some(Ok(synsets)) = &*synsets.read() {
         rsx! {
             div {
@@ -28,11 +29,11 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                             for synset in nouns.into_iter() {
                                 Synset { 
                                     synset_id: synset.clone(),
-                                    display_ids: false,
-                                    display_sensekeys: false,
-                                    display_subcats: false,
-                                    display_topics: false,
-                                    display_pronunciations: false,
+                                    display_ids: options().show_ids,
+                                    display_sensekeys: options().show_sensekeys,
+                                    display_subcats: options().show_subcats,
+                                    display_topics: options().show_topics,
+                                    display_pronunciations: options().show_pronunciations,
                                     focus: lemma
                                 }
                             }
@@ -45,11 +46,11 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                             for synset in verbs.into_iter() {
                                 Synset { 
                                     synset_id: synset.clone(),
-                                    display_ids: false,
-                                    display_sensekeys: false,
-                                    display_subcats: false,
-                                    display_topics: false,
-                                    display_pronunciations: false,
+                                    display_ids: options().show_ids,
+                                    display_sensekeys: options().show_sensekeys,
+                                    display_subcats: options().show_subcats,
+                                    display_topics: options().show_topics,
+                                    display_pronunciations: options().show_pronunciations,
                                     focus: lemma
                                 }
                             }
@@ -62,11 +63,11 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                             for synset in adjectives.into_iter() {
                                 Synset { 
                                     synset_id: synset.clone(),
-                                    display_ids: false,
-                                    display_sensekeys: false,
-                                    display_subcats: false,
-                                    display_topics: false,
-                                    display_pronunciations: false,
+                                    display_ids: options().show_ids,
+                                    display_sensekeys: options().show_sensekeys,
+                                    display_subcats: options().show_subcats,
+                                    display_topics: options().show_topics,
+                                    display_pronunciations: options().show_pronunciations,
                                     focus: lemma
                                 }
                             }
@@ -79,11 +80,11 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                             for synset in adverbs.into_iter() {
                                 Synset { 
                                     synset_id: synset.clone(),
-                                    display_ids: false,
-                                    display_sensekeys: false,
-                                    display_subcats: false,
-                                    display_topics: false,
-                                    display_pronunciations: false,
+                                    display_ids: options().show_ids,
+                                    display_sensekeys: options().show_sensekeys,
+                                    display_subcats: options().show_subcats,
+                                    display_topics: options().show_topics,
+                                    display_pronunciations: options().show_pronunciations,
                                     focus: lemma
                                 }
                             }

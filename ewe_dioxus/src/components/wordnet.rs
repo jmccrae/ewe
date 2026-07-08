@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus::events::FormEvent;
 use crate::backend::api::autocomplete;
+use crate::components::DisplayOptionsButton;
 use crate::Route;
 
 #[component]
@@ -72,6 +73,7 @@ pub fn WordNet() -> Element {
                         }
                     }
                 }
+                DisplayOptionsButton {}
             }
         }
     }

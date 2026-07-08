@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
-use oewn_lib::wordnet::{SynsetId, MemberSynset, SenseRelation};
 use crate::backend::api::get_synset;
-use crate::components::{Subcat,Relation};
+use crate::components::{Relation, Subcat};
 use crate::Route;
+use dioxus::prelude::*;
+use oewn_lib::wordnet::{MemberSynset, SenseRelation, SynsetId};
 use std::collections::HashMap;
 
 static CSS: Asset = asset!("/assets/styling/synset.css");
@@ -16,21 +16,24 @@ pub struct SynsetProps {
     display_subcats: bool,
     display_topics: bool,
     display_pronunciations: bool,
-    focus: String
+    focus: String,
 }
-    
+
 fn subcats(synset: &MemberSynset) -> HashMap<String, Vec<String>> {
     let mut subcat_map = HashMap::new();
     for member in &synset.members {
         for subcat in &member.sense.subcat {
-            subcat_map.entry(subcat.clone()).or_insert(Vec::new()).push(member.lemma.clone());
+            subcat_map
+                .entry(subcat.clone())
+                .or_insert(Vec::new())
+                .push(member.lemma.clone());
         }
     }
     subcat_map
 }
 
 #[component]
-fn synset_rels(name: &'static str, rels : Vec<SynsetId>, props : SynsetProps) -> Element {
+fn synset_rels(name: &'static str, rels: Vec<SynsetId>, props: SynsetProps) -> Element {
     rsx! {
         Relation {
             relation_name: name,
@@ -45,7 +48,7 @@ fn synset_rels(name: &'static str, rels : Vec<SynsetId>, props : SynsetProps) ->
 }
 
 #[component]
-fn sense_rels(name: &'static str, rels : Vec<SenseRelation>, props : SynsetProps) -> Element {
+fn sense_rels(name: &'static str, rels: Vec<SenseRelation>, props: SynsetProps) -> Element {
     rsx! {
         Relation {
             relation_name: name,
@@ -59,21 +62,27 @@ fn sense_rels(name: &'static str, rels : Vec<SenseRelation>, props : SynsetProps
     }
 }
 
-fn map_ss_rels(rels : Vec<SynsetId>) -> Vec<(SynsetId, Option<String>, Option<String>)> {
+fn map_ss_rels(rels: Vec<SynsetId>) -> Vec<(SynsetId, Option<String>, Option<String>)> {
     rels.into_iter().map(|ss_id| (ss_id, None, None)).collect()
 }
 
-fn map_se_rels(rels : Vec<SenseRelation>) -> Vec<(SynsetId, Option<String>, Option<String>)> {
-    rels.into_iter().map(|se_rel| (se_rel.target_synset, Some(se_rel.source_lemma), Some(se_rel.target_lemma))).collect()
+fn map_se_rels(rels: Vec<SenseRelation>) -> Vec<(SynsetId, Option<String>, Option<String>)> {
+    rels.into_iter()
+        .map(|se_rel| {
+            (
+                se_rel.target_synset,
+                Some(se_rel.source_lemma),
+                Some(se_rel.target_lemma),
+            )
+        })
+        .collect()
 }
 
 #[component]
-pub fn Synset(props : SynsetProps) -> Element {
+pub fn Synset(props: SynsetProps) -> Element {
     let synset = use_loader(move || {
         let synset_id = props.synset_id.cloned();
-        async move {
-            get_synset(synset_id).await
-        }
+        async move { get_synset(synset_id).await }
     });
 
     let mut show_relations = use_signal(|| false);
@@ -89,8 +98,8 @@ pub fn Synset(props : SynsetProps) -> Element {
             if let Some(synset) = &*ss_load.read() {
                 rsx! {
                     document::Style { href: CSS },
-                    div { 
-                        class: "synset", 
+                    div {
+                        class: "synset",
                         if props.display_ids {
                             div {
                                 class: "synset-id",
@@ -101,14 +110,14 @@ pub fn Synset(props : SynsetProps) -> Element {
                                 }
                                 if synset.ili.is_some() || !synset.wikidata.is_empty() {
                                     span {
-                                        "("
+                                        " ("
                                     }
                                 }
                                 if let Some(ref ili) = synset.ili {
                                     span {
                                         b {
                                             class: "synset-id-title",
-                                            "Interlingual Index:"
+                                            "Interlingual Index: "
                                         },
                                         span {
                                             class: "identifier",
@@ -141,7 +150,7 @@ pub fn Synset(props : SynsetProps) -> Element {
                                         ")"
                                     }
                                 }
-
+                                hr {}
                             },
                         },
                         div {
@@ -178,17 +187,17 @@ pub fn Synset(props : SynsetProps) -> Element {
                                         if props.display_pronunciations && member.pronunciation.len() > 0 {
                                             span {
                                                 class: "pronunciations",
-                                                "(Pronunciation: ",
+                                                " (Pronunciation:",
                                                 for (i, pron) in member.pronunciation.iter().enumerate() {
                                                     if let Some(variety) = &pron.variety {
                                                         span {
                                                             class: "pronunciation_variety",
-                                                            "{variety}"
+                                                                " ({variety})"
                                                         }
                                                     }
-                                                    "{pron.value}",
+                                                    " {pron.value}",
                                                     if i < member.pronunciation.len() - 1 {
-                                                        ", " 
+                                                        ", "
                                                     }
                                                 },
                                                 ")"
@@ -244,7 +253,7 @@ pub fn Synset(props : SynsetProps) -> Element {
                                         class: "relations",
                                         if !synset.hypernym.is_empty() {
                                             synset_rels {
-                                                name: "Hypernyms", 
+                                                name: "Hypernyms",
                                                 rels: synset.hypernym.clone(),
                                                 props: props.clone()
                                             }
@@ -608,7 +617,7 @@ pub fn Synset(props : SynsetProps) -> Element {
                                     class: "wikidata",
                                     a {
                                         href: "https://www.wikidata.org/entity/{wd}",
-                                        img { 
+                                        img {
                                             src: WIKIDATA_ICON,
                                         }
                                     }

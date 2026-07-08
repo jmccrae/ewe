@@ -110,12 +110,14 @@ fn replace_subcat(subcat : &str, members : &Vec<String>) -> String {
 #[component]
 pub fn Subcat(subcats : HashMap<String, Vec<String>>) -> Element {
     rsx! {
-        div {
-            class: "subcats",
-            b { "Subcategorization frames:" },
-            ul {
-                for (subcat, members) in subcats.iter() {
-                    li { "{replace_subcat(subcat, members)}" }
+        if !subcats.is_empty() {
+            div {
+                class: "subcats",
+                b { "Subcategorization frames:" },
+                ul {
+                    for (subcat, members) in subcats.iter() {
+                        li { "{replace_subcat(subcat, members)}" }
+                    }
                 }
             }
         }
