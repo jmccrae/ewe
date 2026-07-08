@@ -3,16 +3,17 @@
 use dioxus::prelude::*;
 
 use dioxus_fullstack::Lazy;
-#[allow(unused_imports)]
-use oewn_lib::progress::NullProgress;
 #[cfg(feature = "server")]
-use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
+use oewn_lib::wordnet::ReDBLexicon;
 use views::{ByLemma, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
 /// Define a components module that contains all shared components for our app.
 mod components;
+/// Opening (and automatically rebuilding, if stale) the lexicon database.
+#[cfg(feature = "server")]
+mod db;
 /// The settings file
 mod settings;
 /// Define a views module that contains the UI for all Layouts and Routes for our app.
@@ -56,10 +57,12 @@ static SETTINGS: Lazy<settings::EweSettings> = Lazy::new(|| async move {
 
 #[cfg(feature = "server")]
 static LEXICON: Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
-    if let Ok(lexicon) = ReDBLexicon::open("wordnet.db") {
-        dioxus::Ok(Some(lexicon))
-    } else {
-        dioxus::Ok(None)
+    match db::open_lexicon(SETTINGS.get()) {
+        Ok(lexicon) => dioxus::Ok(Some(lexicon)),
+        Err(e) => {
+            eprintln!("Failed to open lexicon: {}", e);
+            dioxus::Ok(None)
+        }
     }
 });
 

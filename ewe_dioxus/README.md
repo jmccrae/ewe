@@ -17,7 +17,7 @@ It is one member of the `ewe` Cargo workspace:
   cargo install dioxus-cli
   ```
 
-- A built Wordnet database (see [Loading the Wordnet database](#loading-the-wordnet-database) below) — the app has nothing to serve without it.
+- A local checkout of the [english-wordnet](https://github.com/globalwordnet/english-wordnet) YAML source, if you want the database built automatically (see [Configuration](#configuration-settingstoml) below).
 
 ## Project layout
 
@@ -29,7 +29,7 @@ ewe_dioxus/
 ├─ assets/            # Static assets (favicon, styling)
 └─ src/
    ├─ main.rs          # App entrypoint, routes, and the fullstack server bootstrap
-   ├─ load.rs           # Standalone `load` binary that builds the Wordnet database
+   ├─ db.rs             # Opens the lexicon database, rebuilding it if stale (see below)
    ├─ settings.rs        # `EweSettings` struct — loads and parses settings.toml
    ├─ backend/            # Server-only logic: API endpoints (`#[get]` server functions)
    ├─ components/          # Shared UI components (synsets, relations, subcat frames, ...)
@@ -47,32 +47,25 @@ wordnet_source = "/path/to/english-wordnet/src/yaml/"
 
 | Key              | Type             | Description |
 |------------------|------------------|-------------|
-| `database`       | string           | Path to the ReDB database file. Used by the `load` binary as the output path, and expected by the server as its input path. |
-| `wordnet_source` | string, optional | Path to a directory of Wordnet YAML source files (from the [english-wordnet](https://github.com/globalwordnet/english-wordnet) repo). Only used by the `load` binary; leave unset if you're not (re)building the database. |
-
-> **Note:** the running app currently opens the ReDB database from the fixed path `wordnet.db` in the working directory, rather than reading `settings.database` dynamically. Keep `database = "wordnet.db"` in `settings.toml` (the default) so the path the `load` binary writes to matches what the server reads from.
+| `database`       | string           | Path to the ReDB database file that the app reads from (and, if it needs rebuilding, writes to). |
+| `wordnet_source` | string, optional | Path to a directory of Wordnet YAML source files (from the [english-wordnet](https://github.com/globalwordnet/english-wordnet) repo). Leave unset if you already have a database and don't want it rebuilt. |
 
 `wordnet.db` is git-ignored — every developer builds their own copy locally.
 
-## Loading the Wordnet database
+## The Wordnet database
 
-Before serving the app for the first time, build the ReDB database from the Wordnet YAML sources using the `load` binary:
+The server opens the database lazily, on first request, via `src/db.rs`. Every time it does, it checks:
 
-1. Clone the [english-wordnet](https://github.com/globalwordnet/english-wordnet) source repo somewhere locally.
-2. Point `wordnet_source` in `settings.toml` at its `src/yaml/` directory.
-3. Run:
+- if `database` doesn't exist yet, or
+- if `wordnet_source` is set and any file in it (or the sibling `deprecations.csv`) has a newer modification time than `database`,
 
-   ```bash
-   cargo run --bin load
-   ```
-
-This creates (or overwrites) the database at the path given by `database` in `settings.toml`, printing load progress as it goes. You only need to redo this when the source data changes.
+and if either is true, it rebuilds the database from `wordnet_source` before opening it. Otherwise it just opens the existing file. In practice this means you can edit the Wordnet YAML source and the next request after a restart will pick up the changes automatically — there's no separate load/reload step to run.
 
 ## Running the interface with Dioxus
 
 This crate uses Dioxus's `fullstack` feature, so `dx serve` builds and runs both the server (which exposes the `/api/...` server functions in `src/backend/api.rs`) and the client in one step.
 
-From the `ewe_dioxus` directory, with a `wordnet.db` already built:
+From the `ewe_dioxus` directory:
 
 ```bash
 dx serve
