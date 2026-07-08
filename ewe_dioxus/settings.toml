@@ -1,2 +1,0 @@
-database = "wordnet.db"
-wordnet_source = "/home/jmccrae/projects/globalwordnet/english-wordnet/src/yaml/"
