@@ -73,7 +73,7 @@ h1.en-title {
 }
 
 @media screen and (max-width: 600px) {
-    .wordnet-input span {
+    .wordnet-search-label {
         display: none;
     }
 }
@@ -148,6 +148,23 @@ h1.en-title {
 .pronunciation_variety {
     font-size: 90%;
     color: #555;
+}
+
+.footer {
+    margin-top: 20px;
+    padding: 20px;
+    font-size: 12px;
+    text-align: right;
+    font-family: "Arvo", serif;
+}
+
+.footer1 {
+    font-size: 120%;
+}
+
+.footer2 {
+    padding-bottom: 20px;
+    color: #767676;
 }
 
 @font-face {
