@@ -1048,6 +1048,8 @@ pub struct Member {
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone, Readable, Writable)]
 pub struct MemberSense {
     pub id : SenseId,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
 }
  

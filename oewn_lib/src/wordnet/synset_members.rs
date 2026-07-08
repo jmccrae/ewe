@@ -185,6 +185,8 @@ pub struct Member {
 #[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct MemberSense {
     pub id : SenseId,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
 }
  

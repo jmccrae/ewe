@@ -219,10 +219,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
     if action == "A" {
         let pos = synset.part_of_speech.to_pos_key();
         let subcat = if pos.as_str() == "v" {
-            input("Enter verb subcats as comma-separated list: ")
-                .split(",")
-                .map(|s| s.to_string())
-                .collect()
+            input_subcats("Enter verb subcats as comma-separated list: ")
         } else {
             Vec::new()
         };
@@ -279,10 +276,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
                     .expect("Could not delete entry");
                 let new_lemma = input("New lemma: ");
                 let subcat = if pos.as_str() == "v" {
-                    input("Enter verb subcats as comma-separated list: ")
-                        .split(",")
-                        .map(|s| s.to_string())
-                        .collect()
+                    input_subcats("Enter verb subcats as comma-separated list: ")
                 } else {
                     Vec::new()
                 };
@@ -352,10 +346,7 @@ fn change_synset<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
                 loop {
                     let lemma = input("Add Lemma (blank to stop): ");
                     let subcat = if pos == PosKey::new("v".to_string()) {
-                        input("Enter verb subcats as comma-separated list: ")
-                            .split(",")
-                            .map(|s| s.to_string())
-                            .collect()
+                        input_subcats("Enter verb subcats as comma-separated list: ")
                     } else {
                         Vec::new()
                     };
@@ -570,6 +561,15 @@ fn input(prompt: &str) -> String {
         .read_line(&mut buffer)
         .expect("Cannot read from STDIN");
     buffer.trim().to_string()
+}
+
+fn input_subcats(prompt: &str) -> Vec<String> {
+    let subcats = input(prompt);
+    if subcats.is_empty() {
+        Vec::new()
+    } else {
+        subcats.split(",").map(|s| s.to_string()).collect()
+    }
 }
 
 fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -> bool {
