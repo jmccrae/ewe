@@ -1,22 +1,22 @@
 body {
-    font-family: "Dosis", sans-serif;
-    border-top: 4px solid #bf0a30;
+    font-family: var(--font-body);
+    border-top: 4px solid var(--color-accent);
     margin-bottom: 60px;
     margin-top: 0px;
     margin-left: 0px;
     margin-right: 0px;
-    color: #333;
+    color: var(--color-text);
 }
 
 a {
-    color: #002868;
+    color: var(--color-primary);
     text-decoration: none;
 }
 
 a:hover {
-    color: #bf0a30;
+    color: var(--color-accent);
     text-decoration: none;
-}   
+}
 
 .container {
     margin-left: auto;
@@ -32,9 +32,9 @@ h1.en-title {
     line-height: 1.1em;
     padding-left: 20px;
     font-size: 42pt;
-    font-family: "Arvo", serif;
+    font-family: var(--font-heading);
     font-weight: 700;
-    color: #002868;
+    color: var(--color-primary);
     margin-top: 10px;
     margin-bottom: 0;
 }
@@ -58,8 +58,8 @@ h1.en-title {
 
 .wordnet-lemma {
     width: 100%;
-    border: 1px solid #ccc;
-    color: rgb(85, 85, 85);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
     padding: 10px;
     margin: 10px 0;
     box-sizing: border-box;
@@ -95,8 +95,8 @@ h1.en-title {
     top: 50px;
     left: 0;
     right: 0;
-    background: white;
-    border: 1px solid #ddd;
+    background: var(--color-white);
+    border: 1px solid var(--color-border-light);
     border-top: none;
     border-radius: 0 0 4px 4px;
     margin: 0;
@@ -120,18 +120,18 @@ h1.en-title {
 }
 
 .suggestions li:hover {
-    background-color: #f0f0f0;
+    background-color: var(--color-surface-hover);
 }
 
 .suggestion-link {
     text-decoration: none;
-    color: #333;
+    color: var(--color-text);
 }
 
 /* Optional: style for when no results are found */
 .no-results {
     padding: 10px;
-    color: #888;
+    color: var(--color-text-faint);
     font-style: italic;
 }
 
@@ -147,7 +147,7 @@ h1.en-title {
 
 .pronunciation_variety {
     font-size: 90%;
-    color: #555;
+    color: var(--color-text-muted);
 }
 
 .footer {
@@ -155,7 +155,7 @@ h1.en-title {
     padding: 20px;
     font-size: 12px;
     text-align: right;
-    font-family: "Arvo", serif;
+    font-family: var(--font-heading);
 }
 
 .footer1 {
@@ -166,34 +166,5 @@ h1.en-title {
 
 .footer2 {
     padding-bottom: 20px;
-    color: #767676;
-}
-
-@font-face {
-    font-family: "Arvo";
-    font-style: normal;
-    font-weight: 400;
-    src: url(https://fonts.gstatic.com/s/arvo/v20/tDbD2oWUg0MKqScQ6A.ttf)
-        format("truetype");
-}
-@font-face {
-    font-family: "Arvo";
-    font-style: normal;
-    font-weight: 700;
-    src: url(https://fonts.gstatic.com/s/arvo/v20/tDbM2oWUg0MKoZw1-LPK9g.ttf)
-        format("truetype");
-}
-@font-face {
-    font-family: "Dosis";
-    font-style: normal;
-    font-weight: 400;
-    src: url(https://fonts.gstatic.com/s/dosis/v27/HhyJU5sn9vOmLxNkIwRSjTVNWLEJN7Ml2xMB.ttf)
-        format("truetype");
-}
-@font-face {
-    font-family: "Scope One";
-    font-style: normal;
-    font-weight: 400;
-    src: url(https://fonts.gstatic.com/s/scopeone/v14/WBLnrEXKYFlGHrOKmGDFXEXI.ttf)
-        format("truetype");
+    color: var(--color-text-dim);
 }

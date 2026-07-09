@@ -16,14 +16,14 @@
 
 .definition {
     font-size: 0.8em;
-    color: #333;
+    color: var(--color-text);
     font-style: italic;
     margin-left: 4px;
 }
 
 .example {
     font-size: 0.8em;
-    color: #444;
+    color: var(--color-text-secondary);
     font-style: italic;
 }
 
@@ -36,8 +36,8 @@
 }
 
 .sense_key {
-    color: #aaa;
-    font-family: 'Scope One', monospace;
+    color: var(--color-text-mute);
+    font-family: var(--font-mono);
 }
 
 .synset-id {
@@ -45,7 +45,7 @@
 }
 
 .identifier {
-    font-family: 'Scope One', monospace;
+    font-family: var(--font-mono);
 }
 
 .more {
@@ -56,7 +56,7 @@
 }
 
 .more a {
-    color: black;
+    color: var(--color-text-strong);
 }
 
 .more:hover {
@@ -72,7 +72,7 @@
 }
 
 .pos {
-    color: #BF0A30;
+    color: var(--color-accent);
     margin-right: 4px;
 }
 
@@ -83,7 +83,7 @@
 .synset-id hr {
     margin-top:2px;
     margin-bottom:2px;
-    border: 1px solid #eee;
+    border: 1px solid var(--color-surface-light);
     height: 0px;
 }
 
@@ -94,9 +94,9 @@
 
 .relation-title a,.relation-title a:hover,.relation-title a:focus {
     text-decoration:none;
-    color:black;
+    color: var(--color-text-strong);
     font-size: 0.9em;
-    font-family: 'Arvo', serif;
+    font-family: var(--font-heading);
     font-weight: 500;
 }
 
@@ -105,7 +105,7 @@
 }
 
 .lemma a {
-    color:black;
+    color: var(--color-text-strong);
 }
 
 .lemma a:not(:hover) {
@@ -125,10 +125,10 @@
 }
 
 .pos_label {
-    font-family: 'Arvo', serif;
+    font-family: var(--font-heading);
     font-size: 30px;
     font-weight: 500;
-    color: #333;
+    color: var(--color-text);
     margin-top: 20px;
     margin-bottom: 10px;
 }
@@ -142,7 +142,7 @@
     border: none;
     cursor: pointer;
     font-size: 1.2rem;
-    color: #555;
+    color: var(--color-text-muted);
     padding: 0;
     transition: color 0.2s;
 }

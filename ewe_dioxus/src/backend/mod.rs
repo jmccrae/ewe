@@ -9,3 +9,6 @@ pub use rdf::synset_negotiated;
 
 #[cfg(feature="server")]
 pub mod xml;
+
+#[cfg(feature="server")]
+pub mod static_files;
