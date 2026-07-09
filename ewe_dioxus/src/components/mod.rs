@@ -18,3 +18,6 @@ mod display_options;
 pub use display_options::{
     provide_display_options, provide_panel_visibility, DisplayOptions, DisplayOptionsButton,
 };
+
+mod download_links;
+pub use download_links::DownloadLinks;

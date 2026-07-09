@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::{WordNet, Synset, DisplayOptions};
+use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks};
 use oewn_lib::wordnet::SynsetId;
 
 #[component]
@@ -18,6 +18,7 @@ pub fn BySynset(synset: ReadSignal<String>) -> Element {
                 display_pronunciations: options().show_pronunciations,
                 focus: String::new()
             }
+            DownloadLinks { kind: "synset", id: synset.cloned() },
         }
     }
 }

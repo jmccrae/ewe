@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::{WordNet, Synset, DisplayOptions};
+use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks};
 use crate::backend::api::get_lemma;
 
 #[component]
@@ -91,6 +91,7 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                         }
                     }
                 }
+                DownloadLinks { kind: "lemma", id: lemma.cloned() },
             }
         }
     } else {

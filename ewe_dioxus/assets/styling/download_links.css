@@ -1,0 +1,10 @@
+.download-links {
+    font-size: 0.85em;
+    color: #555;
+    margin: 10px 15px;
+    text-align: right;
+}
+
+.download-links a {
+    margin-left: 10px;
+}
