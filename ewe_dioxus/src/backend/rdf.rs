@@ -5,12 +5,11 @@
 use crate::dioxus_fullstack::response::IntoResponse;
 use crate::dioxus_fullstack::{body::Body, http::Response, HeaderMap, Redirect};
 use dioxus::prelude::*;
-use oewn_lib::wordnet::{Lexicon, MemberSynset, PosKey, Synset, SynsetId};
+use oewn_lib::wordnet::{Lexicon, MemberSynset, PosKey, SynsetId};
 use oxrdf::vocab::rdf;
 use oxrdf::*;
 use oxrdfio::{RdfFormat, RdfSerializer, WriterQuadSerializer};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 #[get("/synset/{id}", headers : HeaderMap)]
@@ -20,6 +19,7 @@ pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
         ContentType::HTML => Redirect::to(&format!("/view/synset/{}", id)).into_response(),
         ContentType::RDFXML => Redirect::to(&format!("/rdf/synset/{}", id)).into_response(),
         ContentType::Turtle => Redirect::to(&format!("/ttl/synset/{}", id)).into_response(),
+        ContentType::XML => Redirect::to(&format!("/xml/synset/{}", id)).into_response(),
         ContentType::JSON => Redirect::to(&format!("/api/synset/{}", id)).into_response(),
     };
     Ok(response)
@@ -37,50 +37,33 @@ pub async fn synset_ttl(id: String) -> Result<Response<Body>> {
 
 async fn synset_serialized(id: String, format: RdfFormat) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
-    let result: Result<Option<Vec<u8>>> = crate::LEXICON
-        .get()
-        .as_ref()
-        .and_then(|lexicon| {
-            let synset2: Option<Result<Cow<Synset>>> =
-                lexicon.synset_by_id(&id).transpose().map(|s| Ok(s?));
-            let synset: Option<Result<Synset>> =
-                synset2.map(|res| res.and_then(|cow| Ok(cow.into_owned())));
-            let member_synset: Option<Result<MemberSynset>> =
-                synset.map(|synset| Ok(MemberSynset::from_synset(&id, synset?, lexicon)?));
-
-            eprintln!("Synset lookup for {}: {:?}", id, member_synset);
-            let x: Option<Result<Vec<u8>>> = member_synset.map(|res| {
-                let z: Result<Vec<u8>> = res.and_then(|ms| {
-                    gen_synset_rdf(
-                        format,
-                        "https://creativecommons.org/licenses/by/4.0/",
-                        "https://en-word.net/",
-                        "en",
-                        &ms,
-                    )
-                });
-                z
-            });
-
-            x
-        })
-        .transpose();
-
-    if let Ok(Some(rdf_data)) = result {
-        Ok(Response::builder()
-            .header("Content-Type", format.media_type())
-            .body(Body::from(rdf_data))
-            .unwrap())
-    } else if let Err(e) = result {
-        Ok(Response::builder()
-            .status(500)
-            .body(Body::from(format!("Internal server error: {}", e)))
-            .unwrap())
-    } else {
-        Ok(Response::builder()
+    match resolve_synset(&id) {
+        Ok(Some(ms)) => {
+            match gen_synset_rdf(
+                format,
+                "https://creativecommons.org/licenses/by/4.0/",
+                "https://en-word.net/",
+                "en",
+                &ms,
+            ) {
+                Ok(rdf_data) => Ok(Response::builder()
+                    .header("Content-Type", format.media_type())
+                    .body(Body::from(rdf_data))
+                    .unwrap()),
+                Err(e) => Ok(Response::builder()
+                    .status(500)
+                    .body(Body::from(format!("Internal server error: {}", e)))
+                    .unwrap()),
+            }
+        }
+        Ok(None) => Ok(Response::builder()
             .status(404)
             .body(Body::from("Synset not found"))
-            .unwrap())
+            .unwrap()),
+        Err(e) => Ok(Response::builder()
+            .status(500)
+            .body(Body::from(format!("Internal server error: {}", e)))
+            .unwrap()),
     }
 }
 
@@ -91,6 +74,7 @@ pub async fn lemma_negotiated(lemma: String) -> Result<Response<Body>> {
         ContentType::HTML => Redirect::to(&format!("/view/lemma/{}", lemma)).into_response(),
         ContentType::RDFXML => Redirect::to(&format!("/rdf/lemma/{}", lemma)).into_response(),
         ContentType::Turtle => Redirect::to(&format!("/ttl/lemma/{}", lemma)).into_response(),
+        ContentType::XML => Redirect::to(&format!("/xml/lemma/{}", lemma)).into_response(),
         ContentType::JSON => Redirect::to(&format!("/api/lemma/{}", lemma)).into_response(),
     };
     Ok(response)
@@ -124,25 +108,9 @@ async fn lemma_serialized(lemma: String, format: RdfFormat) -> Result<Response<B
 }
 
 fn lemma_rdf_bytes(lemma: &str, format: RdfFormat) -> Result<Option<Vec<u8>>> {
-    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+    let member_synsets = resolve_lemma_synsets(lemma)?;
+    if member_synsets.is_empty() {
         return Ok(None);
-    };
-
-    let entries = lexicon.entry_by_lemma(lemma)?;
-    let synset_ids: BTreeSet<SynsetId> = entries
-        .iter()
-        .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
-        .collect();
-
-    if synset_ids.is_empty() {
-        return Ok(None);
-    }
-
-    let mut member_synsets = Vec::with_capacity(synset_ids.len());
-    for id in &synset_ids {
-        if let Some(synset) = lexicon.synset_by_id(id)? {
-            member_synsets.push(MemberSynset::from_synset(id, synset.into_owned(), lexicon)?);
-        }
     }
 
     let rdf_data = gen_synsets_rdf(
@@ -156,10 +124,52 @@ fn lemma_rdf_bytes(lemma: &str, format: RdfFormat) -> Result<Option<Vec<u8>>> {
     Ok(Some(rdf_data))
 }
 
+/// Looks up a single synset by id and expands it into a [`MemberSynset`], the
+/// enriched representation (with reverse relation links) shared by the RDF,
+/// Turtle, XML, and JSON exports. Returns `Ok(None)` if the lexicon isn't
+/// loaded or the id doesn't exist.
+pub(crate) fn resolve_synset(id: &SynsetId) -> Result<Option<MemberSynset>> {
+    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+        return Ok(None);
+    };
+    let Some(synset) = lexicon.synset_by_id(id)? else {
+        return Ok(None);
+    };
+    Ok(Some(MemberSynset::from_synset(
+        id,
+        synset.into_owned(),
+        lexicon,
+    )?))
+}
+
+/// Looks up every distinct synset that a lemma has a sense in. Returns an
+/// empty vec (not an error) if the lexicon isn't loaded or the lemma is
+/// unknown.
+pub(crate) fn resolve_lemma_synsets(lemma: &str) -> Result<Vec<MemberSynset>> {
+    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+        return Ok(Vec::new());
+    };
+
+    let entries = lexicon.entry_by_lemma(lemma)?;
+    let synset_ids: BTreeSet<SynsetId> = entries
+        .iter()
+        .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+        .collect();
+
+    let mut member_synsets = Vec::with_capacity(synset_ids.len());
+    for id in &synset_ids {
+        if let Some(synset) = resolve_synset(id)? {
+            member_synsets.push(synset);
+        }
+    }
+    Ok(member_synsets)
+}
+
 enum ContentType {
     HTML,
     RDFXML,
     Turtle,
+    XML,
     JSON,
 }
 
@@ -196,6 +206,7 @@ fn negotiate(headers: HeaderMap) -> ContentType {
                 "text/html" => Some(ContentType::HTML),
                 "application/rdf+xml" => Some(ContentType::RDFXML),
                 "text/turtle" => Some(ContentType::Turtle),
+                "application/xml" => Some(ContentType::XML),
                 "application/json" => Some(ContentType::JSON),
                 "*/*" => Some(ContentType::HTML), // Default to HTML if any type is accepted
                 _ => None,
@@ -512,7 +523,7 @@ fn write_synset_triples<W: std::io::Write>(
     Ok(())
 }
 
-fn lemma_id(lemma: &str, pos_key: &PosKey) -> String {
+pub(crate) fn lemma_id(lemma: &str, pos_key: &PosKey) -> String {
     format!("{}-{}", lemma.replace(" ", "_"), pos_key.as_str())
 }
 
@@ -553,6 +564,13 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("Accept", "application/json".parse().unwrap());
         assert!(matches!(negotiate(headers), ContentType::JSON));
+    }
+
+    #[test]
+    fn test_negotiate_xml() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/xml".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::XML));
     }
 
     #[test]

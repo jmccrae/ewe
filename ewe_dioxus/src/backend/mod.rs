@@ -6,3 +6,6 @@ pub use api::{get_lemma, autocomplete};
 pub mod rdf;
 #[cfg(feature="server")]
 pub use rdf::synset_negotiated;
+
+#[cfg(feature="server")]
+pub mod xml;
