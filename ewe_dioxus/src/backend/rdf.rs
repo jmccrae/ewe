@@ -1,5 +1,7 @@
 //! Implements the key RDF functionality of returning pages as RDF
 //! using content negotiation
+
+// TODO : URLs need to have a short prefix (oewn-00001740-n) instead of just ID 00001740-n
 use crate::dioxus_fullstack::{HeaderMap, Redirect, http::Response, body::Body};
 use dioxus::prelude::*;
 use crate::dioxus_fullstack::response::IntoResponse;
@@ -134,8 +136,8 @@ fn wikidata(id : &str) -> Result<NamedNode> {
     Ok(NamedNode::new(&format!("http://www.wikidata.org/entity/{}", id))?)
 }
 
-const FRAGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'%');
-const PATH_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'/').add(b'#').add(b'?').add(b'&').add(b'=').add(b'+').add(b'$').add(b',').add(b';').add(b':').add(b'@');
+const FRAGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'%').add(b'#');
+const PATH_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'/').add(b'#').add(b'?').add(b'&').add(b'=').add(b'+').add(b'$').add(b',').add(b';').add(b':').add(b'@').add(b' ');
 
 fn build_url(site : &str, section : &str, id : &str, fragment : Option<&str>) -> Result<NamedNode> {
     let site = if site.ends_with("/") {
@@ -324,5 +326,120 @@ fn lemma_id(lemma : &str, pos_key : &PosKey) -> String {
     format!("{}-{}", lemma.replace(" ", "_"), pos_key.as_str())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxrdf::NamedNode;
+    use oewn_lib::wordnet::{MemberSynset, SynsetId, PartOfSpeech, PosKey, SenseRelation, Example};
 
+    #[test]
+    fn test_negotiate_html() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::HTML));
+    }
+
+    #[test]
+    fn test_negotiate_rdf_xml() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/rdf+xml".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::RDFXML));
+    }
+
+    #[test]
+    fn test_negotiate_turtle() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "text/turtle".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::Turtle));
+    }
+
+    #[test]
+    fn test_negotiate_json() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "application/json".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::JSON));
+    }
+
+    #[test]
+    fn test_negotiate_quality_preference() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Accept", "text/html;q=0.5,application/rdf+xml;q=0.9".parse().unwrap());
+        assert!(matches!(negotiate(headers), ContentType::RDFXML));
+    }
+
+    #[test]
+    fn test_negotiate_default() {
+        let headers = HeaderMap::new();
+        assert!(matches!(negotiate(headers), ContentType::HTML));
+    }
+
+    #[test]
+    fn test_ontolex_namespace() {
+        let result = ontolex("LexicalEntry").unwrap();
+        assert_eq!(result.as_str(), "http://www.w3.org/ns/lemon/ontolex#LexicalEntry");
+    }
+
+    #[test]
+    fn test_wn_namespace() {
+        let result = wn("hypernym").unwrap();
+        assert_eq!(result.as_str(), "https://globalwordnet.github.io/schemas/wn#hypernym");
+    }
+
+    #[test]
+    fn test_build_url_without_fragment() {
+        let result = build_url("https://example.com", "synset", "12345-n", None).unwrap();
+        assert_eq!(result.as_str(), "https://example.com/synset/12345-n");
+    }
+
+    #[test]
+    fn test_build_url_with_fragment() {
+        let result = build_url("https://example.com", "lemma", "dog-n", Some("12345-n")).unwrap();
+        assert_eq!(result.as_str(), "https://example.com/lemma/dog-n#12345-n");
+    }
+
+    #[test]
+    fn test_build_url_encoding() {
+        let result = build_url("https://example.com", "synset", "test id", Some("test#fragment")).unwrap();
+        assert_eq!(result.as_str(), "https://example.com/synset/test%20id#test%23fragment");
+    }
+
+    #[test]
+    fn test_lemma_id_simple() {
+        let pos_key = PosKey::new("n");
+        let result = lemma_id("dog", &pos_key);
+        assert_eq!(result, "dog-n");
+    }
+
+    #[test]
+    fn test_lemma_id_with_spaces() {
+        let pos_key = PosKey::new("n");
+        let result = lemma_id("hot dog", &pos_key);
+        assert_eq!(result, "hot_dog-n");
+    }
+
+    #[test]
+    fn test_gen_synset_rdf_basic() {
+        let synset_id = SynsetId::new_owned("12345-n".to_string());
+        let synset = MemberSynset::new(
+            synset_id,
+            "noun.test".to_string(),
+            vec![],
+            vec!["test definition".to_string()],
+            PartOfSpeech::n
+        );
+
+        let result = gen_synset_rdf(
+            "https://creativecommons.org/licenses/by/4.0/",
+            "https://en-word.net/",
+            "en",
+            &synset
+        );
+
+        assert!(result.is_ok());
+        let rdf_data = result.unwrap();
+        let rdf_string = String::from_utf8_lossy(&rdf_data);
+        assert!(rdf_string.contains("12345-n"));
+        assert!(rdf_string.contains("test definition"));
+    }
+}
 

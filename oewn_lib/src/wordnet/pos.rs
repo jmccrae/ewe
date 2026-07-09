@@ -5,7 +5,7 @@ use std::fmt;
 #[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]pub struct PosKey(String);
 
 impl PosKey {
-    pub fn new(s : String) -> PosKey { PosKey(s) }
+    pub fn new(s : impl Into<String>) -> PosKey { PosKey(s.into()) }
     pub fn as_str(&self) -> &str { &self.0 }
     pub fn to_part_of_speech(&self) -> Option<PartOfSpeech> {
         if self.0.starts_with("n") {
