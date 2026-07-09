@@ -1,24 +1,24 @@
-on: [push]
+on:
+  push:
+    tags:
+      - 'v*'
 
 name: cargo-macos
 
+permissions:
+  contents: write
+
 jobs:
-  build_and_test:
+  build_and_release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p ewe-cli
+      - run: cp target/release/ewe-cli ewe-cli-macos
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
-      - name: Update Automatic Release
-        uses: marvinpinto/action-automatic-releases@latest
-        with:
-          repo_token: "${{ secrets.GITHUB_TOKEN}}"
-          automatic_release_tag: "macos-latest"
-          prerelease: true
-          title: "Mac OS Development Build"
-          files: ./target/release/ewe
+          files: ewe-cli-macos
+          prerelease: false
+          generate_release_notes: true
