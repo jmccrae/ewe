@@ -26,4 +26,6 @@ desktop = ["dioxus/desktop"]
 # The feature that are only required for the mobile = ["dioxus/mobile"] build target should be optional and only enabled in the mobile = ["dioxus/mobile"] feature
 mobile = ["dioxus/mobile"]
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
-server = ["dioxus/server"]
+server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio"]
+oxrdf = ["dep:oxrdf"]
+oxrdfio = ["dep:oxrdfio"]

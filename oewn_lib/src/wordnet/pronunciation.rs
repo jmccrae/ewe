@@ -6,6 +6,7 @@ use crate::wordnet::util::escape_yaml_string;
 #[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Pronunciation {
     pub value : String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub variety : Option<String>
 }
 

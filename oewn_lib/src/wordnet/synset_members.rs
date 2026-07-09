@@ -12,155 +12,231 @@ use crate::rels::{SynsetRelType,SenseRelType};
 pub struct MemberSynset {
     pub id : SynsetId,
     pub lexname : String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members : Vec<Member>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub definition : Vec<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub example : Vec<Example>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ili : Option<ILIID>,
     #[serde(default, deserialize_with = "string_or_vec")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wikidata : Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source : Option<String>,
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub also : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub attribute : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub causes : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub domain_region : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub domain_topic : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exemplifies : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entails : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hypernym : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub instance_hypernym : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mero_location : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mero_member : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mero_part : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mero_portion : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mero_substance : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub meronym : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub similar : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub feminine : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub masculine : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub other : Vec<SynsetId>,
 
     // Inverse fields
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hyponym : Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_caused_by: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub has_domain_region: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub has_domain_topic: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_exemplified_by: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_entailed_by: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub instance_hyponym: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holo_location: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holo_member: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holo_part: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holo_portion: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holo_substance: Vec<SynsetId>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holonym: Vec<SynsetId>,
 
     // Sense Relations
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub antonym: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub participle: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_participle_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pertainym: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_pertainym_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub derivation: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exemplifies_sense: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_exemplified_by_sense: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub agent: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_agent_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub material: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_material_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub event: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_event_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub instrument: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_instrument_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub location: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_location_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub by_means_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_by_means_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub undergoer: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_undergoer_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub property: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_property_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub result: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_result_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_state_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_used_by: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub destination: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_destination_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub body_part: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_body_part_of: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub vehicle: Vec<SenseRelation>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub is_vehicle_of: Vec<SenseRelation>
 }
 

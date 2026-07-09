@@ -2,53 +2,74 @@
 //! using content negotiation
 
 // TODO : URLs need to have a short prefix (oewn-00001740-n) instead of just ID 00001740-n
-use crate::dioxus_fullstack::{HeaderMap, Redirect, http::Response, body::Body};
-use dioxus::prelude::*;
 use crate::dioxus_fullstack::response::IntoResponse;
-use oewn_lib::wordnet::{MemberSynset, Lexicon, SynsetId, Synset, PosKey};
-use oxrdf::*;
+use crate::dioxus_fullstack::{body::Body, http::Response, HeaderMap, Redirect};
+use dioxus::prelude::*;
+use oewn_lib::wordnet::{Lexicon, MemberSynset, PosKey, Synset, SynsetId};
 use oxrdf::vocab::rdf;
-use oxrdfio::{RdfFormat, RdfSerializer};
+use oxrdf::*;
+use oxrdfio::{RdfFormat, RdfSerializer, WriterQuadSerializer};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 #[get("/synset/{id}", headers : HeaderMap)]
-pub async fn synset_negotiated(id : String) -> Result<Response<Body>> {
+pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
     let content_type = negotiate(headers);
     let response = match content_type {
         ContentType::HTML => Redirect::to(&format!("/view/synset/{}", id)).into_response(),
         ContentType::RDFXML => Redirect::to(&format!("/rdf/synset/{}", id)).into_response(),
-        ContentType::Turtle => Redirect::to(&format!("/turtle/synset/{}", id)).into_response(),
+        ContentType::Turtle => Redirect::to(&format!("/ttl/synset/{}", id)).into_response(),
         ContentType::JSON => Redirect::to(&format!("/api/synset/{}", id)).into_response(),
     };
     Ok(response)
 }
 
 #[get("/rdf/synset/{id}")]
-pub async fn synset_rdf(id : String) -> Result<Response<Body>> {
+pub async fn synset_rdf(id: String) -> Result<Response<Body>> {
+    synset_serialized(id, RdfFormat::RdfXml).await
+}
+
+#[get("/ttl/synset/{id}")]
+pub async fn synset_ttl(id: String) -> Result<Response<Body>> {
+    synset_serialized(id, RdfFormat::Turtle).await
+}
+
+async fn synset_serialized(id: String, format: RdfFormat) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
-    let result : Result<Option<Vec<u8>>> = crate::LEXICON.get().as_ref()
+    let result: Result<Option<Vec<u8>>> = crate::LEXICON
+        .get()
+        .as_ref()
         .and_then(|lexicon| {
-            let synset2 : Option<Result<Cow<Synset>>> = 
+            let synset2: Option<Result<Cow<Synset>>> =
                 lexicon.synset_by_id(&id).transpose().map(|s| Ok(s?));
-            let synset : Option<Result<Synset>> = synset2.map(|res| res.and_then(|cow| Ok(cow.into_owned())));
-            let member_synset : Option<Result<MemberSynset>> = synset
-                .map(|synset| Ok(MemberSynset::from_synset(&id, synset?, lexicon)?));
+            let synset: Option<Result<Synset>> =
+                synset2.map(|res| res.and_then(|cow| Ok(cow.into_owned())));
+            let member_synset: Option<Result<MemberSynset>> =
+                synset.map(|synset| Ok(MemberSynset::from_synset(&id, synset?, lexicon)?));
 
             eprintln!("Synset lookup for {}: {:?}", id, member_synset);
-            let x : Option<Result<Vec<u8>>> = member_synset.map(|res| {
-                let z : Result<Vec<u8>> = res.and_then(|ms|
-                    gen_synset_rdf("https://creativecommons.org/licenses/by/4.0/", "https://en-word.net/", "en", &ms));
+            let x: Option<Result<Vec<u8>>> = member_synset.map(|res| {
+                let z: Result<Vec<u8>> = res.and_then(|ms| {
+                    gen_synset_rdf(
+                        format,
+                        "https://creativecommons.org/licenses/by/4.0/",
+                        "https://en-word.net/",
+                        "en",
+                        &ms,
+                    )
+                });
                 z
             });
-                
-            x
-        }).transpose();
 
-    if let Ok(Some(rdf_xml)) = result {
+            x
+        })
+        .transpose();
+
+    if let Ok(Some(rdf_data)) = result {
         Ok(Response::builder()
-            .header("Content-Type", "application/rdf+xml")
-            .body(Body::from(rdf_xml))
+            .header("Content-Type", format.media_type())
+            .body(Body::from(rdf_data))
             .unwrap())
     } else if let Err(e) = result {
         Ok(Response::builder()
@@ -63,14 +84,86 @@ pub async fn synset_rdf(id : String) -> Result<Response<Body>> {
     }
 }
 
+#[get("/lemma/{lemma}", headers : HeaderMap)]
+pub async fn lemma_negotiated(lemma: String) -> Result<Response<Body>> {
+    let content_type = negotiate(headers);
+    let response = match content_type {
+        ContentType::HTML => Redirect::to(&format!("/view/lemma/{}", lemma)).into_response(),
+        ContentType::RDFXML => Redirect::to(&format!("/rdf/lemma/{}", lemma)).into_response(),
+        ContentType::Turtle => Redirect::to(&format!("/ttl/lemma/{}", lemma)).into_response(),
+        ContentType::JSON => Redirect::to(&format!("/api/lemma/{}", lemma)).into_response(),
+    };
+    Ok(response)
+}
+
+#[get("/rdf/lemma/{lemma}")]
+pub async fn lemma_rdf(lemma: String) -> Result<Response<Body>> {
+    lemma_serialized(lemma, RdfFormat::RdfXml).await
+}
+
+#[get("/ttl/lemma/{lemma}")]
+pub async fn lemma_ttl(lemma: String) -> Result<Response<Body>> {
+    lemma_serialized(lemma, RdfFormat::Turtle).await
+}
+
+async fn lemma_serialized(lemma: String, format: RdfFormat) -> Result<Response<Body>> {
+    match lemma_rdf_bytes(&lemma, format) {
+        Ok(Some(rdf_data)) => Ok(Response::builder()
+            .header("Content-Type", format.media_type())
+            .body(Body::from(rdf_data))
+            .unwrap()),
+        Ok(None) => Ok(Response::builder()
+            .status(404)
+            .body(Body::from("Lemma not found"))
+            .unwrap()),
+        Err(e) => Ok(Response::builder()
+            .status(500)
+            .body(Body::from(format!("Internal server error: {}", e)))
+            .unwrap()),
+    }
+}
+
+fn lemma_rdf_bytes(lemma: &str, format: RdfFormat) -> Result<Option<Vec<u8>>> {
+    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+        return Ok(None);
+    };
+
+    let entries = lexicon.entry_by_lemma(lemma)?;
+    let synset_ids: BTreeSet<SynsetId> = entries
+        .iter()
+        .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+        .collect();
+
+    if synset_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let mut member_synsets = Vec::with_capacity(synset_ids.len());
+    for id in &synset_ids {
+        if let Some(synset) = lexicon.synset_by_id(id)? {
+            member_synsets.push(MemberSynset::from_synset(id, synset.into_owned(), lexicon)?);
+        }
+    }
+
+    let rdf_data = gen_synsets_rdf(
+        format,
+        "https://creativecommons.org/licenses/by/4.0/",
+        "https://en-word.net/",
+        "en",
+        &member_synsets,
+    )?;
+
+    Ok(Some(rdf_data))
+}
+
 enum ContentType {
     HTML,
     RDFXML,
     Turtle,
-    JSON
+    JSON,
 }
 
-fn negotiate(headers : HeaderMap) -> ContentType {
+fn negotiate(headers: HeaderMap) -> ContentType {
     let accept_str = headers
         .get("Accept")
         .and_then(|h| h.to_str().ok())
@@ -81,7 +174,7 @@ fn negotiate(headers : HeaderMap) -> ContentType {
         .filter_map(|part| {
             let mut pieces = part.split(';');
             let mime = pieces.next()?.trim();
-            
+
             // Default quality is 1.0 if not specified
             let mut q = 1.0;
             for piece in pieces {
@@ -96,64 +189,120 @@ fn negotiate(headers : HeaderMap) -> ContentType {
 
     types.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    types.into_iter().find_map(|(_, mime)| {
-        match mime {
-            "text/html" => Some(ContentType::HTML),
-            "application/rdf+xml" => Some(ContentType::RDFXML),
-            "text/turtle" => Some(ContentType::Turtle),
-            "application/json" => Some(ContentType::JSON),
-            "*/*" => Some(ContentType::HTML), // Default to HTML if any type is accepted
-            _ => None,
-        }
-    }).unwrap_or(ContentType::HTML) // Default to HTML if no acceptable type is found
+    types
+        .into_iter()
+        .find_map(|(_, mime)| {
+            match mime {
+                "text/html" => Some(ContentType::HTML),
+                "application/rdf+xml" => Some(ContentType::RDFXML),
+                "text/turtle" => Some(ContentType::Turtle),
+                "application/json" => Some(ContentType::JSON),
+                "*/*" => Some(ContentType::HTML), // Default to HTML if any type is accepted
+                _ => None,
+            }
+        })
+        .unwrap_or(ContentType::HTML) // Default to HTML if no acceptable type is found
 }
 
-fn ontolex(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("http://www.w3.org/ns/lemon/ontolex#{}", id))?)
+fn ontolex(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "http://www.w3.org/ns/lemon/ontolex#{}",
+        id
+    ))?)
 }
 
-fn wn(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("https://globalwordnet.github.io/schemas/wn#{}", id))?)
+fn wn(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "https://globalwordnet.github.io/schemas/wn#{}",
+        id
+    ))?)
 }
 
-fn skos(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("http://www.w3.org/2004/02/skos/core#{}", id))?)
+fn skos(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "http://www.w3.org/2004/02/skos/core#{}",
+        id
+    ))?)
 }
 
-fn dc(id : &str) -> Result<NamedNode> {
+fn dc(id: &str) -> Result<NamedNode> {
     Ok(NamedNode::new(&format!("http://purl.org/dc/terms/{}", id))?)
 }
 
-fn ili(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("http://ili.globalwordnet.org/ili/{}", id))?)
+fn ili(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "http://ili.globalwordnet.org/ili/{}",
+        id
+    ))?)
 }
 
-fn owl(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("http://www.w3.org/2002/07/owl#{}", id))?)
+fn owl(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "http://www.w3.org/2002/07/owl#{}",
+        id
+    ))?)
 }
 
-fn wikidata(id : &str) -> Result<NamedNode> {
-    Ok(NamedNode::new(&format!("http://www.wikidata.org/entity/{}", id))?)
+fn wikidata(id: &str) -> Result<NamedNode> {
+    Ok(NamedNode::new(&format!(
+        "http://www.wikidata.org/entity/{}",
+        id
+    ))?)
 }
 
 const FRAGMENT_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'%').add(b'#');
-const PATH_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS.add(b'/').add(b'#').add(b'?').add(b'&').add(b'=').add(b'+').add(b'$').add(b',').add(b';').add(b':').add(b'@').add(b' ');
+const PATH_ENCODE_SET: &percent_encoding::AsciiSet = &CONTROLS
+    .add(b'/')
+    .add(b'#')
+    .add(b'?')
+    .add(b'&')
+    .add(b'=')
+    .add(b'+')
+    .add(b'$')
+    .add(b',')
+    .add(b';')
+    .add(b':')
+    .add(b'@')
+    .add(b' ');
 
-fn build_url(site : &str, section : &str, id : &str, fragment : Option<&str>) -> Result<NamedNode> {
-    let site = if site.ends_with("/") {
+fn section_uri(site: &str, section: &str) -> String {
+    if site.ends_with("/") {
         format!("{}{}/", site, section)
     } else {
         format!("{}/{}/", site, section)
-    };
+    }
+}
+
+fn build_url(site: &str, section: &str, id: &str, fragment: Option<&str>) -> Result<NamedNode> {
+    let site = section_uri(site, section);
     let mut url = format!("{}{}", site, utf8_percent_encode(id, PATH_ENCODE_SET));
     if let Some(fragment) = fragment {
-        url.push_str(&format!("#{}", utf8_percent_encode(fragment, FRAGMENT_ENCODE_SET)));
+        url.push_str(&format!(
+            "#{}",
+            utf8_percent_encode(fragment, FRAGMENT_ENCODE_SET)
+        ));
     }
     Ok(NamedNode::new(url)?)
 }
 
-fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &MemberSynset) -> Result<Vec<u8>> {
-    let mut serializer = RdfSerializer::from_format(RdfFormat::RdfXml)
+fn gen_synset_rdf(
+    format: RdfFormat,
+    license: &str,
+    site: &str,
+    language: &str,
+    synset: &MemberSynset,
+) -> Result<Vec<u8>> {
+    gen_synsets_rdf(format, license, site, language, std::slice::from_ref(synset))
+}
+
+fn gen_synsets_rdf(
+    format: RdfFormat,
+    license: &str,
+    site: &str,
+    language: &str,
+    synsets: &[MemberSynset],
+) -> Result<Vec<u8>> {
+    let mut serializer = RdfSerializer::from_format(format)
         .with_prefix("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#")?
         .with_prefix("dc", "http://purl.org/dc/terms/")?
         .with_prefix("ili", "http://ili.globalwordnet.org/ili/")?
@@ -168,8 +317,23 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
         .with_prefix("wikidata", "http://www.wikidata.org/entity/")?
         .with_prefix("wordnet", site)?
         .with_prefix("wordnetlicense", license)?
+        .with_prefix("wordnetlemma", &section_uri(site, "lemma"))?
+        .with_prefix("wordnetsynset", &section_uri(site, "synset"))?
         .for_writer(Vec::new());
 
+    for synset in synsets {
+        write_synset_triples(&mut serializer, site, language, synset)?;
+    }
+
+    Ok(serializer.finish()?)
+}
+
+fn write_synset_triples<W: std::io::Write>(
+    serializer: &mut WriterQuadSerializer<W>,
+    site: &str,
+    language: &str,
+    synset: &MemberSynset,
+) -> Result<()> {
     macro_rules! triple {
         ($s:expr, $p:expr, $o:expr) => {
             serializer.serialize_triple(TripleRef::new($s, $p, $o))?
@@ -191,11 +355,29 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
     let ss = build_url(site, "synset", &synset.id.as_str(), None)?;
 
     for member in &synset.members {
-        let entry = build_url(site, "lemma", &lemma_id(&member.lemma, &member.poskey), None)?;
-        let sense = build_url(site, "lemma", &lemma_id(&member.lemma, &member.poskey), Some(synset.id.as_str()))?;
-        let pos = member.poskey.to_part_of_speech().map(|pos| pos.long_pos()).unwrap_or("unknown");
+        let entry = build_url(
+            site,
+            "lemma",
+            &lemma_id(&member.lemma, &member.poskey),
+            None,
+        )?;
+        let sense = build_url(
+            site,
+            "lemma",
+            &lemma_id(&member.lemma, &member.poskey),
+            Some(synset.id.as_str()),
+        )?;
+        let pos = member
+            .poskey
+            .to_part_of_speech()
+            .map(|pos| pos.long_pos())
+            .unwrap_or("unknown");
         triple!(&entry, rdf::TYPE, &ontolex("LexicalEntry")?);
-        triple!(&entry, &ontolex("canonicalForm")?, lang_lit!(&member.lemma, language));
+        triple!(
+            &entry,
+            &ontolex("canonicalForm")?,
+            lang_lit!(&member.lemma, language)
+        );
         triple!(&entry, &ontolex("sense")?, &sense);
         triple!(&entry, &wn("partOfSpeech")?, &wn(pos)?);
         triple!(&sense, rdf::TYPE, &ontolex("LexicalSense")?);
@@ -204,13 +386,17 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
             ($rel_type:ident, $rel_name:expr) => {
                 for rel in &synset.$rel_type {
                     if rel.source_lemma == member.lemma {
-                        let target = build_url(site, "lemma", &lemma_id(&rel.target_lemma, &rel.target_poskey), Some(rel.target_synset.as_str()))?;
+                        let target = build_url(
+                            site,
+                            "lemma",
+                            &lemma_id(&rel.target_lemma, &rel.target_poskey),
+                            Some(rel.target_synset.as_str()),
+                        )?;
                         triple!(&sense, &wn($rel_name)?, &target);
                     }
                 }
-            }
+            };
         }
-
 
         sense_rel!(antonym, "antonym");
         sense_rel!(participle, "participle");
@@ -218,7 +404,7 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
         sense_rel!(pertainym, "pertainym");
         sense_rel!(is_pertainym_of, "isPertainymOf");
         sense_rel!(derivation, "derivation");
-        sense_rel!(exemplifies_sense,"exemplifies");
+        sense_rel!(exemplifies_sense, "exemplifies");
         sense_rel!(is_exemplified_by_sense, "isExemplifiedBy");
         sense_rel!(agent, "agent");
         sense_rel!(is_agent_of, "isAgentOf");
@@ -278,7 +464,11 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
 
     triple!(&ss, &wn("lexfile")?, lit!(&synset.lexname));
 
-    triple!(&ss, &wn("partOfSpeech")?, &wn(synset.part_of_speech.long_pos())?);
+    triple!(
+        &ss,
+        &wn("partOfSpeech")?,
+        &wn(synset.part_of_speech.long_pos())?
+    );
 
     for wd in &synset.wikidata {
         triple!(&ss, &owl("sameAs")?, &wikidata(wd)?);
@@ -297,7 +487,7 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
                 let target = build_url(site, "synset", &rel.as_str(), None)?;
                 triple!(&ss, &wn($rel_name)?, &target);
             }
-        }
+        };
     }
     synset_rel!(also, "also");
     synset_rel!(attribute, "attribute");
@@ -319,23 +509,28 @@ fn gen_synset_rdf(license : &str, site : &str, language : &str, synset : &Member
     synset_rel!(masculine, "masculine");
     synset_rel!(other, "other");
 
-    Ok(serializer.finish()?)
+    Ok(())
 }
 
-fn lemma_id(lemma : &str, pos_key : &PosKey) -> String {
+fn lemma_id(lemma: &str, pos_key: &PosKey) -> String {
     format!("{}-{}", lemma.replace(" ", "_"), pos_key.as_str())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oewn_lib::wordnet::{Example, MemberSynset, PartOfSpeech, PosKey, SenseRelation, SynsetId};
     use oxrdf::NamedNode;
-    use oewn_lib::wordnet::{MemberSynset, SynsetId, PartOfSpeech, PosKey, SenseRelation, Example};
 
     #[test]
     fn test_negotiate_html() {
         let mut headers = HeaderMap::new();
-        headers.insert("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".parse().unwrap());
+        headers.insert(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                .parse()
+                .unwrap(),
+        );
         assert!(matches!(negotiate(headers), ContentType::HTML));
     }
 
@@ -363,7 +558,10 @@ mod tests {
     #[test]
     fn test_negotiate_quality_preference() {
         let mut headers = HeaderMap::new();
-        headers.insert("Accept", "text/html;q=0.5,application/rdf+xml;q=0.9".parse().unwrap());
+        headers.insert(
+            "Accept",
+            "text/html;q=0.5,application/rdf+xml;q=0.9".parse().unwrap(),
+        );
         assert!(matches!(negotiate(headers), ContentType::RDFXML));
     }
 
@@ -376,13 +574,19 @@ mod tests {
     #[test]
     fn test_ontolex_namespace() {
         let result = ontolex("LexicalEntry").unwrap();
-        assert_eq!(result.as_str(), "http://www.w3.org/ns/lemon/ontolex#LexicalEntry");
+        assert_eq!(
+            result.as_str(),
+            "http://www.w3.org/ns/lemon/ontolex#LexicalEntry"
+        );
     }
 
     #[test]
     fn test_wn_namespace() {
         let result = wn("hypernym").unwrap();
-        assert_eq!(result.as_str(), "https://globalwordnet.github.io/schemas/wn#hypernym");
+        assert_eq!(
+            result.as_str(),
+            "https://globalwordnet.github.io/schemas/wn#hypernym"
+        );
     }
 
     #[test]
@@ -399,8 +603,17 @@ mod tests {
 
     #[test]
     fn test_build_url_encoding() {
-        let result = build_url("https://example.com", "synset", "test id", Some("test#fragment")).unwrap();
-        assert_eq!(result.as_str(), "https://example.com/synset/test%20id#test%23fragment");
+        let result = build_url(
+            "https://example.com",
+            "synset",
+            "test id",
+            Some("test#fragment"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://example.com/synset/test%20id#test%23fragment"
+        );
     }
 
     #[test]
@@ -425,14 +638,41 @@ mod tests {
             "noun.test".to_string(),
             vec![],
             vec!["test definition".to_string()],
-            PartOfSpeech::n
+            PartOfSpeech::n,
         );
 
         let result = gen_synset_rdf(
+            RdfFormat::RdfXml,
             "https://creativecommons.org/licenses/by/4.0/",
             "https://en-word.net/",
             "en",
-            &synset
+            &synset,
+        );
+
+        assert!(result.is_ok());
+        let rdf_data = result.unwrap();
+        let rdf_string = String::from_utf8_lossy(&rdf_data);
+        assert!(rdf_string.contains("12345-n"));
+        assert!(rdf_string.contains("test definition"));
+    }
+
+    #[test]
+    fn test_gen_synset_turtle_basic() {
+        let synset_id = SynsetId::new_owned("12345-n".to_string());
+        let synset = MemberSynset::new(
+            synset_id,
+            "noun.test".to_string(),
+            vec![],
+            vec!["test definition".to_string()],
+            PartOfSpeech::n,
+        );
+
+        let result = gen_synset_rdf(
+            RdfFormat::Turtle,
+            "https://creativecommons.org/licenses/by/4.0/",
+            "https://en-word.net/",
+            "en",
+            &synset,
         );
 
         assert!(result.is_ok());
@@ -442,4 +682,3 @@ mod tests {
         assert!(rdf_string.contains("test definition"));
     }
 }
-

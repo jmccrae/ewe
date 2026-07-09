@@ -85,9 +85,11 @@ pub struct Synset {
     pub definition : Vec<String>,
     #[serde(default)]
     pub example : Vec<Example>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ili : Option<ILIID>,
     #[serde(default, deserialize_with = "string_or_vec")]
     pub wikidata : Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source : Option<String>,
     pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]

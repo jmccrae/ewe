@@ -11,6 +11,7 @@ pub struct Sense {
     pub id: SenseId,
     pub synset: SynsetId,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub adjposition: Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]

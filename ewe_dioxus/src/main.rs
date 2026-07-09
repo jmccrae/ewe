@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use dioxus_fullstack::Lazy;
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
-use views::{ByLemma, Home, WNLayout};
+use views::{ByLemma, BySynset, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -35,8 +35,11 @@ enum Route {
         #[route("/")]
         Home {},
 
-        #[route("/lemma/:lemma")]
+        #[route("/view/lemma/:lemma")]
         ByLemma { lemma: String },
+
+        #[route("/view/synset/:synset")]
+        BySynset { synset: String },
 }
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.

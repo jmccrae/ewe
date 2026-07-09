@@ -6,3 +6,6 @@ pub use wn_layout::WNLayout;
 
 mod by_lemma;
 pub use by_lemma::ByLemma;
+
+mod by_synset;
+pub use by_synset::BySynset;
