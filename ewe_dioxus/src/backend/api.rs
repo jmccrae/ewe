@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 #[allow(unused_imports)]
 use oewn_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
+#[allow(unused_imports)]
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -10,7 +12,7 @@ enum EweAPIError {
     LexiconUnavailable,
 }
 
-#[get("/api/lemma/{lemma}")]
+#[get("/api/by_lemma/{lemma}")]
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     if let Some(lexicon) = crate::LEXICON.get() {
         let lemmas = lexicon.entry_by_lemma(&lemma)?;
@@ -19,6 +21,27 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
             .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
             .collect();
         Ok(synset_ids)
+    } else {
+        Err(EweAPIError::LexiconUnavailable.into())
+    }
+}
+
+#[get("/api/lemma/{lemma}")]
+pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
+    if let Some(lexicon) = crate::LEXICON.get() {
+        let entries = lexicon.entry_by_lemma(&lemma)?;
+        let synset_ids: BTreeSet<SynsetId> = entries
+            .iter()
+            .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+            .collect();
+
+        let mut synsets = Vec::with_capacity(synset_ids.len());
+        for id in &synset_ids {
+            if let Some(synset) = lexicon.synset_by_id(id)? {
+                synsets.push(MemberSynset::from_synset(id, synset.into_owned(), lexicon)?);
+            }
+        }
+        Ok(synsets)
     } else {
         Err(EweAPIError::LexiconUnavailable.into())
     }
