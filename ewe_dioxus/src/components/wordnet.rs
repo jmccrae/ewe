@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::events::FormEvent;
-use crate::backend::api::autocomplete;
+use crate::backend::api::{autocomplete, SearchResultKind};
 use crate::components::DisplayOptionsButton;
 use crate::Route;
 
@@ -26,15 +26,11 @@ pub fn WordNet() -> Element {
             div {
                 class: "wordnet-input",
                 span {
-                    class: "wordnet-search-label",
-                    "LEMMA"
-                },
-                span {
                     class: "suggestions-span",
                     input {
                         class: "wordnet-lemma",
                         r#type: "text",
-                        placeholder: "Enter a word",
+                        placeholder: "Enter a word or identifier",
                         value: "{lemma}",
                         oninput: update_lemma
                     }
@@ -46,14 +42,21 @@ pub fn WordNet() -> Element {
                                     rsx! {
                                         for s in suggestions.cloned().into_iter() {
                                             li {
-                                                key: "{s}", 
+                                                key: "{s.display}",
                                                 onmousedown: move |_| {
                                                     let navigator = navigator();
-                                                    lemma.set(s.clone());
-                                                    navigator.push(Route::ByLemma { lemma: s.clone() });
+                                                    lemma.set(s.display.clone());
+                                                    match s.kind {
+                                                        SearchResultKind::Lemma => {
+                                                            navigator.push(Route::ByLemma { lemma: s.value.clone() });
+                                                        }
+                                                        SearchResultKind::Synset => {
+                                                            navigator.push(Route::BySynset { synset: s.value.clone() });
+                                                        }
+                                                    }
                                                     show_suggestions.set(false);
                                                 },
-                                                "{s}"
+                                                "{s.display}"
                                             }
 
                                         }

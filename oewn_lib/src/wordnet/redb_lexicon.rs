@@ -15,6 +15,7 @@ use std::borrow::Cow;
 use std::path::Path;
 use speedy::{Readable, Writable};
 use std::result;
+use std::sync::OnceLock;
 
 const INITIAL_CHARS : [char;27] = ['0', 'a','b', 'c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'];
 /// (initial character, lemma) -> HashMap<PosKey, Entry>
@@ -38,7 +39,13 @@ pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
-    lexnames: Vec<String>
+    lexnames: Vec<String>,
+    /// Lazily-built (on first `ssid_by_prefix`/`ili_by_prefix` call), sorted
+    /// in-memory index: (all synset ids, sorted) and ((ili, synset id)
+    /// pairs, sorted by ili). Built once from a single scan over every
+    /// synset instead of re-scanning (and re-deserializing every `Synset`
+    /// from redb) on every search.
+    search_index: OnceLock<(Vec<SynsetId>, Vec<(String, SynsetId)>)>
 }
 
 impl ReDBLexicon {
@@ -84,7 +91,8 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets,
-            lexnames
+            lexnames,
+            search_index: OnceLock::new()
         })
     }
 
@@ -120,7 +128,52 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets: HashMap::new(),
-            lexnames: Vec::new()
+            lexnames: Vec::new(),
+            search_index: OnceLock::new()
+        })
+    }
+
+    /// Get (and lazily build, on first call) the sorted synset-id and
+    /// ili search indexes shared by `ssid_by_prefix` and `ili_by_prefix`.
+    fn search_index(&self) -> &(Vec<SynsetId>, Vec<(String, SynsetId)>) {
+        self.search_index.get_or_init(|| {
+            let mut ssids = Vec::new();
+            let mut ilis = Vec::new();
+            match self.synsets_iter() {
+                Ok(lexfiles) => {
+                    for lexfile in lexfiles {
+                        let synsets = match lexfile {
+                            Ok((_, synsets)) => synsets,
+                            Err(e) => {
+                                eprintln!("Error building synset search index: {}", e);
+                                continue;
+                            }
+                        };
+                        let entries = match synsets.iter() {
+                            Ok(entries) => entries,
+                            Err(e) => {
+                                eprintln!("Error building synset search index: {}", e);
+                                continue;
+                            }
+                        };
+                        for entry in entries {
+                            match entry {
+                                Ok((id, synset)) => {
+                                    if let Some(ili) = synset.ili.as_ref() {
+                                        ilis.push((ili.as_str().to_string(), id.clone()));
+                                    }
+                                    ssids.push(id);
+                                }
+                                Err(e) => eprintln!("Error building synset search index: {}", e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => eprintln!("Error building synset search index: {}", e),
+            }
+            ssids.sort();
+            ilis.sort_by(|a, b| a.0.cmp(&b.0));
+            (ssids, ilis)
         })
     }
 }
@@ -172,27 +225,32 @@ impl Lexicon for ReDBLexicon {
     }
     fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
         let lexfile_opt = self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned());
-        if let Some(lexfile) = lexfile_opt {
-            let res = if let Some(synsets) = self.synsets.get_mut(&lexfile) {
+        let res = if let Some(lexfile) = lexfile_opt {
+            if let Some(synsets) = self.synsets.get_mut(&lexfile) {
                 synsets.update(synset_id, f)?;
                 Ok(())
             } else {
                 Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
-            };
-            res
+            }
         } else {
             Err(LexiconError::SynsetIdNotFound(synset_id.clone()))
-        }
+        };
+        // `f` may have changed the synset's ILI, which the search index caches.
+        self.search_index = OnceLock::new();
+        res
     }
     fn synsets_insert_synset(&mut self, lexname : &str, synset_id : SynsetId, synset : Synset) -> Result<()> {
         self.synsets.entry(lexname.to_owned()).or_insert_with(|| {
             ReDBSynsets::new(self.txn_manager.clone(), lexname.to_owned())
         }).insert(lexname.to_owned(), synset_id.clone(), synset.clone())?;
+        self.search_index = OnceLock::new();
         Ok(())
     }
     fn synsets_remove_synset(&mut self, lexname : &str,  synset_id : &SynsetId) -> Result<Option<(SynsetId, Synset)>> {
         if let Some(synsets) = self.synsets.get_mut(lexname) {
-            return synsets.remove(lexname.to_string(), synset_id.clone());
+            let removed = synsets.remove(lexname.to_string(), synset_id.clone());
+            self.search_index = OnceLock::new();
+            return removed;
         }
         Ok(None)
     }
@@ -435,6 +493,39 @@ impl Lexicon for ReDBLexicon {
         let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
         Ok(table.len()? as usize)
+    }
+
+    /// More efficient implementation: the default trait implementation
+    /// re-scans (and deserializes) every synset in every lexfile on every
+    /// call. This uses a sorted in-memory index, built lazily once on the
+    /// first call, so subsequent lookups are a binary search instead of a
+    /// full scan.
+    fn ssid_by_prefix(&self, prefix : &str, max_results : Option<usize>) -> Result<Vec<String>> {
+        let limit = max_results.unwrap_or(usize::MAX);
+        let (ssids, _) = self.search_index();
+        let start = ssids.partition_point(|id| id.as_str() < prefix);
+        Ok(ssids[start..]
+            .iter()
+            .take_while(|id| id.as_str().starts_with(prefix))
+            .take(limit)
+            .map(|id| id.as_str().to_string())
+            .collect())
+    }
+
+    /// More efficient implementation, see `ssid_by_prefix`.
+    fn ili_by_prefix(&self, prefix : &str, max_results : Option<usize>) -> Result<Vec<(String, SynsetId)>> {
+        let limit = max_results.unwrap_or(usize::MAX);
+        if prefix.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_, ilis) = self.search_index();
+        let start = ilis.partition_point(|(ili, _)| ili.as_str() < prefix);
+        Ok(ilis[start..]
+            .iter()
+            .take_while(|(ili, _)| ili.starts_with(prefix))
+            .take(limit)
+            .cloned()
+            .collect())
     }
 }
 

@@ -78,17 +78,6 @@ h1.en-title {
     flex: 1 1 auto;
 }
 
-.wordnet-search-label {
-    margin: 20px;
-    color: #333;
-}
-
-@media screen and (max-width: 600px) {
-    .wordnet-search-label {
-        display: none;
-    }
-}
-
 @media screen and (max-width: 725px) {
     #logo-img {
         margin-left: auto;

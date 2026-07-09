@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 #[allow(unused_imports)]
 use oewn_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
+use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use std::collections::BTreeSet;
 use thiserror::Error;
@@ -10,6 +11,34 @@ use thiserror::Error;
 enum EweAPIError {
     #[error("Lexicon not available")]
     LexiconUnavailable,
+}
+
+/// What a [`SearchResult`] refers to, so the frontend knows which page to
+/// navigate to when a suggestion is picked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SearchResultKind {
+    Lemma,
+    Synset,
+}
+
+/// A single autocomplete suggestion. `value` is what to look up (a lemma, or
+/// a bare synset id like `00001740-n`); `display` is what to show the user.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub display: String,
+    pub kind: SearchResultKind,
+    pub value: String,
+}
+
+/// Users may search by lemma, by synset id (with or without the `oewn-`
+/// prefix used in the RDF/XML/Turtle exports), or by ILI. Strips a leading
+/// `oewn-`/`OEWN-` so both `00001740-n` and `oewn-00001740-n` match.
+#[allow(dead_code)]
+fn strip_id_prefix(query: &str) -> &str {
+    match query.get(..5) {
+        Some(prefix) if prefix.eq_ignore_ascii_case("oewn-") => &query[5..],
+        _ => query,
+    }
 }
 
 #[get("/api/by_lemma/{lemma}")]
@@ -48,17 +77,40 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
 }
 
 #[get("/api/autocomplete/{query}?{max_results}")]
-pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<String>> {
+pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
     if let Some(lexicon) = crate::LEXICON.get() {
         let mut results = Vec::new();
-        results.extend(lexicon.lemma_by_prefix(&query, Some(max_results))?);
-        //results.extend(lexicon.ili_by_prefix(&query));
-        results.extend(lexicon.ssid_by_prefix(&query, Some(max_results))?);
+
+        for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
+            results.push(SearchResult {
+                display: lemma.clone(),
+                kind: SearchResultKind::Lemma,
+                value: lemma,
+            });
+        }
+
+        // Synset ids may be typed bare ("00001740-n") or with the "oewn-"
+        // prefix used in the RDF/XML/Turtle exports.
+        for ssid in lexicon.ssid_by_prefix(strip_id_prefix(&query), Some(max_results))? {
+            results.push(SearchResult {
+                display: format!("oewn-{}", ssid),
+                kind: SearchResultKind::Synset,
+                value: ssid,
+            });
+        }
+
+        for (ili, ssid) in lexicon.ili_by_prefix(&query, Some(max_results))? {
+            results.push(SearchResult {
+                display: format!("{} ({})", ili, ssid.as_str()),
+                kind: SearchResultKind::Synset,
+                value: ssid.as_str().to_string(),
+            });
+        }
 
         let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
-        results.sort_by(|a, b| match a.to_lowercase().cmp(&b.to_lowercase()) {
-            std::cmp::Ordering::Equal => a.cmp(b).reverse(),
+        results.sort_by(|a, b| match a.display.to_lowercase().cmp(&b.display.to_lowercase()) {
+            std::cmp::Ordering::Equal => a.display.cmp(&b.display).reverse(),
             x => x,
         });
         Ok(results)

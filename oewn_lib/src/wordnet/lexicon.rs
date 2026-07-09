@@ -818,6 +818,32 @@ pub trait Lexicon : Sized {
             .collect())
     }
 
+    /// Get the list of (ILI, synset id) pairs whose ILI starts with a prefix.
+    /// There is no dedicated ILI index, so this does a linear scan over every
+    /// synset, same as `ssid_by_prefix` does over synset ids.
+    fn ili_by_prefix(&self, prefix : &str, max_results : Option<usize>) -> Result<Vec<(String, SynsetId)>> {
+        let limit = max_results.unwrap_or(usize::MAX);
+        if prefix.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut results = Vec::new();
+        'outer: for v in self.synsets_iter()? {
+            let (_, synsets) = v?;
+            for entry in synsets.iter()? {
+                let (id, synset) = entry?;
+                if let Some(ili) = synset.ili.as_ref() {
+                    if ili.as_str().starts_with(prefix) {
+                        results.push((ili.as_str().to_string(), id));
+                        if results.len() >= limit {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(results)
+    }
+
     //#[cfg(test)]
     //fn add_lexfile(&mut self, lexfile : &str) -> Result<()> {
     //    self.synsets_insert(lexfile.to_owned(), Synsets::new());
