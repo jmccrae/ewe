@@ -12,3 +12,4 @@ oewn_lib = { workspace = true }
 lazy_static = "*"
 regex = "*"
 serde_yaml = "*"
+clap = { version = "4.6.1", features = [ "derive" ] }

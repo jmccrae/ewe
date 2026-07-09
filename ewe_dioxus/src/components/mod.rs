@@ -13,3 +13,8 @@ pub use subcat::Subcat;
 
 mod relation;
 pub use relation::Relation;
+
+mod display_options;
+pub use display_options::{
+    provide_display_options, provide_panel_visibility, DisplayOptions, DisplayOptionsButton,
+};

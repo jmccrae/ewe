@@ -11,3 +11,4 @@ deprecations.csv
 Cargo.lock
 ewe_dioxus/wordnet.db
 .vscode
+ewe_dioxus/settings.toml

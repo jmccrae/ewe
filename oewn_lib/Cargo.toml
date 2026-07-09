@@ -10,7 +10,7 @@ lazy_static = "*"
 xml-rs = "*"
 regex = "1"
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
+serde_yaml = "0.9.33"
 void = "1"
 csv = "*"
 sha2 = "*"
