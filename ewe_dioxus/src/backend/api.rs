@@ -13,6 +13,27 @@ enum EweAPIError {
     LexiconUnavailable,
 }
 
+/// The branding fields configurable via `settings.toml` that need to reach
+/// client-rendered pages. Fetched through a server function (rather than
+/// reading `crate::SETTINGS` directly from view code) because `SETTINGS` is
+/// a `Lazy` that can only initialize on the server: touching it from code
+/// that also compiles into the WASM client panics with "Lazy initialization
+/// is only supported with tokio and threads enabled."
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Branding {
+    pub project_name: String,
+    pub footer: String,
+}
+
+#[get("/api/branding")]
+pub async fn get_branding() -> Result<Branding> {
+    let settings = crate::SETTINGS.get();
+    Ok(Branding {
+        project_name: settings.project_name.clone(),
+        footer: settings.footer.clone(),
+    })
+}
+
 /// What a [`SearchResult`] refers to, so the frontend knows which page to
 /// navigate to when a suggestion is picked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

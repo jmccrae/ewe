@@ -1,4 +1,5 @@
 use crate::backend::api::get_synset;
+use crate::backend::senses::get_sense_count;
 use crate::components::{Relation, Subcat};
 use crate::Route;
 use dioxus::prelude::*;
@@ -83,6 +84,14 @@ pub fn Synset(props: SynsetProps) -> Element {
     let synset = use_loader(move || {
         let synset_id = props.synset_id.cloned();
         async move { get_synset(synset_id).await }
+    });
+
+    // A non-zero count means the sense has corpus annotations worth linking to;
+    // fetched separately (rather than baked into `get_synset`) so it stays a cheap,
+    // index-backed lookup that doesn't slow down loading the synset itself.
+    let sense_count = use_loader(move || {
+        let synset_id = props.synset_id.cloned();
+        async move { get_sense_count(synset_id).await }
     });
 
     let mut show_relations = use_signal(|| false);
@@ -599,6 +608,19 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 name: "Vehicle",
                                                 rels: synset.vehicle.clone(),
                                                 props: props.clone()
+                                            }
+                                        },
+                                        if let Ok(count_load) = &sense_count {
+                                            if !count_load.loading() {
+                                                if let Some(count) = Some(*count_load.read()).filter(|c| *c > 0) {
+                                                    div {
+                                                        class: "relation-title",
+                                                        Link {
+                                                            to: Route::BySenses { id: synset.id.as_str().to_string(), page: 0 },
+                                                            "Occurrences ({count})"
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }

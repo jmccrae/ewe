@@ -7,6 +7,12 @@ pub struct EweSettings {
     pub database: String,
     /// The source to load from
     pub wordnet_source: Option<String>,
+    /// The Semcor corpus database file
+    #[serde(default = "default_semcor_database")]
+    pub semcor_database: String,
+    /// The Semcor corpus YAML file to load from
+    #[serde(default)]
+    pub semcor_source: Option<String>,
     /// Path (relative to the working directory) of the logo image, served at `/logo`
     #[serde(default = "default_logo")]
     pub logo: String,
@@ -24,6 +30,10 @@ pub struct EweSettings {
 
 fn default_logo() -> String {
     "assets/english.svg".to_string()
+}
+
+fn default_semcor_database() -> String {
+    "semcor.db".to_string()
 }
 
 fn default_theme() -> String {
@@ -63,6 +73,8 @@ impl EweSettings {
         Self {
             database: "wordnet.db".to_string(),
             wordnet_source: None,
+            semcor_database: default_semcor_database(),
+            semcor_source: None,
             logo: default_logo(),
             project_name: default_project_name(),
             footer: default_footer(),

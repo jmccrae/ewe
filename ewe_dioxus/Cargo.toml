@@ -17,6 +17,7 @@ oxrdf = { version = "0.3.3", optional = true }
 oxrdfio = { version = "0.2.4", optional = true }
 quick-xml = { version = "0.37.5", optional = true }
 percent-encoding = "2.3.2"
+teanga = { git = "https://github.com/TeangaNLP/teanga.rs", branch = "main", features = ["redb"] }
 
 [features]
 default = ["web"]

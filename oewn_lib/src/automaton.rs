@@ -553,7 +553,7 @@ impl<'de> Deserialize<'de> for SenseRef {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ActionWrapper(#[serde(with = "serde_yaml::with::singleton_map")] pub Action);
 
@@ -770,7 +770,12 @@ mod tests {
 
     #[test]
     fn test_serialize() {
-        let test_str = "---\n- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n      - bar\n- delete_synset:\n    synset: last\n    reason: \"Duplicate (#123)\"\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: \"example%1:09:00::\"\n    target: 00001741-n\n    target_sense: \"target%1:10:00::'\"\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
+        // Same `key: value`-per-variant shape as before serde_yaml 0.9 (preserved via
+        // `ActionWrapper`'s `singleton_map`, see below). Whitespace/quoting differs
+        // slightly from the pre-0.9 original because serde_yaml 0.9 swapped its YAML
+        // emitter backend (yaml-rust -> unsafe-libyaml); that formatting isn't
+        // configurable through serde_yaml's public API.
+        let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
         let data = vec![
             Action::AddEntry {
                 synset: SynsetRef::id("00001740-n"),
@@ -838,7 +843,13 @@ mod tests {
             Action::Validate,
         ];
 
-        let gen_str: String = serde_yaml::to_string(&data).unwrap();
+        // Plain `Action` values serialize through serde_yaml's default enum
+        // representation, which (since serde_yaml 0.9) emits YAML `!tag` nodes.
+        // Wrapping in `ActionWrapper` routes through `singleton_map` instead, which
+        // keeps the single-key-mapping style this format (and `ActionWrapper`'s
+        // `Deserialize` side, used in ewe_cli) already relies on.
+        let wrapped: Vec<ActionWrapper> = data.into_iter().map(ActionWrapper).collect();
+        let gen_str: String = serde_yaml::to_string(&wrapped).unwrap();
 
         assert_eq!(test_str, gen_str);
     }

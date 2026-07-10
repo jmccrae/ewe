@@ -533,6 +533,96 @@ mod tests {
     use oewn_lib::wordnet::{Example, MemberSynset, PartOfSpeech, PosKey, SenseRelation, SynsetId};
     use oxrdf::NamedNode;
 
+    /// `MemberSynset` has no public constructor besides `from_synset` (which needs a
+    /// `Lexicon`), so tests build one directly via its (all-public) fields, leaving
+    /// every relation/member list empty except what's under test.
+    fn test_synset(
+        id: SynsetId,
+        lexname: String,
+        definition: Vec<String>,
+        part_of_speech: PartOfSpeech,
+    ) -> MemberSynset {
+        MemberSynset {
+            id,
+            lexname,
+            members: vec![],
+            definition,
+            example: vec![],
+            ili: None,
+            wikidata: vec![],
+            source: None,
+            part_of_speech,
+            also: vec![],
+            attribute: vec![],
+            causes: vec![],
+            domain_region: vec![],
+            domain_topic: vec![],
+            exemplifies: vec![],
+            entails: vec![],
+            hypernym: vec![],
+            instance_hypernym: vec![],
+            mero_location: vec![],
+            mero_member: vec![],
+            mero_part: vec![],
+            mero_portion: vec![],
+            mero_substance: vec![],
+            meronym: vec![],
+            similar: vec![],
+            feminine: vec![],
+            masculine: vec![],
+            other: vec![],
+            hyponym: vec![],
+            is_caused_by: vec![],
+            has_domain_region: vec![],
+            has_domain_topic: vec![],
+            is_exemplified_by: vec![],
+            is_entailed_by: vec![],
+            instance_hyponym: vec![],
+            holo_location: vec![],
+            holo_member: vec![],
+            holo_part: vec![],
+            holo_portion: vec![],
+            holo_substance: vec![],
+            holonym: vec![],
+            antonym: vec![],
+            participle: vec![],
+            is_participle_of: vec![],
+            pertainym: vec![],
+            is_pertainym_of: vec![],
+            derivation: vec![],
+            exemplifies_sense: vec![],
+            is_exemplified_by_sense: vec![],
+            agent: vec![],
+            is_agent_of: vec![],
+            material: vec![],
+            is_material_of: vec![],
+            event: vec![],
+            is_event_of: vec![],
+            instrument: vec![],
+            is_instrument_of: vec![],
+            location: vec![],
+            is_location_of: vec![],
+            by_means_of: vec![],
+            is_by_means_of: vec![],
+            undergoer: vec![],
+            is_undergoer_of: vec![],
+            property: vec![],
+            is_property_of: vec![],
+            result: vec![],
+            is_result_of: vec![],
+            state: vec![],
+            is_state_of: vec![],
+            uses: vec![],
+            is_used_by: vec![],
+            destination: vec![],
+            is_destination_of: vec![],
+            body_part: vec![],
+            is_body_part_of: vec![],
+            vehicle: vec![],
+            is_vehicle_of: vec![],
+        }
+    }
+
     #[test]
     fn test_negotiate_html() {
         let mut headers = HeaderMap::new();
@@ -651,10 +741,9 @@ mod tests {
     #[test]
     fn test_gen_synset_rdf_basic() {
         let synset_id = SynsetId::new_owned("12345-n".to_string());
-        let synset = MemberSynset::new(
+        let synset = test_synset(
             synset_id,
             "noun.test".to_string(),
-            vec![],
             vec!["test definition".to_string()],
             PartOfSpeech::n,
         );
@@ -677,10 +766,9 @@ mod tests {
     #[test]
     fn test_gen_synset_turtle_basic() {
         let synset_id = SynsetId::new_owned("12345-n".to_string());
-        let synset = MemberSynset::new(
+        let synset = test_synset(
             synset_id,
             "noun.test".to_string(),
-            vec![],
             vec!["test definition".to_string()],
             PartOfSpeech::n,
         );

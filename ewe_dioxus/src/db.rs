@@ -3,7 +3,10 @@ use oewn_lib::progress::NullProgress;
 use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
 use std::path::Path;
 use std::time::SystemTime;
+use teanga::disk_corpus::RedbDb;
+use teanga::{Corpus, DiskCorpus};
 
+use crate::backend::senses::OEWN_KEY_LAYER;
 use crate::settings::EweSettings;
 
 /// Open the lexicon database at `settings.database`. If it doesn't exist yet, or any
@@ -45,4 +48,51 @@ fn latest_source_mtime(source: &str) -> Result<SystemTime, Box<dyn std::error::E
         latest = latest.max(mtime);
     }
     Ok(latest)
+}
+
+/// Open the Semcor corpus database at `settings.semcor_database`. If it doesn't exist yet,
+/// or `settings.semcor_source` has been modified more recently than the database, the
+/// database is rebuilt from source first. Either way, a search index on `OEWN_KEY_LAYER`
+/// is guaranteed to exist by the time this returns, so sense lookups don't have to scan
+/// every document.
+pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
+    let mut corpus = if let Some(source) = &settings.semcor_source {
+        if is_file_stale(&settings.semcor_database, source)? {
+            eprintln!(
+                "Semcor source at {} is newer than {}, rebuilding database",
+                source, settings.semcor_database
+            );
+            if Path::new(&settings.semcor_database).exists() {
+                std::fs::remove_file(&settings.semcor_database)?;
+            }
+            let mut corpus = DiskCorpus::<RedbDb>::new(&settings.semcor_database)?;
+            let file = std::fs::File::open(source)?;
+            teanga::read_yaml(file, &mut corpus)?;
+            corpus.commit()?;
+            corpus
+        } else {
+            DiskCorpus::<RedbDb>::new(&settings.semcor_database)?
+        }
+    } else {
+        DiskCorpus::<RedbDb>::new(&settings.semcor_database)?
+    };
+
+    // The index is persisted in the database file, so this is a no-op (just an
+    // index-file lookup) on every startup after the first.
+    if !corpus.has_index(OEWN_KEY_LAYER) {
+        eprintln!("Building search index on '{}' layer", OEWN_KEY_LAYER);
+        corpus.create_index(OEWN_KEY_LAYER)?;
+        corpus.commit()?;
+    }
+
+    Ok(corpus)
+}
+
+/// True if the database at `database` doesn't exist, or if `source` is newer than it.
+fn is_file_stale(database: &str, source: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
+        Ok(mtime) => mtime,
+        Err(_) => return Ok(true),
+    };
+    Ok(Path::new(source).metadata()?.modified()? > db_mtime)
 }

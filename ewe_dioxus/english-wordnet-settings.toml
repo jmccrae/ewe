@@ -1,5 +1,7 @@
 database = "wordnet.db"
 wordnet_source = "/home/john-mccrae/p/globalwordnet/english-wordnet/src/yaml/"
+semcor_database = "semcor.db"
+semcor_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
 logo = "assets/english.svg"
 theme = "assets/styling/theme.css"
 project_name = "Open English Wordnet"

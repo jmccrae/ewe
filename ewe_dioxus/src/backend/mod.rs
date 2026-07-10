@@ -12,3 +12,5 @@ pub mod xml;
 
 #[cfg(feature="server")]
 pub mod static_files;
+
+pub mod senses;

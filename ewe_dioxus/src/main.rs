@@ -5,7 +5,11 @@ use dioxus::prelude::*;
 use dioxus_fullstack::Lazy;
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
-use views::{ByLemma, BySynset, Home, WNLayout};
+#[cfg(feature = "server")]
+use teanga::disk_corpus::RedbDb;
+#[cfg(feature = "server")]
+use teanga::DiskCorpus;
+use views::{ByLemma, BySenses, BySynset, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -40,6 +44,9 @@ enum Route {
 
         #[route("/view/synset/:synset")]
         BySynset { synset: String },
+
+        #[route("/view/senses/:id?:page")]
+        BySenses { id: String, page: usize },
 }
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.
@@ -69,6 +76,17 @@ static LEXICON: Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
     }
 });
 
+#[cfg(feature = "server")]
+static CORPUS: Lazy<Option<DiskCorpus<RedbDb>>> = Lazy::new(|| async move {
+    match db::open_corpus(SETTINGS.get()) {
+        Ok(corpus) => dioxus::Ok(Some(corpus)),
+        Err(e) => {
+            eprintln!("Failed to open semcor corpus: {}", e);
+            dioxus::Ok(None)
+        }
+    }
+});
+
 fn main() {
     // The `launch` function is the main entry point for a dioxus app. It takes a component and renders it with the platform feature
     // you have enabled
@@ -90,6 +108,9 @@ fn main() {
 #[cfg(feature = "server")]
 #[component]
 fn App() -> Element {
+    // Eagerly load the Semcor corpus alongside the lexicon. It's supplementary
+    // (used for showing usages), so a failure is logged but doesn't block the app.
+    CORPUS.get();
     match LEXICON.get() {
         Some(_) => App2(),
         None => {
