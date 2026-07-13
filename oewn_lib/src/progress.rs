@@ -60,3 +60,52 @@ impl Progress for NullProgress {
     fn finish(&mut self) {}
     fn set_percent_mode(&mut self, _percent_mode: bool) {}
 }
+
+/// A `Progress` implementation that logs progress to stderr with `eprintln!`.
+/// Reports at most once per percentage point, so it stays readable even when
+/// `total` is very large (e.g. loading NameNet, which has far more source
+/// files than the base WordNet).
+pub struct LoggingProgress {
+    current: u64,
+    total: u64,
+    last_logged_percent: u64,
+}
+
+impl LoggingProgress {
+    pub fn new() -> Self {
+        LoggingProgress { current: 0, total: 0, last_logged_percent: 0 }
+    }
+}
+
+impl Default for LoggingProgress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Progress for LoggingProgress {
+    fn start(&mut self, total : u64) {
+        self.current = 0;
+        self.total = total;
+        self.last_logged_percent = 0;
+        eprintln!("Loading: 0/{} files", total);
+    }
+
+    fn inc(&mut self, amount : u64) {
+        self.current += amount;
+        if self.total == 0 {
+            return;
+        }
+        let percent = (self.current * 100 / self.total).min(100);
+        if percent > self.last_logged_percent || self.current >= self.total {
+            self.last_logged_percent = percent;
+            eprintln!("Loading: {}/{} files ({}%)", self.current, self.total, percent);
+        }
+    }
+
+    fn finish(&mut self) {
+        eprintln!("Loading: done ({} files)", self.current);
+    }
+
+    fn set_percent_mode(&mut self, _percent_mode: bool) {}
+}

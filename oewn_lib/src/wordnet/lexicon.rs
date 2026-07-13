@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs::File;
 use crate::rels::{SenseRelType,SynsetRelType};
 use crate::wordnet::util::LexiconSaveError;
@@ -11,6 +11,22 @@ use std::borrow::Cow;
 use std::result;
 
 pub type Result<T> = result::Result<T, LexiconError>;
+
+/// Recursively list all files under `folder`, descending into subdirectories.
+/// Used so that source trees which split files across subdirectories (e.g.
+/// large WordNet extensions like NameNet) are loaded in full.
+fn list_files_recursive(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(folder)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            files.extend(list_files_recursive(&path)?);
+        } else {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
 
 pub trait Lexicon : Sized {
     type E : Entries + Clone;
@@ -63,20 +79,18 @@ pub trait Lexicon : Sized {
         } else {
             eprintln!("No deprecation file");
         }
-        let folder_files = fs::read_dir(folder)
+        let folder_files = list_files_recursive(folder.as_ref())
             .map_err(|e| WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
-        bar.start(75);
+        bar.start(folder_files.len() as u64);
         for file in folder_files {
-            let file = file.map_err(|e|
-                WordNetYAMLIOError::Io(format!("Could not list directory: {}", e)))?;
-            let file_name = file.path().file_name().
+            let file_name = file.file_name().
                 and_then(|x| x.to_str()).
                 map(|x| x.to_string()).
                 unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
                 let key = file_name[8..9].chars().into_iter().next().expect("Unreachable as file_name must be at least 10 chars long");
                 let entries2 : BTEntries =
-                    serde_yaml::from_reader(File::open(file.path())
+                    serde_yaml::from_reader(File::open(&file)
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
                         .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
                 for (lemma, map) in entries2.0.iter() {
@@ -91,7 +105,7 @@ pub trait Lexicon : Sized {
                 self.entries_insert(key, entries2)?;
             } else if file_name.ends_with(".yaml") && file_name != "frames.yaml" {
                 let synsets2 : BTSynsets = serde_yaml::from_reader(
-                    File::open(file.path())
+                    File::open(&file)
                         .map_err(|e| WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e)))?)
                         .map_err(|e| WordNetYAMLIOError::Serde(format!("Error reading {} due to {}", file_name, e)))?;
                 let lexname = file_name[0..file_name.len()-5].to_string();

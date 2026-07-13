@@ -1,5 +1,5 @@
 /// Opening (and, if necessary, rebuilding) the ReDB lexicon database.
-use oewn_lib::progress::NullProgress;
+use oewn_lib::progress::LoggingProgress;
 use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
 use std::path::Path;
 use std::time::SystemTime;
@@ -20,7 +20,7 @@ pub fn open_lexicon(settings: &EweSettings) -> Result<ReDBLexicon, Box<dyn std::
                 source, settings.database
             );
             let lexicon = ReDBLexicon::create(&settings.database)?;
-            return Ok(lexicon.load(source, &mut NullProgress)?);
+            return Ok(lexicon.load(source, &mut LoggingProgress::new())?);
         }
     }
     Ok(ReDBLexicon::open(&settings.database)?)
@@ -36,18 +36,33 @@ fn is_stale(database: &str, source: &str) -> Result<bool, Box<dyn std::error::Er
     Ok(latest_source_mtime(source)? > db_mtime)
 }
 
-/// The most recent modification time among the source YAML files and the deprecations file.
+/// The most recent modification time among the source YAML files (searched recursively,
+/// since large sources like NameNet split files across subdirectories) and the
+/// deprecations file.
 fn latest_source_mtime(source: &str) -> Result<SystemTime, Box<dyn std::error::Error>> {
     let mut latest = SystemTime::UNIX_EPOCH;
-    for entry in std::fs::read_dir(source)? {
-        let mtime = entry?.metadata()?.modified()?;
-        latest = latest.max(mtime);
-    }
+    latest_mtime_recursive(Path::new(source), &mut latest)?;
     let dep_file = Path::new(source).join("../deprecations.csv");
     if let Ok(mtime) = dep_file.metadata().and_then(|m| m.modified()) {
         latest = latest.max(mtime);
     }
     Ok(latest)
+}
+
+/// Recurse into `dir` and its subdirectories, updating `latest` with the newest
+/// modification time found among all files.
+fn latest_mtime_recursive(dir: &Path, latest: &mut SystemTime) -> Result<(), Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            latest_mtime_recursive(&path, latest)?;
+        } else {
+            let mtime = entry.metadata()?.modified()?;
+            *latest = (*latest).max(mtime);
+        }
+    }
+    Ok(())
 }
 
 /// Open the Semcor corpus database at `settings.semcor_database`. If it doesn't exist yet,
