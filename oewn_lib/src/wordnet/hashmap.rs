@@ -61,7 +61,13 @@ impl Lexicon for LexiconHashMapBackend {
         Ok(self.synsets.get(lexname).map(|x| Cow::Borrowed(x)))
     }
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()> {
-        self.synsets.insert(lexname, synsets);
+        // `load` may call this once per batch for a single lexfile (see
+        // `load_synsets_streaming`), so this must merge into any synsets
+        // already registered under `lexname` rather than replacing them.
+        for id in synsets.0.keys() {
+            self.synset_id_to_lexfile.insert(id.clone(), lexname.clone());
+        }
+        self.synsets.entry(lexname).or_insert_with(BTSynsets::new).0.extend(synsets.0);
         Ok(())
     }
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, BTSynsets>)>>> {

@@ -211,10 +211,33 @@ impl Lexicon for ReDBLexicon {
         Ok(self.synsets.get(lexname).map(Cow::Borrowed))
     }
     fn synsets_insert(&mut self, lexname : String, synsets : BTSynsets) -> Result<()> {
-        for synset in synsets.into_iter()? {
-            let (id, synset) = synset?;
-            self.insert_synset(lexname.clone(), id, synset)?;
+        // Writes the whole batch (synsets + their lexfile mapping) under a
+        // single lock/table-open rather than one lock+open_table per record,
+        // since `load` may call this once per bounded batch (see
+        // `load_synsets_streaming`) rather than once per (potentially huge)
+        // file, and per-call overhead would otherwise dominate.
+        //
+        // Note: unlike `insert_synset`, this does *not* maintain the `links_to`
+        // reverse-index incrementally (that would be O(n^2) for any target with
+        // many incoming links, e.g. a common hypernym shared by thousands of
+        // synsets in one lexfile). `Lexicon::load` rebuilds `links_to` from
+        // scratch in one pass after all files are loaded, so incremental
+        // maintenance here would just be wasted work. Also mirrors
+        // `entries_insert`, which likewise skips per-item link bookkeeping.
+        {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let mut synsets_table = txn.open_table(SYNSETS_TABLE)?;
+            let mut lexfile_table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+            for synset in synsets.into_iter()? {
+                let (id, synset) = synset?;
+                lexfile_table.insert(id.to_string(), lexname.clone())?;
+                synsets_table.insert((lexname.clone(), id.to_string()), serialize_synset(&synset)?)?;
+            }
         }
+        self.synsets.entry(lexname.clone())
+            .or_insert_with(|| ReDBSynsets::new(self.txn_manager.clone(), lexname.clone()));
+        self.search_index = OnceLock::new();
         Ok(())
     }
     fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
