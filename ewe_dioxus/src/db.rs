@@ -9,12 +9,12 @@ use teanga::{Corpus, DiskCorpus};
 use crate::backend::senses::OEWN_KEY_LAYER;
 use crate::settings::EweSettings;
 
-/// Open the lexicon database at `settings.database`. If it doesn't exist yet, or any
-/// file in `settings.wordnet_source` has been modified more recently than the database,
-/// the database is rebuilt from source first.
+/// Open the lexicon database at `settings.database`. If it doesn't exist yet, or (unless
+/// `settings.disable_auto_reload` is set) any file in `settings.wordnet_source` has been
+/// modified more recently than the database, the database is rebuilt from source first.
 pub fn open_lexicon(settings: &EweSettings) -> Result<ReDBLexicon, Box<dyn std::error::Error>> {
     if let Some(source) = &settings.wordnet_source {
-        if is_stale(&settings.database, source)? {
+        if is_stale(&settings.database, source, settings.disable_auto_reload)? {
             eprintln!(
                 "Wordnet source at {} is newer than {}, rebuilding database",
                 source, settings.database
@@ -26,13 +26,16 @@ pub fn open_lexicon(settings: &EweSettings) -> Result<ReDBLexicon, Box<dyn std::
     Ok(ReDBLexicon::open(&settings.database)?)
 }
 
-/// True if the database at `database` doesn't exist, or if any file under `source`
-/// (including the sibling `deprecations.csv`) is newer than it.
-fn is_stale(database: &str, source: &str) -> Result<bool, Box<dyn std::error::Error>> {
+/// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
+/// and any file under `source` (including the sibling `deprecations.csv`) is newer than it.
+fn is_stale(database: &str, source: &str, disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
     let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
         Ok(mtime) => mtime,
         Err(_) => return Ok(true),
     };
+    if disable_auto_reload {
+        return Ok(false);
+    }
     Ok(latest_source_mtime(source)? > db_mtime)
 }
 
@@ -66,13 +69,13 @@ fn latest_mtime_recursive(dir: &Path, latest: &mut SystemTime) -> Result<(), Box
 }
 
 /// Open the Semcor corpus database at `settings.semcor_database`. If it doesn't exist yet,
-/// or `settings.semcor_source` has been modified more recently than the database, the
-/// database is rebuilt from source first. Either way, a search index on `OEWN_KEY_LAYER`
-/// is guaranteed to exist by the time this returns, so sense lookups don't have to scan
-/// every document.
+/// or (unless `settings.disable_auto_reload` is set) `settings.semcor_source` has been
+/// modified more recently than the database, the database is rebuilt from source first.
+/// Either way, a search index on `OEWN_KEY_LAYER` is guaranteed to exist by the time this
+/// returns, so sense lookups don't have to scan every document.
 pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
     let mut corpus = if let Some(source) = &settings.semcor_source {
-        if is_file_stale(&settings.semcor_database, source)? {
+        if is_file_stale(&settings.semcor_database, source, settings.disable_auto_reload)? {
             eprintln!(
                 "Semcor source at {} is newer than {}, rebuilding database",
                 source, settings.semcor_database
@@ -103,11 +106,15 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
     Ok(corpus)
 }
 
-/// True if the database at `database` doesn't exist, or if `source` is newer than it.
-fn is_file_stale(database: &str, source: &str) -> Result<bool, Box<dyn std::error::Error>> {
+/// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
+/// and `source` is newer than it.
+fn is_file_stale(database: &str, source: &str, disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
     let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
         Ok(mtime) => mtime,
         Err(_) => return Ok(true),
     };
+    if disable_auto_reload {
+        return Ok(false);
+    }
     Ok(Path::new(source).metadata()?.modified()? > db_mtime)
 }

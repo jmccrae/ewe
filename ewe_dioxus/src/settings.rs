@@ -26,6 +26,12 @@ pub struct EweSettings {
     /// (colours and fonts), served at `/theme.css`
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// If true, skip checking whether `wordnet_source`/`semcor_source` are newer
+    /// than the existing databases on startup, so the databases are never
+    /// automatically rebuilt (they're still built if missing). Useful to avoid
+    /// a slow source scan on startup with very large sources such as NameNet.
+    #[serde(default)]
+    pub disable_auto_reload: bool,
 }
 
 fn default_logo() -> String {
@@ -79,6 +85,7 @@ impl EweSettings {
             project_name: default_project_name(),
             footer: default_footer(),
             theme: default_theme(),
+            disable_auto_reload: false,
         }
     }
 
