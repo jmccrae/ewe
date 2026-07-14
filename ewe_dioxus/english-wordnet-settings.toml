@@ -5,6 +5,14 @@ semcor_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
 logo = "assets/english.svg"
 theme = "assets/styling/theme.css"
 project_name = "Open English Wordnet"
+intro = """
+<p>
+    The Open English Wordnet is a free, open-source lexical database of English,
+    linking words into sets of synonyms called synsets, each with a short
+    definition. Search for a word above to explore its meanings, synonyms,
+    and how it relates to other words.
+</p>
+"""
 footer = """
 <p class="footer1">
     Open English Wordnet is derived from <a href="http://wordnet.princeton.edu/">Princeton WordNet</a>

@@ -19,6 +19,9 @@ pub struct EweSettings {
     /// The project name shown in the header
     #[serde(default = "default_project_name")]
     pub project_name: String,
+    /// Introduction HTML shown on the home page, above the search box
+    #[serde(default = "default_intro")]
+    pub intro: String,
     /// Footer HTML, rendered as-is beneath the main content
     #[serde(default = "default_footer")]
     pub footer: String,
@@ -48,6 +51,14 @@ fn default_theme() -> String {
 
 fn default_project_name() -> String {
     "Open English Wordnet".to_string()
+}
+
+fn default_intro() -> String {
+    r#"<p>
+        Search for a word above to see its meanings, synonyms, and how it
+        relates to other words in the Open English Wordnet.
+    </p>"#
+        .to_string()
 }
 
 fn default_footer() -> String {
@@ -83,6 +94,7 @@ impl EweSettings {
             semcor_source: None,
             logo: default_logo(),
             project_name: default_project_name(),
+            intro: default_intro(),
             footer: default_footer(),
             theme: default_theme(),
             disable_auto_reload: false,
