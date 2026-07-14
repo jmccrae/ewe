@@ -42,7 +42,13 @@ pub fn WNLayout() -> Element {
             Outlet::<Route> {}
             footer {
                 class: "footer",
-                dangerous_inner_html: "{footer}"
+                div {
+                    dangerous_inner_html: "{footer}"
+                }
+                p {
+                    class: "api-docs-link",
+                    a { href: "/api/docs", "JSON API documentation" }
+                }
             }
         }
     }
