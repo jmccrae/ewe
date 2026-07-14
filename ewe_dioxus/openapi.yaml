@@ -32,50 +32,14 @@ x-common-schemas:
       $ref: '#/components/schemas/SenseRelation'
 
 paths:
-  /api/branding:
-    get:
-      operationId: getBranding
-      summary: Site branding
-      description: Project name and footer HTML configured for this deployment.
-      responses:
-        '200':
-          description: Branding info
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Branding'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/by_lemma/{lemma}:
-    get:
-      operationId: getSynsetIdsByLemma
-      summary: Synset ids for a lemma
-      description: >
-        Every synset id that has a sense for the exact given lemma (an
-        entry, across every part of speech).
-      parameters:
-        - $ref: '#/components/parameters/Lemma'
-      responses:
-        '200':
-          description: Matching synset ids (possibly empty)
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SynsetId'
-        default:
-          $ref: '#/components/responses/Error'
-
   /api/lemma/{lemma}:
     get:
       operationId: getSynsetsByLemma
       summary: Full synset records for a lemma
       description: >
-        Like `/api/by_lemma/{lemma}`, but returns the full synset record
-        (definitions, relations, other members, ...) for each matching
-        synset instead of just its id.
+        Returns the full synset record (definitions, relations, other
+        members, ...) for every synset that has a sense for the exact
+        given lemma (across every part of speech).
       parameters:
         - $ref: '#/components/parameters/Lemma'
       responses:
@@ -87,6 +51,45 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/MemberSynset'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/synset/{id}:
+    get:
+      operationId: getSynset
+      summary: Full synset record by id
+      parameters:
+        - $ref: '#/components/parameters/SynsetIdParam'
+      responses:
+        '200':
+          description: The synset, or null if no synset has that id
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/MemberSynset'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/by_lemma/{lemma}:
+    get:
+      operationId: getSynsetIdsByLemma
+      summary: Synset ids for a lemma
+      description: >
+        Like `/api/lemma/{lemma}`, but returns just the matching synset ids
+        instead of the full synset record for each.
+      parameters:
+        - $ref: '#/components/parameters/Lemma'
+      responses:
+        '200':
+          description: Matching synset ids (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SynsetId'
         default:
           $ref: '#/components/responses/Error'
 
@@ -122,24 +125,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SearchResult'
-        default:
-          $ref: '#/components/responses/Error'
-
-  /api/synset/{id}:
-    get:
-      operationId: getSynset
-      summary: Full synset record by id
-      parameters:
-        - $ref: '#/components/parameters/SynsetIdParam'
-      responses:
-        '200':
-          description: The synset, or null if no synset has that id
-          content:
-            application/json:
-              schema:
-                nullable: true
-                allOf:
-                  - $ref: '#/components/schemas/MemberSynset'
         default:
           $ref: '#/components/responses/Error'
 
@@ -268,16 +253,6 @@ components:
       type: string
       enum: [n, v, a, r, s]
       description: noun/verb/adjective/adverb/satellite-adjective.
-
-    Branding:
-      type: object
-      required: [project_name, footer]
-      properties:
-        project_name:
-          type: string
-        footer:
-          type: string
-          description: Raw footer HTML for this deployment.
 
     SearchResultKind:
       type: string
