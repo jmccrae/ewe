@@ -29,6 +29,11 @@
 .home-search {
     max-width: 640px;
     margin: 10px auto 0;
+    /* .home centers everything by default, but that shouldn't cascade into
+       the search widget's own content - the input placeholder and, more
+       visibly, the autocomplete dropdown's suggestion list stay left-aligned
+       like any normal dropdown. */
+    text-align: left;
 }
 
 .home-search .wordnet-input {
