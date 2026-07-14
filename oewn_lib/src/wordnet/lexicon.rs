@@ -991,6 +991,42 @@ pub trait Lexicon: Sized {
             .sum()
     }
 
+    /// Number of senses in the dictionary
+    fn n_senses(&self) -> Result<usize> {
+        let mut total = 0;
+        for v in self.entries_iter()? {
+            let (_, entries) = v?;
+            for e in entries.entries()? {
+                let (_, _, entry) = e?;
+                total += entry.sense.len();
+            }
+        }
+        Ok(total)
+    }
+
+    /// A uniformly random synset id, or `None` if the dictionary is empty.
+    /// Backends may override this with something cheaper than a full scan
+    /// (see `ReDBLexicon`).
+    fn random_synset_id(&self) -> Result<Option<SynsetId>> {
+        let n = self.n_synsets()?;
+        if n == 0 {
+            return Ok(None);
+        }
+        let target = rand::random_range(0..n);
+        let mut count = 0;
+        for lexfile in self.synsets_iter()? {
+            let (_, synsets) = lexfile?;
+            for entry in synsets.iter()? {
+                let (id, _) = entry?;
+                if count == target {
+                    return Ok(Some(id));
+                }
+                count += 1;
+            }
+        }
+        Ok(None)
+    }
+
     /// Get the synset augmented with the member data
     #[cfg(feature = "redb")]
     fn get_member_synset(&self, id: &SynsetId) -> Result<MemberSynset> {

@@ -1,0 +1,85 @@
+.home {
+    text-align: center;
+}
+
+/* OED-style centered hero treatment, only applied to the logo/title when
+   they're rendered as part of the home page (see WNLayout) - every other
+   page keeps the normal left-aligned header. */
+#logo.home-logo {
+    justify-content: center;
+}
+
+#logo.home-logo #logo-title {
+    width: 450px;
+    height: auto;
+}
+
+/* main.css's global rule centers #logo-title's text below 725px, meant for
+   whenever the logo/title wrap onto separate rows. On the wider home-logo
+   title (450px) that wrap doesn't actually happen until ~590px, so between
+   590px and 725px the title text was jumping to centered while still
+   sitting on the same row as the image - overridden back to left until
+   the title has actually wrapped underneath the logo. */
+@media screen and (min-width: 591px) {
+    #logo.home-logo #logo-title {
+        text-align: left;
+    }
+}
+
+.home-search {
+    max-width: 640px;
+    margin: 10px auto 0;
+    /* .home centers everything by default, but that shouldn't cascade into
+       the search widget's own content - the input placeholder and, more
+       visibly, the autocomplete dropdown's suggestion list stay left-aligned
+       like any normal dropdown. */
+    text-align: left;
+}
+
+.home-search .wordnet-input {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.home-tagline {
+    margin: 10px 15px 0;
+    font-family: var(--font-heading);
+    font-weight: 400;
+    color: var(--color-primary);
+}
+
+.home-intro {
+    max-width: 640px;
+    margin: 8px auto 20px;
+    padding: 0 15px;
+    color: var(--color-text-muted);
+}
+
+.home-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin: 0 15px 30px;
+}
+
+.home-stat {
+    display: inline-block;
+    padding: 10px 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 0;
+    background: var(--color-white);
+    color: var(--color-text-muted);
+    font-size: 0.9em;
+}
+
+button.home-stat {
+    cursor: pointer;
+    color: var(--color-primary);
+    font: inherit;
+}
+
+button.home-stat:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}

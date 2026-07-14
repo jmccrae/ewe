@@ -34,6 +34,44 @@ pub async fn get_branding() -> Result<Branding> {
     })
 }
 
+/// Everything the home page needs in one round trip: the configurable
+/// tagline/intro text plus live counts, so the page can show e.g.
+/// "142,384 synsets".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HomeInfo {
+    pub tagline: String,
+    pub intro: String,
+    pub n_synsets: usize,
+    pub n_entries: usize,
+}
+
+#[get("/api/home")]
+pub async fn get_home_info() -> Result<HomeInfo> {
+    let settings = crate::SETTINGS.get();
+    let tagline = settings.tagline.clone();
+    let intro = settings.intro.clone();
+    if let Some(lexicon) = crate::LEXICON.get() {
+        Ok(HomeInfo {
+            tagline,
+            intro,
+            n_synsets: lexicon.n_synsets()?,
+            n_entries: lexicon.n_entries()?,
+        })
+    } else {
+        Err(EweAPIError::LexiconUnavailable.into())
+    }
+}
+
+/// A uniformly random synset id, for the home page's "Random synset" button.
+#[get("/api/random_synset")]
+pub async fn get_random_synset() -> Result<Option<SynsetId>> {
+    if let Some(lexicon) = crate::LEXICON.get() {
+        Ok(lexicon.random_synset_id()?)
+    } else {
+        Err(EweAPIError::LexiconUnavailable.into())
+    }
+}
+
 /// What a [`SearchResult`] refers to, so the frontend knows which page to
 /// navigate to when a suggestion is picked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

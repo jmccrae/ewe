@@ -468,6 +468,41 @@ impl Lexicon for ReDBLexicon {
         Ok(table.len()? as usize)
     }
 
+    /// Number of senses in the dictionary. `SENSE_ID_TO_LEMMA_POS` has
+    /// exactly one entry per sense, so its length is the answer directly
+    /// -- no need for the default trait implementation's full entries scan.
+    fn n_senses(&self) -> Result<usize> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        let table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
+        Ok(table.len()? as usize)
+    }
+
+    /// More efficient implementation: the default trait implementation
+    /// deserializes every synset up to the chosen index. `SYNSET_ID_TO_LEXFILE`
+    /// is keyed by (and holds an entry for) every synset id, so picking a
+    /// random position in it only has to walk plain string keys, not
+    /// deserialize `Synset`s.
+    fn random_synset_id(&self) -> Result<Option<SynsetId>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        let table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+        let n = table.len()? as usize;
+        if n == 0 {
+            return Ok(None);
+        }
+        let target = rand::random_range(0..n);
+        let nth = table.iter()?.nth(target);
+        let result = match nth {
+            Some(kv) => {
+                let (key, _) = kv?;
+                Some(SynsetId::new_owned(key.value()))
+            }
+            None => None,
+        };
+        Ok(result)
+    }
+
     /// More efficient implementation: the default trait implementation
     /// re-scans (and deserializes) every synset in every lexfile on every
     /// call. `SYNSET_ID_TO_LEXFILE` is already keyed by (and holds an entry
