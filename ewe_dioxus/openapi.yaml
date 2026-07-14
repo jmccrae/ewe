@@ -143,7 +143,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
-  /api/senses/{id}/concordance/{page}:
+  /api/senses/{id}/concordance:
     get:
       operationId: getSenseConcordance
       summary: Corpus concordance for a synset
@@ -154,7 +154,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SynsetIdParam'
         - name: page
-          in: path
+          in: query
           required: true
           schema:
             type: integer
