@@ -128,18 +128,8 @@ async fn all_concordance_lines(id: SynsetId) -> Result<Vec<ConcordanceLine>> {
 
 /// `page` is 0-indexed; out-of-range pages clamp to the last page rather
 /// than erroring.
-///
-/// Takes `page` as a path segment rather than a `?page` query parameter as
-/// a simple design choice (this is always required, not optional, so a
-/// path segment fits it better than a query parameter would).
-///
-/// Note: an earlier version of this comment blamed a `?{page}`-style query
-/// parameter failing on an upstream dioxus-fullstack bug. That was a
-/// misdiagnosis: `?{name}` (braces) is parsed as a query *catch-all*, the
-/// same as a `?:name` prefix, not as a regular named parameter - see
-/// `autocomplete`'s route in `api.rs` for the real fix (drop the braces).
 #[allow(dead_code)]
-#[get("/api/senses/{id}/concordance/{page}")]
+#[get("/api/senses/{id}/concordance?page")]
 pub async fn get_sense_concordance(id: SynsetId, page: usize) -> Result<ConcordancePage> {
     let all = all_concordance_lines(id).await?;
     let total = all.len();
