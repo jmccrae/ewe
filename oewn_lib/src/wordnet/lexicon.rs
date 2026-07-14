@@ -1,5 +1,6 @@
 use crate::progress::Progress;
 use crate::rels::{SenseRelType, SynsetRelType};
+use crate::sense_keys::get_sense_key;
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::util::LexiconSaveError;
 use crate::wordnet::*;
@@ -267,6 +268,12 @@ pub trait Lexicon: Sized {
         }
         self.set_sense_links_to(sense_links_to)?;
         let mut links_to = HashMap::new();
+        // NameNet-derived sources don't guarantee every synset member has a
+        // corresponding entries-*.yaml entry, unlike hand-curated WordNet
+        // sources. Collect the ones missing an entry here (while already
+        // scanning every synset for links_to) so they can be backfilled
+        // below once the immutable scan below is done.
+        let mut missing_members = Vec::new();
         for ss in self.synsets_iter()? {
             let (_, ss) = ss?;
             for s in ss.iter()? {
@@ -277,9 +284,48 @@ pub trait Lexicon: Sized {
                         .or_insert_with(Vec::new)
                         .push((rel_type, ssid.clone()));
                 }
+                for member in s.members.iter() {
+                    if self.pos_for_entry_synset(member, &ssid)?.is_none() {
+                        missing_members.push((member.clone(), ssid.clone()));
+                    }
+                }
             }
         }
         self.set_links_to(links_to)?;
+
+        // Backfill entries for the members collected above. Re-check each
+        // one fresh (rather than trusting the snapshot taken above) since
+        // backfilling one missing member can change the answer for another
+        // missing member that shares the same lemma (e.g. whether an entry
+        // for that lemma/pos now already exists).
+        for (lemma, synset_id) in missing_members {
+            let synset = match self.synset_by_id(&synset_id)? {
+                Some(s) => s.into_owned(),
+                None => continue,
+            };
+            let existing = self.entry_by_lemma_with_pos(&lemma)?;
+            let already_present = existing
+                .iter()
+                .any(|(_, e)| e.sense.iter().any(|sense| sense.synset == synset_id));
+            if already_present {
+                continue;
+            }
+            // Entries file conventions file satellite adjectives (`s`) under
+            // the same `a` bucket as regular adjectives.
+            let pos_key = if synset.part_of_speech == PartOfSpeech::s {
+                PosKey::new("a".to_string())
+            } else {
+                synset.part_of_speech.to_pos_key()
+            };
+            let sense_id = get_sense_key(&self, &lemma, None, &synset, &synset_id)?;
+            let sense = Sense::new(sense_id, synset_id.clone());
+            if existing.iter().any(|(p, _)| *p == pos_key) {
+                self.insert_sense(lemma, pos_key, sense)?;
+            } else {
+                self.insert_entry(lemma.clone(), pos_key.clone(), Entry::new())?;
+                self.insert_sense(lemma, pos_key, sense)?;
+            }
+        }
         bar.finish();
         Ok(self)
     }
