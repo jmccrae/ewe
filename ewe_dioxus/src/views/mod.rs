@@ -12,3 +12,6 @@ pub use by_synset::BySynset;
 
 mod by_senses;
 pub use by_senses::BySenses;
+
+mod downloads;
+pub use downloads::Downloads;

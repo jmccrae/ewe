@@ -13,3 +13,5 @@ ewe_dioxus/wordnet.db
 ewe_dioxus/semcor.db
 .vscode
 ewe_dioxus/settings.toml
+ewe_dioxus/downloads.toml
+ewe_dioxus/downloads/
