@@ -16,4 +16,6 @@ pub mod static_files;
 #[cfg(feature="server")]
 pub mod openapi;
 
+pub mod downloads;
+
 pub mod senses;

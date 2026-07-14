@@ -9,7 +9,7 @@ use oewn_lib::wordnet::ReDBLexicon;
 use teanga::disk_corpus::RedbDb;
 #[cfg(feature = "server")]
 use teanga::DiskCorpus;
-use views::{ByLemma, BySenses, BySynset, Home, WNLayout};
+use views::{ByLemma, BySenses, BySynset, Downloads, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -20,10 +20,13 @@ mod components;
 mod db;
 /// The settings file
 mod settings;
+/// Downloads page configuration (`downloads.toml`)
+mod downloads_config;
 /// Define a views module that contains the UI for all Layouts and Routes for our app.
 mod views;
 
 use settings::EweSettings;
+use downloads_config::DownloadsConfig;
 
 /// The Route enum is used to define the structure of internal routes in our app. All route enums need to derive
 /// the [`Routable`] trait, which provides the necessary methods for the router to work.
@@ -47,6 +50,9 @@ enum Route {
 
         #[route("/view/senses/:id?:page")]
         BySenses { id: String, page: usize },
+
+        #[route("/downloads")]
+        Downloads {},
 }
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.
@@ -63,6 +69,18 @@ static SETTINGS: Lazy<settings::EweSettings> = Lazy::new(|| async move {
         EweSettings::default()
     };
     dioxus::Ok(settings)
+});
+
+/// Downloads are entirely optional: if `downloads.toml` doesn't exist, the
+/// Downloads page just has nothing to list rather than erroring.
+#[allow(dead_code)]
+static DOWNLOADS: Lazy<DownloadsConfig> = Lazy::new(|| async move {
+    let downloads = if std::path::Path::new("downloads.toml").exists() {
+        DownloadsConfig::load("downloads.toml").expect("Failed to load downloads.toml")
+    } else {
+        DownloadsConfig::default()
+    };
+    dioxus::Ok(downloads)
 });
 
 #[cfg(feature = "server")]

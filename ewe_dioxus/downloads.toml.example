@@ -1,0 +1,29 @@
+# Example configuration for the Downloads page. Copy to `downloads.toml`
+# (loaded automatically if present; the page is simply empty if it's
+# absent) and place the listed files under `downloads_dir`.
+#
+# Only filenames listed below are ever served at /downloads/{filename} -
+# anything else in downloads_dir is ignored, so there's no need to worry
+# about accidentally exposing other files placed in that directory.
+
+downloads_dir = "downloads"
+
+[[release]]
+version = "2025"
+date = "2025-12-31"
+description = "Open English Wordnet 2025 edition"
+files = [
+    { filename = "english-wordnet-2025.zip", format = "YAML source", description = "Full source in YAML format" },
+    { filename = "english-wordnet-2025.xml.gz", format = "WN-LMF XML", description = "WordNet LMF XML dump (gzipped)" },
+    { filename = "english-wordnet-2025.ttl.gz", format = "RDF/Turtle", description = "RDF Turtle dump (gzipped)" },
+]
+
+[[release]]
+version = "2024"
+date = "2024-11-01"
+description = "Open English Wordnet 2024 edition"
+files = [
+    { filename = "english-wordnet-2024.zip", format = "YAML source", description = "Full source in YAML format" },
+    { filename = "english-wordnet-2024.xml.gz", format = "WN-LMF XML", description = "WordNet LMF XML dump (gzipped)" },
+    { filename = "english-wordnet-2024.ttl.gz", format = "RDF/Turtle", description = "RDF Turtle dump (gzipped)" },
+]
