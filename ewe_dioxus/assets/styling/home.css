@@ -10,8 +10,20 @@
 }
 
 #logo.home-logo #logo-title {
-    width: 400px;
+    width: 450px;
     height: auto;
+}
+
+/* main.css's global rule centers #logo-title's text below 725px, meant for
+   whenever the logo/title wrap onto separate rows. On the wider home-logo
+   title (450px) that wrap doesn't actually happen until ~590px, so between
+   590px and 725px the title text was jumping to centered while still
+   sitting on the same row as the image - overridden back to left until
+   the title has actually wrapped underneath the logo. */
+@media screen and (min-width: 591px) {
+    #logo.home-logo #logo-title {
+        text-align: left;
+    }
 }
 
 .home-search {
