@@ -97,7 +97,7 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     }
 }
 
-#[get("/api/autocomplete/{query}?{max_results}")]
+#[get("/api/autocomplete/{query}?max_results")]
 pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
     if let Some(lexicon) = crate::LEXICON.get() {
