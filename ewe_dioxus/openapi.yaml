@@ -1,0 +1,530 @@
+openapi: 3.0.3
+info:
+  title: Open English WordNet API
+  description: >
+    JSON API for querying the Open English WordNet (and NameNet-derived
+    extensions), served by this project. Also serves this WordNet at
+    https://en-word.net/.
+
+    See https://github.com/jmccrae/ewe/issues/4 and
+    https://github.com/globalwordnet/english-wordnet/issues/1110 for
+    background.
+  version: "1.0.0"
+servers:
+  - url: /
+    description: Same origin as this documentation page
+
+# Reusable fragments, referenced below via YAML aliases so the ~70 relation
+# fields on MemberSynset (each just "array of SynsetId" or "array of
+# SenseRelation") don't have to be repeated in full. Resolved by the YAML
+# parser before any OpenAPI tooling sees the document, so the effective spec
+# is identical to writing each one out by hand. Kept under an "x-" key
+# because the OpenAPI root object only permits vendor-extension
+# ("x-"-prefixed) additional properties.
+x-common-schemas:
+  synsetIdArray: &synsetIdArray
+    type: array
+    items:
+      $ref: '#/components/schemas/SynsetId'
+  senseRelationArray: &senseRelationArray
+    type: array
+    items:
+      $ref: '#/components/schemas/SenseRelation'
+
+paths:
+  /api/branding:
+    get:
+      operationId: getBranding
+      summary: Site branding
+      description: Project name and footer HTML configured for this deployment.
+      responses:
+        '200':
+          description: Branding info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Branding'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/by_lemma/{lemma}:
+    get:
+      operationId: getSynsetIdsByLemma
+      summary: Synset ids for a lemma
+      description: >
+        Every synset id that has a sense for the exact given lemma (an
+        entry, across every part of speech).
+      parameters:
+        - $ref: '#/components/parameters/Lemma'
+      responses:
+        '200':
+          description: Matching synset ids (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SynsetId'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/lemma/{lemma}:
+    get:
+      operationId: getSynsetsByLemma
+      summary: Full synset records for a lemma
+      description: >
+        Like `/api/by_lemma/{lemma}`, but returns the full synset record
+        (definitions, relations, other members, ...) for each matching
+        synset instead of just its id.
+      parameters:
+        - $ref: '#/components/parameters/Lemma'
+      responses:
+        '200':
+          description: Matching synsets (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemberSynset'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/autocomplete/{query}:
+    get:
+      operationId: autocomplete
+      summary: Search-as-you-type suggestions
+      description: >
+        Matches `query` as a prefix against lemmas, bare synset ids (with or
+        without the `oewn-` prefix used in the RDF/XML/Turtle exports), and
+        ILIs. Results are sorted case-insensitively by display text.
+      parameters:
+        - name: query
+          in: path
+          required: true
+          schema:
+            type: string
+          example: hors
+        - name: max_results
+          in: query
+          required: false
+          description: >
+            Maximum results per matched category (lemma/synset id/ILI).
+            Defaults to 100. Known issue: passing this parameter currently
+            returns HTTP 500 ("cannot deserialize primitive at the top
+            level") - a dioxus-fullstack 0.7.9 bug deserializing a
+            single-field Option<T> query struct, the same one worked around
+            for the `page` parameter on the `/api/senses/{id}/concordance`
+            endpoint below. Omit it and rely on the default until fixed.
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+      responses:
+        '200':
+          description: Suggestions (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchResult'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/synset/{id}:
+    get:
+      operationId: getSynset
+      summary: Full synset record by id
+      parameters:
+        - $ref: '#/components/parameters/SynsetIdParam'
+      responses:
+        '200':
+          description: The synset, or null if no synset has that id
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/MemberSynset'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/senses/{id}/concordance/{page}:
+    get:
+      operationId: getSenseConcordance
+      summary: Corpus concordance for a synset
+      description: >
+        One page of keyword-in-context (KWIC) rows from the Semcor corpus
+        for every sense tagged with this synset id. `page` is 0-indexed and
+        clamps to the last page rather than erroring if out of range.
+      parameters:
+        - $ref: '#/components/parameters/SynsetIdParam'
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: One page of concordance lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConcordancePage'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/senses/{id}/count:
+    get:
+      operationId: getSenseCount
+      summary: Approximate corpus occurrence count for a synset
+      description: >
+        A fast, index-backed, approximate count of documents containing at
+        least one occurrence of this synset id. Intended for "is this sense
+        worth linking to?" checks, not as an exact occurrence count - it can
+        under-count (see `/api/senses/{id}` description) but never
+        over-counts.
+      parameters:
+        - $ref: '#/components/parameters/SynsetIdParam'
+      responses:
+        '200':
+          description: Approximate document count
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: int64
+                minimum: 0
+        default:
+          $ref: '#/components/responses/Error'
+
+  /api/senses/{id}:
+    get:
+      operationId: getSenseDocuments
+      summary: Corpus document ids for a synset
+      description: >
+        Sorted, deduplicated ids of every Semcor document containing at
+        least one token tagged with this synset id. Documents where the
+        only occurrence is packed into a `;`-joined multi-key token are not
+        found by the underlying index, so this can under-count.
+      parameters:
+        - $ref: '#/components/parameters/SynsetIdParam'
+      responses:
+        '200':
+          description: Matching document ids (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        default:
+          $ref: '#/components/responses/Error'
+
+components:
+  parameters:
+    Lemma:
+      name: lemma
+      in: path
+      required: true
+      schema:
+        type: string
+      example: horse
+    SynsetIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SynsetId'
+
+  responses:
+    Error:
+      description: >
+        Every failure mode in this API currently maps to HTTP 500 (a
+        server function's Err(...) is always encoded as status 500, no
+        matter what the schema's `code` field says).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorPayload'
+
+  schemas:
+    SynsetId:
+      type: string
+      description: A WordNet synset id, e.g. "00001740-n" (8 digits, hyphen, single-letter part of speech).
+      example: "00001740-n"
+    SenseId:
+      type: string
+      description: A WordNet sense key, "lemma%ss_type:lex_filenum:lex_id:head_word:head_id".
+      example: "entity%1:03:00::"
+    ILIID:
+      type: string
+      description: An Interlingual Index id.
+      example: "i35545"
+    PosKey:
+      type: string
+      description: >
+        A part-of-speech bucket key, normally a single letter (n/v/a/r/s);
+        may have a numeric suffix (e.g. "n1") for a synset's non-first
+        homograph entry.
+      example: "n"
+    PartOfSpeech:
+      type: string
+      enum: [n, v, a, r, s]
+      description: noun/verb/adjective/adverb/satellite-adjective.
+
+    Branding:
+      type: object
+      required: [project_name, footer]
+      properties:
+        project_name:
+          type: string
+        footer:
+          type: string
+          description: Raw footer HTML for this deployment.
+
+    SearchResultKind:
+      type: string
+      enum: [Lemma, Synset]
+      description: What `SearchResult.value` refers to, so a client knows which lookup endpoint to call next.
+    SearchResult:
+      type: object
+      required: [display, kind, value]
+      properties:
+        display:
+          type: string
+          description: Text to show the user.
+        kind:
+          $ref: '#/components/schemas/SearchResultKind'
+        value:
+          type: string
+          description: What to look up - a lemma, or a bare synset id - depending on `kind`.
+
+    Pronunciation:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+        variety:
+          type: string
+          description: Absent if not specified (e.g. a regional variety label).
+
+    MemberSense:
+      type: object
+      required: [id]
+      properties:
+        id:
+          $ref: '#/components/schemas/SenseId'
+        subcat:
+          type: array
+          items:
+            type: string
+
+    Member:
+      type: object
+      required: [lemma, sense, poskey]
+      properties:
+        lemma:
+          type: string
+        sense:
+          $ref: '#/components/schemas/MemberSense'
+        form:
+          type: array
+          items:
+            type: string
+          description: Alternative inflected forms.
+        pronunciation:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pronunciation'
+        poskey:
+          $ref: '#/components/schemas/PosKey'
+        entry_no:
+          type: integer
+          description: Absent for a synset's first (or only) homograph entry for this lemma/pos.
+
+    SenseRelation:
+      type: object
+      required: [target_synset, source_lemma, target_lemma, target_poskey]
+      description: A sense-to-sense relation, expanded to include the lemma text on both ends.
+      properties:
+        target_synset:
+          $ref: '#/components/schemas/SynsetId'
+        source_lemma:
+          type: string
+        target_lemma:
+          type: string
+        target_poskey:
+          $ref: '#/components/schemas/PosKey'
+
+    Example:
+      description: >
+        An example sentence. A bare JSON string if it has no attributed
+        source, or an object with `source` and `text` if it does.
+      oneOf:
+        - type: string
+        - type: object
+          required: [source, text]
+          properties:
+            source:
+              type: string
+            text:
+              type: string
+
+    ErrorPayload:
+      type: object
+      required: [message, code]
+      properties:
+        message:
+          type: string
+          description: Human-readable error description.
+        code:
+          type: integer
+          description: Currently always 500; not authoritative (the actual HTTP status is always 500 too).
+
+    MemberSynset:
+      type: object
+      description: >
+        A full synset record. Every relation field below (both the
+        SynsetId-relation ones like `hypernym`/`hyponym`, and the
+        SenseRelation-based ones like `antonym`) is omitted entirely
+        (absent, not null/empty-array) when there are no relations of that
+        kind for this synset.
+      required: [id, lexname, partOfSpeech]
+      properties:
+        id:
+          $ref: '#/components/schemas/SynsetId'
+        lexname:
+          type: string
+          description: The lexicographer file this synset belongs to, e.g. "noun.Tops". Empty string if unknown.
+        partOfSpeech:
+          $ref: '#/components/schemas/PartOfSpeech'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        definition:
+          type: array
+          items:
+            type: string
+        example:
+          type: array
+          items:
+            $ref: '#/components/schemas/Example'
+        ili:
+          $ref: '#/components/schemas/ILIID'
+        wikidata:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+
+        # --- SynsetId-valued relations ---
+        also: *synsetIdArray
+        attribute: *synsetIdArray
+        causes: *synsetIdArray
+        domain_region: *synsetIdArray
+        domain_topic: *synsetIdArray
+        exemplifies: *synsetIdArray
+        entails: *synsetIdArray
+        hypernym: *synsetIdArray
+        instance_hypernym: *synsetIdArray
+        mero_location: *synsetIdArray
+        mero_member: *synsetIdArray
+        mero_part: *synsetIdArray
+        mero_portion: *synsetIdArray
+        mero_substance: *synsetIdArray
+        meronym: *synsetIdArray
+        similar: *synsetIdArray
+        feminine: *synsetIdArray
+        masculine: *synsetIdArray
+        other: *synsetIdArray
+        hyponym: *synsetIdArray
+        is_caused_by: *synsetIdArray
+        has_domain_region: *synsetIdArray
+        has_domain_topic: *synsetIdArray
+        is_exemplified_by: *synsetIdArray
+        is_entailed_by: *synsetIdArray
+        instance_hyponym: *synsetIdArray
+        holo_location: *synsetIdArray
+        holo_member: *synsetIdArray
+        holo_part: *synsetIdArray
+        holo_portion: *synsetIdArray
+        holo_substance: *synsetIdArray
+        holonym: *synsetIdArray
+
+        # --- SenseRelation-valued relations ---
+        antonym: *senseRelationArray
+        participle: *senseRelationArray
+        is_participle_of: *senseRelationArray
+        pertainym: *senseRelationArray
+        is_pertainym_of: *senseRelationArray
+        derivation: *senseRelationArray
+        exemplifies_sense: *senseRelationArray
+        is_exemplified_by_sense: *senseRelationArray
+        agent: *senseRelationArray
+        is_agent_of: *senseRelationArray
+        material: *senseRelationArray
+        is_material_of: *senseRelationArray
+        event: *senseRelationArray
+        is_event_of: *senseRelationArray
+        instrument: *senseRelationArray
+        is_instrument_of: *senseRelationArray
+        location: *senseRelationArray
+        is_location_of: *senseRelationArray
+        by_means_of: *senseRelationArray
+        is_by_means_of: *senseRelationArray
+        undergoer: *senseRelationArray
+        is_undergoer_of: *senseRelationArray
+        property: *senseRelationArray
+        is_property_of: *senseRelationArray
+        result: *senseRelationArray
+        is_result_of: *senseRelationArray
+        state: *senseRelationArray
+        is_state_of: *senseRelationArray
+        uses: *senseRelationArray
+        is_used_by: *senseRelationArray
+        destination: *senseRelationArray
+        is_destination_of: *senseRelationArray
+        body_part: *senseRelationArray
+        is_body_part_of: *senseRelationArray
+        vehicle: *senseRelationArray
+        is_vehicle_of: *senseRelationArray
+
+    ConcordanceLine:
+      type: object
+      required: [doc_id, left, target, right]
+      properties:
+        doc_id:
+          type: string
+        left:
+          type: string
+          description: Context words before the target, joined by spaces.
+        target:
+          type: string
+          description: The tagged token itself.
+        right:
+          type: string
+          description: Context words after the target, joined by spaces.
+
+    ConcordancePage:
+      type: object
+      required: [lines, page, total_pages, total]
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConcordanceLine'
+        page:
+          type: integer
+          description: 0-indexed.
+        total_pages:
+          type: integer
+        total:
+          type: integer
+          description: Total matching lines across all pages.
