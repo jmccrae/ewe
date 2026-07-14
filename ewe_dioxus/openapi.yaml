@@ -108,14 +108,7 @@ paths:
         - name: max_results
           in: query
           required: false
-          description: >
-            Maximum results per matched category (lemma/synset id/ILI).
-            Defaults to 100. Known issue: passing this parameter currently
-            returns HTTP 500 ("cannot deserialize primitive at the top
-            level") - a dioxus-fullstack 0.7.9 bug deserializing a
-            single-field Option<T> query struct, the same one worked around
-            for the `page` parameter on the `/api/senses/{id}/concordance`
-            endpoint below. Omit it and rely on the default until fixed.
+          description: Maximum results per matched category (lemma/synset id/ILI). Defaults to 100.
           schema:
             type: integer
             minimum: 1
