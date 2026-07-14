@@ -28,32 +28,36 @@ pub fn Home() -> Element {
         document::Style { href: CSS },
         div {
             class: "home",
+            div {
+                class: "home-search",
+                WordNet {},
+            }
             match &info {
                 Ok(loaded) if !loaded.loading() => {
                     let info = loaded.read();
                     rsx! {
+                        h2 { class: "home-tagline", "{info.tagline}" }
                         div {
                             class: "home-intro",
                             dangerous_inner_html: "{info.intro}"
                         }
                         div {
-                            class: "home-stats",
-                            span { "{format_count(info.n_synsets)} synsets" }
-                            span { "{format_count(info.n_senses)} senses" }
+                            class: "home-actions",
+                            span { class: "home-stat", "{format_count(info.n_synsets)} synsets" }
+                            span { class: "home-stat", "{format_count(info.n_entries)} entries" }
+                            button {
+                                class: "home-stat home-random",
+                                onclick: move |_| async move {
+                                    if let Ok(Some(id)) = get_random_synset().await {
+                                        navigator.push(Route::BySynset { synset: id.as_str().to_string() });
+                                    }
+                                },
+                                "Random synset ›"
+                            }
                         }
                     }
                 }
                 _ => rsx! {},
-            }
-            WordNet {},
-            button {
-                class: "home-random-button",
-                onclick: move |_| async move {
-                    if let Ok(Some(id)) = get_random_synset().await {
-                        navigator.push(Route::BySynset { synset: id.as_str().to_string() });
-                    }
-                },
-                "Take me to a random synset"
             }
         }
     }

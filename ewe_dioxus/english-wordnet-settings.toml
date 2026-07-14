@@ -5,6 +5,7 @@ semcor_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
 logo = "assets/english.svg"
 theme = "assets/styling/theme.css"
 project_name = "Open English Wordnet"
+tagline = "The free, open lexical database of English"
 intro = """
 <p>
     The Open English Wordnet is a free, open-source lexical database of English,

@@ -35,22 +35,27 @@ pub async fn get_branding() -> Result<Branding> {
 }
 
 /// Everything the home page needs in one round trip: the configurable
-/// intro text plus live counts, so the page can show e.g. "142,384 synsets".
+/// tagline/intro text plus live counts, so the page can show e.g.
+/// "142,384 synsets".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HomeInfo {
+    pub tagline: String,
     pub intro: String,
     pub n_synsets: usize,
-    pub n_senses: usize,
+    pub n_entries: usize,
 }
 
 #[get("/api/home")]
 pub async fn get_home_info() -> Result<HomeInfo> {
-    let intro = crate::SETTINGS.get().intro.clone();
+    let settings = crate::SETTINGS.get();
+    let tagline = settings.tagline.clone();
+    let intro = settings.intro.clone();
     if let Some(lexicon) = crate::LEXICON.get() {
         Ok(HomeInfo {
+            tagline,
             intro,
             n_synsets: lexicon.n_synsets()?,
-            n_senses: lexicon.n_senses()?,
+            n_entries: lexicon.n_entries()?,
         })
     } else {
         Err(EweAPIError::LexiconUnavailable.into())

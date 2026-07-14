@@ -20,11 +20,16 @@ pub fn WNLayout() -> Element {
         _ => (String::new(), String::new()),
     };
 
+    // The logo/title is centered on the home page (OED-style hero treatment)
+    // but stays left-aligned everywhere else, like a normal site header.
+    let is_home = matches!(use_route::<Route>(), Route::Home {});
+
     rsx! {
         div {
             class: "container",
             div {
                 id: "logo",
+                class: if is_home { "home-logo" },
                 span {
                     id: "logo-img",
                     img {
