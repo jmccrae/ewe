@@ -113,7 +113,16 @@ fn main() {
 
     #[cfg(feature = "server")]
     dioxus::serve(|| async move {
-        let router = dioxus::server::router(App);
+        // Registered as a plain axum route, not a `#[get(...)]` server
+        // function: server functions get their successful responses
+        // rewritten into a 302-redirect-to-Referer by dioxus-server for any
+        // request that looks like a real browser navigation (see the doc
+        // comment on `backend::downloads::download_file`), which broke
+        // clicking a download link.
+        let router = dioxus::server::router(App).route(
+            "/downloads/{filename}",
+            dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
+        );
 
         Ok(router)
     });

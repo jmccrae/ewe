@@ -2,6 +2,8 @@
 //! files it lists (`/downloads/{filename}`).
 
 use crate::dioxus_fullstack::{body::Body, http::Response};
+#[cfg(feature = "server")]
+use crate::dioxus_fullstack::axum::extract::Path;
 use dioxus::prelude::*;
 
 /// A `DownloadFile` plus its size on disk, computed fresh on every request
@@ -50,8 +52,22 @@ pub async fn get_downloads() -> Result<Vec<DownloadReleaseInfo>> {
         .collect())
 }
 
-#[get("/downloads/{filename}")]
-pub async fn download_file(filename: String) -> Result<Response<Body>> {
+/// A plain axum handler (not a `#[get(...)]` dioxus server function),
+/// registered directly on the router in `main.rs`.
+///
+/// Server functions go through `dioxus-server`'s response post-processing,
+/// which - for any successful response to a request that looks like a real
+/// browser navigation (`Accept: text/html` plus a `Referer` header, as any
+/// plain `<a href>` click sends) and doesn't already set its own `Location`
+/// header - overwrites the status to 302 and redirects back to the
+/// Referer (see `dioxus-server-0.7.9/src/serverfn.rs`; it's meant for
+/// progressive-enhancement `<form>` posts, but applies to any server
+/// function response). That's exactly what a file-download link needs to
+/// *not* happen: clicking it was silently getting redirected back to
+/// `/downloads` instead of downloading. A plain axum route bypasses that
+/// post-processing entirely.
+#[cfg(feature = "server")]
+pub async fn download_file(Path(filename): Path<String>) -> Response<Body> {
     let config = crate::DOWNLOADS.get();
 
     // Whitelist check: only ever serve a filename that's explicitly listed
@@ -63,31 +79,43 @@ pub async fn download_file(filename: String) -> Result<Response<Body>> {
         .flat_map(|release| release.files.iter())
         .any(|file| file.filename == filename);
     if !known {
-        return Ok(Response::builder()
+        return Response::builder()
             .status(404)
             .body(Body::from(format!("No such download: {}", filename)))
-            .unwrap());
+            .unwrap();
     }
 
     let path = std::path::Path::new(&config.downloads_dir).join(&filename);
     match std::fs::read(&path) {
-        Ok(bytes) => Ok(Response::builder()
+        Ok(bytes) => Response::builder()
             .header("Content-Type", content_type(&filename))
             .header(
                 "Content-Disposition",
                 format!("attachment; filename=\"{}\"", filename),
             )
             .body(Body::from(bytes))
-            .unwrap()),
-        Err(e) => Ok(Response::builder()
+            .unwrap(),
+        Err(e) => Response::builder()
             .status(404)
             .body(Body::from(format!(
                 "File not found at {}: {}",
                 path.display(),
                 e
             )))
-            .unwrap()),
+            .unwrap(),
     }
+}
+
+/// Previous releases of the site served downloads at `/static/{filename}`
+/// rather than `/downloads/{filename}`; keep old links (bookmarks,
+/// external references) working with a permanent redirect.
+#[get("/static/{filename}")]
+pub async fn static_redirect(filename: String) -> Result<Response<Body>> {
+    Ok(Response::builder()
+        .status(301)
+        .header("Location", format!("/downloads/{}", filename))
+        .body(Body::empty())
+        .unwrap())
 }
 
 #[cfg(feature = "server")]
