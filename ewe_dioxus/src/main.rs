@@ -119,13 +119,57 @@ fn main() {
         // request that looks like a real browser navigation (see the doc
         // comment on `backend::downloads::download_file`), which broke
         // clicking a download link.
-        let router = dioxus::server::router(App).route(
-            "/downloads/{filename}",
-            dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
-        );
+        let router = dioxus::server::router(App)
+            .route(
+                "/downloads/{filename}",
+                dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
+            )
+            .layer(dioxus_fullstack::axum::middleware::from_fn(
+                strip_referer_from_export_links,
+            ));
 
         Ok(router)
     });
+}
+
+/// Every plain `<a href>` link that points straight at a `#[get(...)]`
+/// server function with no `Location` header hits the same dioxus-server
+/// bug: the "Download As: JSON | RDF/XML | Turtle | XML" links on a
+/// synset/lemma page (see `components::download_links::DownloadLinks`,
+/// `backend::api`/`backend::rdf`/`backend::xml`), and the footer's "JSON API
+/// documentation" link (`views::wn_layout`, `backend::openapi::api_docs`).
+/// Clicking one is a real `<a href>` navigation, which sends
+/// `Accept: text/html` plus a `Referer` header - exactly the combination
+/// dioxus-server's server-function post-processing treats as a
+/// progressive-enhancement `<form>` post, silently rewriting the (correct)
+/// 200 response into a 302 back to the Referer (the same root cause as
+/// `backend::downloads::download_file`, see its doc comment). None of these
+/// routes are ever posted to by a `<form>`, so stripping the Referer before
+/// it reaches the server function disables that post-processing without
+/// having to pull each handler out of the server-function machinery (unlike
+/// `download_file`, `backend::api::get_synset` is also called directly,
+/// isomorphically, from `components::synset` and `views::by_senses`, so it
+/// has to stay a real server function).
+#[cfg(feature = "server")]
+async fn strip_referer_from_export_links(
+    mut req: dioxus_fullstack::axum::extract::Request,
+    next: dioxus_fullstack::axum::middleware::Next,
+) -> dioxus_fullstack::axum::response::Response {
+    let path = req.uri().path();
+    let is_export_link = path == "/api/docs"
+        || path.starts_with("/api/synset/")
+        || path.starts_with("/api/lemma/")
+        || path.starts_with("/rdf/synset/")
+        || path.starts_with("/rdf/lemma/")
+        || path.starts_with("/ttl/synset/")
+        || path.starts_with("/ttl/lemma/")
+        || path.starts_with("/xml/synset/")
+        || path.starts_with("/xml/lemma/");
+    if is_export_link {
+        req.headers_mut()
+            .remove(dioxus_fullstack::http::header::REFERER);
+    }
+    next.run(req).await
 }
 
 /// App is the main component of our app. Components are the building blocks of dioxus apps. Each component is a function
