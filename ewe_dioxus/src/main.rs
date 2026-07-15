@@ -132,10 +132,13 @@ fn main() {
     });
 }
 
-/// The "Download As: JSON | RDF/XML | Turtle | XML" links on a synset/lemma
-/// page (see `components::download_links::DownloadLinks`) point straight at
-/// `#[get(...)]` server functions in `backend::api`/`backend::rdf`/
-/// `backend::xml`. Clicking one is a real `<a href>` navigation, which sends
+/// Every plain `<a href>` link that points straight at a `#[get(...)]`
+/// server function with no `Location` header hits the same dioxus-server
+/// bug: the "Download As: JSON | RDF/XML | Turtle | XML" links on a
+/// synset/lemma page (see `components::download_links::DownloadLinks`,
+/// `backend::api`/`backend::rdf`/`backend::xml`), and the footer's "JSON API
+/// documentation" link (`views::wn_layout`, `backend::openapi::api_docs`).
+/// Clicking one is a real `<a href>` navigation, which sends
 /// `Accept: text/html` plus a `Referer` header - exactly the combination
 /// dioxus-server's server-function post-processing treats as a
 /// progressive-enhancement `<form>` post, silently rewriting the (correct)
@@ -153,7 +156,8 @@ async fn strip_referer_from_export_links(
     next: dioxus_fullstack::axum::middleware::Next,
 ) -> dioxus_fullstack::axum::response::Response {
     let path = req.uri().path();
-    let is_export_link = path.starts_with("/api/synset/")
+    let is_export_link = path == "/api/docs"
+        || path.starts_with("/api/synset/")
         || path.starts_with("/api/lemma/")
         || path.starts_with("/rdf/synset/")
         || path.starts_with("/rdf/lemma/")
