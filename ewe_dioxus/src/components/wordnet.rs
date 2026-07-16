@@ -13,6 +13,19 @@ pub fn WordNet() -> Element {
     let mut suggestions = use_action(move |query| async move {
         autocomplete(query, None).await
     });
+    // `suggestions.value()` reverts to `None` for the duration of every
+    // in-flight call (see `use_action`), so rendering the dropdown directly
+    // from it blanked the whole list on every keystroke while the next
+    // request was pending, then snapped it back in once the response
+    // landed - visible as a flicker while typing. Keeping the last
+    // successful list here and only replacing it once a new one actually
+    // arrives keeps the dropdown populated in between.
+    let mut visible_suggestions = use_signal(Vec::<SearchResult>::new);
+    use_effect(move || {
+        if let Some(Ok(list)) = suggestions.value() {
+            visible_suggestions.set(list.cloned());
+        }
+    });
 
     let update_lemma = move |e: FormEvent| async move {
         lemma.set(e.value().to_string());
@@ -38,10 +51,7 @@ pub fn WordNet() -> Element {
     };
 
     let onkeydown = move |e: KeyboardEvent| {
-        let Some(Ok(current)) = suggestions.value() else {
-            return;
-        };
-        let current = current.cloned();
+        let current = visible_suggestions.read().clone();
         if current.is_empty() {
             return;
         }
@@ -81,31 +91,18 @@ pub fn WordNet() -> Element {
                     if *show_suggestions.read() {
                         ul {
                             class: "suggestions",
-                            match suggestions.value() {
-                                Some(Ok(suggestions)) => {
-                                    rsx! {
-                                        for (i, s) in suggestions.cloned().into_iter().enumerate() {
-                                            li {
-                                                key: "{s.display}",
-                                                class: if i == selected() { "selected" },
-                                                onmousedown: {
-                                                    let s = s.clone();
-                                                    move |_| go_to(s.clone())
-                                                },
-                                                "{s.display}"
-                                            }
-
-                                        }
-                                    }
-                                },
-                                Some(Err(_e)) => {
-                                    rsx! {
-                                        div { "Failed to load suggestions" }
-                                    }
-                                },
-                                None => {
-                                    rsx! {
-
+                            if let Some(Err(_e)) = suggestions.value() {
+                                div { "Failed to load suggestions" }
+                            } else {
+                                for (i, s) in visible_suggestions.read().iter().cloned().enumerate() {
+                                    li {
+                                        key: "{s.display}",
+                                        class: if i == selected() { "selected" },
+                                        onmousedown: {
+                                            let s = s.clone();
+                                            move |_| go_to(s.clone())
+                                        },
+                                        "{s.display}"
                                     }
                                 }
                             }
