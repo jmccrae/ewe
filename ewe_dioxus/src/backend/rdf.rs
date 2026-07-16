@@ -12,8 +12,30 @@ use oxrdfio::{RdfFormat, RdfSerializer, WriterQuadSerializer};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::collections::BTreeSet;
 
+/// Legacy WordNet ids come prefixed with the dataset name - `oewn-` for
+/// this project ("Open English WordNet"), or `ewn-` from when it was called
+/// just "English WordNet" - e.g. `oewn-00001740-n`, whereas every route in
+/// this app (`/synset/{id}`, `/api/synset/{id}`, etc.) takes the bare id,
+/// e.g. `00001740-n`. Returns `None` if `id` carries neither prefix.
+fn strip_synset_id_prefix(id: &str) -> Option<&str> {
+    id.strip_prefix("oewn-").or_else(|| id.strip_prefix("ewn-"))
+}
+
+/// Legacy synset lookup paths: `/id/{id}` and `/synset/{id}` where `id`
+/// still carries an `oewn-`/`ewn-` prefix (see [`strip_synset_id_prefix`]).
+/// Both permanently redirect to the canonical, unprefixed `/synset/{id}`,
+/// which then does the normal content negotiation.
+#[get("/id/{id}")]
+pub async fn synset_id_alias(id: String) -> Result<Response<Body>> {
+    let bare_id = strip_synset_id_prefix(&id).unwrap_or(&id);
+    Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response())
+}
+
 #[get("/synset/{id}", headers : HeaderMap)]
 pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
+    if let Some(bare_id) = strip_synset_id_prefix(&id) {
+        return Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response());
+    }
     let content_type = negotiate(headers);
     let response = match content_type {
         ContentType::HTML => Redirect::to(&format!("/view/synset/{}", id)).into_response(),
@@ -621,6 +643,21 @@ mod tests {
             vehicle: vec![],
             is_vehicle_of: vec![],
         }
+    }
+
+    #[test]
+    fn test_strip_synset_id_prefix_oewn() {
+        assert_eq!(strip_synset_id_prefix("oewn-00001740-n"), Some("00001740-n"));
+    }
+
+    #[test]
+    fn test_strip_synset_id_prefix_ewn() {
+        assert_eq!(strip_synset_id_prefix("ewn-00001740-n"), Some("00001740-n"));
+    }
+
+    #[test]
+    fn test_strip_synset_id_prefix_none() {
+        assert_eq!(strip_synset_id_prefix("00001740-n"), None);
     }
 
     #[test]
