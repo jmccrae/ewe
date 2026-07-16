@@ -46,11 +46,17 @@ pub struct ReDBLexicon {
 }
 
 impl ReDBLexicon {
-    /// Load an existing database from disk
-    pub fn open<P: AsRef<Path>>(path : P) -> Result<ReDBLexicon> {
+    /// Load an existing database from disk. `cache_size_bytes` bounds redb's
+    /// in-memory page cache, which otherwise defaults to 1GiB regardless of
+    /// how large the database file actually is.
+    pub fn open<P: AsRef<Path>>(path : P, cache_size_bytes: usize) -> Result<ReDBLexicon> {
         // create database
         //
-        let db = Arc::new(Database::open(path)?);
+        let db = Arc::new(
+            Database::builder()
+                .set_cache_size(cache_size_bytes)
+                .open(path)?,
+        );
         let txn_manager = Arc::new(Mutex::new(TransactionManager::new(db.clone())));
         // Intialize entries as '0' and 'a'..'z'
         //
@@ -92,9 +98,14 @@ impl ReDBLexicon {
         })
     }
 
-    /// Create a new database, deleting the existing file if necessary
-    pub fn create<P: AsRef<Path>>(path : P) -> Result<ReDBLexicon> {
-        let db = Arc::new(Database::create(path)?);
+    /// Create a new database, deleting the existing file if necessary.
+    /// See [`ReDBLexicon::open`] for `cache_size_bytes`.
+    pub fn create<P: AsRef<Path>>(path : P, cache_size_bytes: usize) -> Result<ReDBLexicon> {
+        let db = Arc::new(
+            Database::builder()
+                .set_cache_size(cache_size_bytes)
+                .create(path)?,
+        );
         let txn_manager = Arc::new(Mutex::new(TransactionManager::new(db.clone())));
         // Intialize entries as '0' and 'a'..'z'
         let mut entries = HashMap::new();

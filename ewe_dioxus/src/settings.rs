@@ -38,6 +38,15 @@ pub struct EweSettings {
     /// a slow source scan on startup with very large sources such as NameNet.
     #[serde(default)]
     pub disable_auto_reload: bool,
+    /// Bounds the lexicon database's in-memory page cache. redb (the
+    /// database engine) defaults to a 1GiB cache regardless of the database
+    /// file's actual size, which is wasteful on memory-constrained servers.
+    #[serde(default = "default_lexicon_cache_mb")]
+    pub lexicon_cache_mb: usize,
+}
+
+fn default_lexicon_cache_mb() -> usize {
+    128
 }
 
 fn default_logo() -> String {
@@ -106,6 +115,7 @@ impl EweSettings {
             footer: default_footer(),
             theme: default_theme(),
             disable_auto_reload: false,
+            lexicon_cache_mb: default_lexicon_cache_mb(),
         }
     }
 
