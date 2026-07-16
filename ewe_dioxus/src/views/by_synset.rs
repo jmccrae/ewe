@@ -10,6 +10,7 @@ pub fn BySynset(synset: ReadSignal<String>) -> Element {
         div {
             WordNet {},
             Synset {
+                key: "{synset}",
                 synset_id: SynsetId::new_owned(synset.cloned()),
                 display_ids: options().show_ids,
                 display_sensekeys: options().show_sensekeys,
