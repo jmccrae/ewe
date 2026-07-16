@@ -27,7 +27,8 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                                 "Nouns" 
                             },
                             for synset in nouns.into_iter() {
-                                Synset { 
+                                Synset {
+                                    key: "{synset}",
                                     synset_id: synset.clone(),
                                     display_ids: options().show_ids,
                                     display_sensekeys: options().show_sensekeys,
@@ -44,7 +45,8 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                                 "Verbs" 
                             },
                             for synset in verbs.into_iter() {
-                                Synset { 
+                                Synset {
+                                    key: "{synset}",
                                     synset_id: synset.clone(),
                                     display_ids: options().show_ids,
                                     display_sensekeys: options().show_sensekeys,
@@ -61,7 +63,8 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                                 "Adjectives" 
                             },
                             for synset in adjectives.into_iter() {
-                                Synset { 
+                                Synset {
+                                    key: "{synset}",
                                     synset_id: synset.clone(),
                                     display_ids: options().show_ids,
                                     display_sensekeys: options().show_sensekeys,
@@ -78,7 +81,8 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
                                 "Adverbs" 
                             },
                             for synset in adverbs.into_iter() {
-                                Synset { 
+                                Synset {
+                                    key: "{synset}",
                                     synset_id: synset.clone(),
                                     display_ids: options().show_ids,
                                     display_sensekeys: options().show_sensekeys,

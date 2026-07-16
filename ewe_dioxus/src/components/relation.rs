@@ -32,24 +32,27 @@ pub fn Relation(props : RelationProps) -> Element {
                 span {
                     if show_relation() {
                         for p in props.targets.iter() {
-                            if let Some(sl) = &p.1 {
-                                if let Some(tl) = &p.2 {
-                                    span {
-                                        "{sl} → {tl}: "
+                            span {
+                                key: "{p.0}",
+                                if let Some(sl) = &p.1 {
+                                    if let Some(tl) = &p.2 {
+                                        span {
+                                            "{sl} → {tl}: "
+                                        }
                                     }
+                                },
+                                Synset {
+                                    synset_id: p.0.clone(),
+                                    display_ids: props.display_ids,
+                                    display_sensekeys: props.display_sensekeys,
+                                    display_subcats: props.display_subcats,
+                                    display_topics: props.display_topics,
+                                    display_pronunciations: props.display_pronunciations,
+                                    focus: String::new()
                                 }
-                            },
-                            Synset {
-                                synset_id: p.0.clone(),
-                                display_ids: props.display_ids,
-                                display_sensekeys: props.display_sensekeys,
-                                display_subcats: props.display_subcats,
-                                display_topics: props.display_topics,
-                                display_pronunciations: props.display_pronunciations,
-                                focus: String::new()
                             }
                         }
-                    } 
+                    }
                 }
             }
         } 

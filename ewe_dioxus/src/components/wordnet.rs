@@ -38,7 +38,6 @@ pub fn WordNet() -> Element {
 
     let mut go_to = move |s: SearchResult| {
         let navigator = navigator();
-        lemma.set(s.display.clone());
         match s.kind {
             SearchResultKind::Lemma => {
                 navigator.push(Route::ByLemma { lemma: s.value.clone() });
@@ -47,6 +46,9 @@ pub fn WordNet() -> Element {
                 navigator.push(Route::BySynset { synset: s.value.clone() });
             }
         }
+        // Leave the box empty rather than filled with the just-completed
+        // query, so it's ready for the next search.
+        lemma.set(String::new());
         show_suggestions.set(false);
     };
 
