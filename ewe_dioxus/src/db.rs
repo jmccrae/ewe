@@ -13,17 +13,18 @@ use crate::settings::EweSettings;
 /// `settings.disable_auto_reload` is set) any file in `settings.wordnet_source` has been
 /// modified more recently than the database, the database is rebuilt from source first.
 pub fn open_lexicon(settings: &EweSettings) -> Result<ReDBLexicon, Box<dyn std::error::Error>> {
+    let cache_size_bytes = settings.lexicon_cache_mb * 1024 * 1024;
     if let Some(source) = &settings.wordnet_source {
         if is_stale(&settings.database, source, settings.disable_auto_reload)? {
             eprintln!(
                 "Wordnet source at {} is newer than {}, rebuilding database",
                 source, settings.database
             );
-            let lexicon = ReDBLexicon::create(&settings.database)?;
+            let lexicon = ReDBLexicon::create(&settings.database, cache_size_bytes)?;
             return Ok(lexicon.load(source, &mut LoggingProgress::new())?);
         }
     }
-    Ok(ReDBLexicon::open(&settings.database)?)
+    Ok(ReDBLexicon::open(&settings.database, cache_size_bytes)?)
 }
 
 /// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
