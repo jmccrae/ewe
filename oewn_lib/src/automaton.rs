@@ -187,7 +187,24 @@ pub fn apply_automaton<L: Lexicon>(
                     wn,
                     &synset.resolve(&last_synset_id)?,
                     example,
-                    source,
+                    // An empty source is not a valid value - treat it the same as omitting
+                    // `source` entirely.
+                    source.filter(|s| !s.is_empty()),
+                    changes,
+                );
+            }
+            Action::UpdateExample {
+                synset,
+                number,
+                example,
+                source,
+            } => {
+                change_manager::update_ex(
+                    wn,
+                    &synset.resolve(&last_synset_id)?,
+                    number - 1,
+                    example,
+                    source.filter(|s| !s.is_empty()),
                     changes,
                 );
             }
@@ -622,6 +639,16 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
     },
+    #[serde(rename = "update_example")]
+    UpdateExample {
+        synset: SynsetRef,
+        /// 1-indexed, matching `delete_example`.
+        number: usize,
+        example: String,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
     #[serde(rename = "delete_example")]
     DeleteExample { synset: SynsetRef, number: usize },
     #[serde(rename = "add_relation")]
@@ -775,7 +802,7 @@ mod tests {
         // slightly from the pre-0.9 original because serde_yaml 0.9 swapped its YAML
         // emitter backend (yaml-rust -> unsafe-libyaml); that formatting isn't
         // configurable through serde_yaml's public API.
-        let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
+        let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- update_example:\n    synset: 00001740-n\n    number: 1\n    example: This is an updated example\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
         let data = vec![
             Action::AddEntry {
                 synset: SynsetRef::id("00001740-n"),
@@ -812,6 +839,12 @@ mod tests {
                 synset: SynsetRef::id("00001740-n"),
                 example: "This is an example".to_string(),
                 source: Some("This is a source".to_string()),
+            },
+            Action::UpdateExample {
+                synset: SynsetRef::id("00001740-n"),
+                number: 1,
+                example: "This is an updated example".to_string(),
+                source: None,
             },
             Action::DeleteExample {
                 synset: SynsetRef::id("00001740-n"),
@@ -932,5 +965,48 @@ mod tests {
             target_lemma: None,
         }];
         apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+    }
+
+    #[test]
+    fn test_update_example_preserves_position() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid = change_manager::add_synset(
+            &mut lexicon,
+            "def".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+
+        let actions = vec![
+            Action::AddExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                example: "first".to_string(),
+                source: None,
+            },
+            Action::AddExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                example: "second".to_string(),
+                source: None,
+            },
+            Action::UpdateExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                number: 1,
+                example: "first, edited".to_string(),
+                // An empty source should be normalized to None, not stored as `Some("")`.
+                source: Some("".to_string()),
+            },
+        ];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let synset = lexicon.synset_by_id(&ssid).unwrap().unwrap();
+        assert_eq!(synset.example.len(), 2);
+        assert_eq!(synset.example[0].text, "first, edited");
+        assert_eq!(synset.example[0].source, None);
+        assert_eq!(synset.example[1].text, "second");
     }
 }

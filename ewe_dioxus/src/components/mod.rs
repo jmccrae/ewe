@@ -8,6 +8,18 @@ pub use wordnet::WordNet;
 mod synset;
 pub use synset::Synset;
 
+mod editable_definition;
+pub use editable_definition::EditableDefinition;
+
+mod editable_examples;
+pub use editable_examples::{EditableExamples, ExampleDraft};
+
+mod editable_lemmas;
+pub use editable_lemmas::EditableLemmas;
+
+mod edit_toggle;
+pub use edit_toggle::EditToggle;
+
 mod subcat;
 pub use subcat::Subcat;
 

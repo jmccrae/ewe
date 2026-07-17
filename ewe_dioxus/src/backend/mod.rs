@@ -19,3 +19,6 @@ pub mod openapi;
 pub mod downloads;
 
 pub mod senses;
+
+#[cfg(feature = "edit")]
+pub mod edit;

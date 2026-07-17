@@ -51,6 +51,7 @@ pub async fn get_home_info() -> Result<HomeInfo> {
     let tagline = settings.tagline.clone();
     let intro = settings.intro.clone();
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         Ok(HomeInfo {
             tagline,
             intro,
@@ -66,6 +67,7 @@ pub async fn get_home_info() -> Result<HomeInfo> {
 #[get("/api/random_synset")]
 pub async fn get_random_synset() -> Result<Option<SynsetId>> {
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         Ok(lexicon.random_synset_id()?)
     } else {
         Err(EweAPIError::LexiconUnavailable.into())
@@ -103,6 +105,7 @@ fn strip_id_prefix(query: &str) -> &str {
 #[get("/api/by_lemma/{lemma}")]
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         let lemmas = lexicon.entry_by_lemma(&lemma)?;
         let synset_ids = lemmas
             .iter()
@@ -117,6 +120,7 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
 #[get("/api/lemma/{lemma}")]
 pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         let entries = lexicon.entry_by_lemma(&lemma)?;
         let synset_ids: BTreeSet<SynsetId> = entries
             .iter()
@@ -126,7 +130,7 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
         let mut synsets = Vec::with_capacity(synset_ids.len());
         for id in &synset_ids {
             if let Some(synset) = lexicon.synset_by_id(id)? {
-                synsets.push(MemberSynset::from_synset(id, synset.into_owned(), lexicon)?);
+                synsets.push(MemberSynset::from_synset(id, synset.into_owned(), &*lexicon)?);
             }
         }
         Ok(synsets)
@@ -139,6 +143,7 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
 pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         let mut results = Vec::new();
 
         for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
@@ -181,12 +186,13 @@ pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<V
 #[get("/api/synset/{id}")]
 pub async fn get_synset(id: SynsetId) -> Result<Option<MemberSynset>> {
     if let Some(lexicon) = crate::LEXICON.get() {
+        let lexicon = lexicon.read().unwrap();
         let synset = lexicon.synset_by_id(&id)?;
         if let Some(synset) = synset {
             Ok(Some(MemberSynset::from_synset(
                 &id,
                 synset.into_owned(),
-                lexicon,
+                &*lexicon,
             )?))
         } else {
             Ok(None)

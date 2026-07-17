@@ -154,13 +154,14 @@ pub(crate) fn resolve_synset(id: &SynsetId) -> Result<Option<MemberSynset>> {
     let Some(lexicon) = crate::LEXICON.get().as_ref() else {
         return Ok(None);
     };
+    let lexicon = lexicon.read().unwrap();
     let Some(synset) = lexicon.synset_by_id(id)? else {
         return Ok(None);
     };
     Ok(Some(MemberSynset::from_synset(
         id,
         synset.into_owned(),
-        lexicon,
+        &*lexicon,
     )?))
 }
 
@@ -171,6 +172,7 @@ pub(crate) fn resolve_lemma_synsets(lemma: &str) -> Result<Vec<MemberSynset>> {
     let Some(lexicon) = crate::LEXICON.get().as_ref() else {
         return Ok(Vec::new());
     };
+    let lexicon = lexicon.read().unwrap();
 
     let entries = lexicon.entry_by_lemma(lemma)?;
     let synset_ids: BTreeSet<SynsetId> = entries

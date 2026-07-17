@@ -21,10 +21,135 @@
     margin-left: 4px;
 }
 
+.definition-editing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 18px;
+}
+
+.definition-input {
+    font-size: 1em;
+    font-style: italic;
+    font-family: inherit;
+    /* Matches the combined width of an example row's three elements (text + source + delete
+       button) below, so the two editable blocks line up. */
+    width: 26em;
+}
+
+/* Shared accept/reject/delete controls for every field editor (definition, examples, and
+   eventually lemmas/relations) so they only need styling in one place. */
+.edit-save,
+.edit-cancel,
+.edit-delete {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 5px;
+}
+
+.edit-save {
+    color: var(--color-primary);
+}
+
+.edit-cancel,
+.edit-delete {
+    color: var(--color-accent);
+}
+
+.edit-save:disabled,
+.edit-cancel:disabled,
+.edit-delete:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.edit-error {
+    color: var(--color-accent);
+    font-size: 0.85em;
+    font-style: normal;
+}
+
 .example {
     font-size: 0.8em;
     color: var(--color-text-secondary);
     font-style: italic;
+}
+
+.example-editing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    margin-left: 18px;
+}
+
+.example-text-input {
+    font-size: 1em;
+    font-style: italic;
+    font-family: inherit;
+    width: 16em;
+}
+
+.example-source-input {
+    font-size: 1em;
+    font-family: inherit;
+    width: 8em;
+}
+
+/* Shared "add a new row" button style for every list field (examples, lemmas, and eventually
+   relations). Layout (block vs. inline, margins) is context-specific - see `.example-add` and
+   `.lemma-add` below. */
+.list-add {
+    background: none;
+    border: 1px dashed var(--color-border);
+    border-radius: 3px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 3px 8px;
+}
+
+.list-add:hover {
+    color: var(--color-text-strong);
+    border-color: var(--color-text-strong);
+}
+
+.example-add {
+    display: block;
+    margin-top: 4px;
+    margin-left: 18px;
+}
+
+.lemmas-editing {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.lemma-editing {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.lemma-dragging {
+    opacity: 0.4;
+}
+
+.lemma-drag-handle {
+    cursor: grab;
+    color: var(--color-text-mute);
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.lemma-input {
+    font-size: 1em;
+    font-family: inherit;
+    width: 8em;
 }
 
 .sense_key:before {
@@ -145,4 +270,33 @@
     color: var(--color-text-muted);
     padding: 0;
     transition: color 0.2s;
+}
+
+.side-icons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.edit-toggle {
+    cursor: pointer;
+    font-size: 1.8rem;
+    line-height: 1;
+    color: var(--color-text-mute);
+    transition: color 0.2s;
+    user-select: none;
+}
+
+.edit-toggle:hover {
+    color: var(--color-text-faint);
+}
+
+.edit-toggle-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.edit-toggle-btn {
+    font-size: 1.3rem;
 }

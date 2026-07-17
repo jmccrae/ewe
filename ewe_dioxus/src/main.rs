@@ -6,6 +6,8 @@ use dioxus_fullstack::Lazy;
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
 #[cfg(feature = "server")]
+use std::sync::RwLock;
+#[cfg(feature = "server")]
 use teanga::disk_corpus::RedbDb;
 #[cfg(feature = "server")]
 use teanga::DiskCorpus;
@@ -83,10 +85,13 @@ static DOWNLOADS: Lazy<DownloadsConfig> = Lazy::new(|| async move {
     dioxus::Ok(downloads)
 });
 
+// Wrapped in a `RwLock` (rather than the plain `ReDBLexicon` reads elsewhere use) so that
+// edit-mode server functions (see `backend::edit`) can take a write lock to apply automaton
+// actions, while ordinary lookups take a read lock and don't block each other.
 #[cfg(feature = "server")]
-static LEXICON: Lazy<Option<ReDBLexicon>> = Lazy::new(|| async move {
+static LEXICON: Lazy<Option<RwLock<ReDBLexicon>>> = Lazy::new(|| async move {
     match db::open_lexicon(SETTINGS.get()) {
-        Ok(lexicon) => dioxus::Ok(Some(lexicon)),
+        Ok(lexicon) => dioxus::Ok(Some(RwLock::new(lexicon))),
         Err(e) => {
             eprintln!("Failed to open lexicon: {}", e);
             dioxus::Ok(None)
@@ -203,6 +208,13 @@ fn App() -> Element {
 
 #[allow(non_snake_case)]
 fn App2() -> Element {
+    // The desktop webview loads pages from Dioxus's own `dioxus://` origin, not from the
+    // fullstack HTTP server, so root-relative requests like `<img src="/logo">` never reach
+    // `backend::static_files` - they need an explicit asset handler instead. See
+    // `register_desktop_settings_assets` below.
+    #[cfg(feature = "desktop")]
+    register_desktop_settings_assets();
+
     // The `rsx!` macro lets us define HTML inside of rust. It expands to an Element with all of our HTML inside.
     rsx! {
         // In addition to element and text (which we will see later), rsx can contain other components. In this case,
@@ -214,5 +226,71 @@ fn App2() -> Element {
         // The router component renders the route enum we defined above. It will handle synchronization of the URL and render
         // the layouts and components for the active route.
         Router::<Route> {}
+    }
+}
+
+/// Registers desktop asset handlers for `/logo` and `/theme.css` so the webview can load them.
+///
+/// These two paths are dynamic `backend::static_files` routes on the fullstack HTTP server
+/// (deliberately read from disk per-request rather than bundled via `asset!`, so a deployment
+/// can be rebranded without rebuilding), but the desktop webview never talks to that server for
+/// plain resource loads - it resolves root-relative URLs against its own internal `dioxus://`
+/// origin, which only knows about bundled assets and explicitly-registered handlers like these.
+/// Settings are loaded directly here (rather than through the `SETTINGS` static) because that
+/// static's lazy initializer only supports being driven from the `server` feature's tokio
+/// runtime, which this - the desktop client process - doesn't have.
+#[cfg(feature = "desktop")]
+fn register_desktop_settings_assets() {
+    use dioxus::desktop::use_asset_handler;
+
+    let settings = if std::path::Path::new("settings.toml").exists() {
+        EweSettings::load("settings.toml").unwrap_or_else(|_| EweSettings::default())
+    } else {
+        EweSettings::default()
+    };
+
+    let logo_path = settings.logo;
+    use_asset_handler("logo", move |_request, responder| {
+        responder.respond(desktop_settings_asset_response(&logo_path));
+    });
+
+    let theme_path = settings.theme;
+    use_asset_handler("theme.css", move |_request, responder| {
+        responder.respond(desktop_settings_asset_response(&theme_path));
+    });
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_settings_asset_response(path: &str) -> dioxus::desktop::wry::http::Response<Vec<u8>> {
+    use dioxus::desktop::wry::http::{Response, StatusCode};
+
+    match std::fs::read(path) {
+        Ok(bytes) => Response::builder()
+            .header("Content-Type", desktop_settings_asset_content_type(path))
+            .body(bytes)
+            .unwrap(),
+        Err(e) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(format!("File not found at {}: {}", path, e).into_bytes())
+            .unwrap(),
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_settings_asset_content_type(path: &str) -> &'static str {
+    match std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
+        Some("css") => "text/css",
+        _ => "application/octet-stream",
     }
 }
