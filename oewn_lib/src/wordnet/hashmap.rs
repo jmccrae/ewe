@@ -11,7 +11,8 @@ pub struct LexiconHashMapBackend {
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
     links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
     sense_id_to_lemma_pos : HashMap<SenseId, (String, PosKey)>,
-    deprecations : Vec<DeprecationRecord>
+    deprecations : Vec<DeprecationRecord>,
+    frames : Vec<(String, String)>
 }
 
 impl LexiconHashMapBackend {
@@ -23,7 +24,8 @@ impl LexiconHashMapBackend {
             sense_links_to : HashMap::new(),
             links_to : HashMap::new(),
             sense_id_to_lemma_pos : HashMap::new(),
-            deprecations : Vec::new()
+            deprecations : Vec::new(),
+            frames : Vec::new()
         }
     }
     #[cfg(test)]
@@ -182,6 +184,13 @@ impl Lexicon for LexiconHashMapBackend {
     }
     fn deprecations_push(&mut self, record : DeprecationRecord) -> Result<()> {
         self.deprecations.push(record);
+        Ok(())
+    }
+    fn frames_get<'a>(&'a self) -> Result<Cow<'a, Vec<(String, String)>>> {
+        Ok(Cow::Borrowed(&self.frames))
+    }
+    fn frames_set(&mut self, frames : Vec<(String, String)>) -> Result<()> {
+        self.frames = frames;
         Ok(())
     }
 }

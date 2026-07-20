@@ -38,3 +38,6 @@ pub use display_options::{
 
 mod download_links;
 pub use download_links::DownloadLinks;
+
+mod add_synset_modal;
+pub use add_synset_modal::AddSynsetTrigger;

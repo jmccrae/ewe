@@ -11,7 +11,7 @@ use oewn_lib::automaton::{apply_automaton, Action};
 #[allow(unused_imports)]
 use oewn_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
-use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, SynsetId};
+use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
 use serde::{Deserialize, Serialize};
@@ -127,4 +127,58 @@ pub async fn search_synsets(
         }
     }
     Ok(candidates)
+}
+
+/// Everything the "add a new synset" form needs to populate itself: every lexicographer file
+/// actually present in this database (rather than hardcoding the standard list, so it only
+/// offers files this data really has), and the subcategorization frames available to verb
+/// lemmas (key, human-readable description), loaded from `frames.yaml` at startup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AddSynsetMetadata {
+    pub lexfiles: Vec<String>,
+    pub frames: Vec<(String, String)>,
+}
+
+#[get("/api/edit/add_synset_metadata")]
+pub async fn add_synset_metadata() -> Result<AddSynsetMetadata> {
+    let lexicon = read_lexicon()?;
+    let mut lexfiles: Vec<String> = lexicon
+        .synsets_iter()?
+        .filter_map(|r| r.ok().map(|(k, _)| k.clone()))
+        .collect();
+    lexfiles.sort();
+    let frames = lexicon.frames_get()?.into_owned();
+    Ok(AddSynsetMetadata { lexfiles, frames })
+}
+
+/// Creates a new synset (and an entry for each lemma) and returns it, so the client can
+/// navigate straight to its page. `subcats`, if given, must be the same length as `lemmas`
+/// (each lemma's applicable frame keys) - only meaningful for verb lemmas.
+#[post("/api/edit/add_synset")]
+pub async fn add_synset(
+    definition: String,
+    lexfile: String,
+    pos: Option<PosKey>,
+    lemmas: Vec<String>,
+    subcats: Vec<Vec<String>>,
+) -> Result<MemberSynset> {
+    let mut lexicon = write_lexicon()?;
+    let actions = vec![Action::AddSynset {
+        definition,
+        lexfile,
+        pos,
+        lemmas,
+        subcats,
+    }];
+    let new_id = apply_automaton(actions, &mut *lexicon, &mut ChangeList::new())
+        .map_err(EweEditError::Automaton)?
+        .ok_or_else(|| EweEditError::Automaton("No synset was created".to_string()))?;
+    let synset = lexicon
+        .synset_by_id(&new_id)?
+        .ok_or_else(|| EweEditError::SynsetNotFoundAfterEdit(new_id.as_str().to_string()))?;
+    Ok(MemberSynset::from_synset(
+        &new_id,
+        synset.into_owned(),
+        &*lexicon,
+    )?)
 }

@@ -33,6 +33,9 @@ const SENSE_ID_TO_LEMMA_POS: TableDefinition<String, (String, String)> = TableDe
 /// DEPRECATION_KEY -> Vec<DeprecationRecord>
 const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("deprecations");
 const DEPRECATION_KEY:&'static str = "deprecations";
+/// FRAMES_KEY -> Vec<(frame key, human-readable description)>, loaded from `frames.yaml`
+const FRAMES: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("frames");
+const FRAMES_KEY:&'static str = "frames";
 /// (ili) -> synset_id. Maintained incrementally wherever a synset is written,
 /// so `ili_by_prefix` can do a direct sorted-range scan instead of building
 /// an in-memory index by scanning (and fully deserializing) every synset.
@@ -42,7 +45,6 @@ pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
-    lexnames: Vec<String>,
 }
 
 impl ReDBLexicon {
@@ -70,8 +72,6 @@ impl ReDBLexicon {
         // Read all the lexnames from the DB
         //
         let mut synsets = HashMap::new();
-        // Assume lexnames is sorted
-        let mut lexnames = Vec::new();
         {
             // Any outstanding writes should be committed before we read.
             let mut manager = txn_manager.lock().unwrap();
@@ -79,14 +79,9 @@ impl ReDBLexicon {
             let table = txn.open_table(SYNSETS_TABLE)?;
             for kv in table.iter()? {
                 let (lexname, _) = kv?.0.value();
-                // Find using binary search
-                match lexnames.binary_search(&lexname) {
-                    Ok(_) => {}
-                    Err(idx) => {
-                        lexnames.insert(idx, lexname.clone());
-                        synsets.insert(lexname.clone(), ReDBSynsets::new(txn_manager.clone(), lexname.clone()));
-                    }
-                }
+                synsets.entry(lexname.clone()).or_insert_with(|| {
+                    ReDBSynsets::new(txn_manager.clone(), lexname.clone())
+                });
             }
         }
 
@@ -94,7 +89,6 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets,
-            lexnames,
         })
     }
 
@@ -128,6 +122,7 @@ impl ReDBLexicon {
             txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
             txn.open_table(DEPRECATIONS)?;
             txn.open_table(ILI_TO_SYNSET_ID)?;
+            txn.open_table(FRAMES)?;
         }
 
 
@@ -136,7 +131,6 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets: HashMap::new(),
-            lexnames: Vec::new(),
         })
     }
 }
@@ -207,7 +201,13 @@ impl Lexicon for ReDBLexicon {
         Ok(())
     }
     fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
-        Ok(self.lexnames.binary_search(&lexname.to_string()).is_ok())
+        // `self.synsets` (unlike the old dedicated `lexnames` field this replaced) is kept
+        // live by `synsets_insert`/`synsets_insert_synset` as new lexfiles are added, not just
+        // populated once at `open()` time - a lexfile added during `Lexicon::load` in the
+        // current process (e.g. a fresh `create()` + `load()`, as opposed to `open()`-ing an
+        // already-built database) used to stay invisible to this check until the process
+        // restarted and re-opened the file from disk.
+        Ok(self.synsets.contains_key(lexname))
     }
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::S>)>>> {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
@@ -469,6 +469,30 @@ impl Lexicon for ReDBLexicon {
         let mut table = txn.open_table(DEPRECATIONS)?;
         deprecations.push(record);
         table.insert(DEPRECATION_KEY, serialize_deprecations(deprecations)?)?;
+        Ok(())
+    }
+    fn frames_get<'a>(&'a self) -> Result<Cow<'a, Vec<(String, String)>>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        // A database written before `frames.yaml` loading existed won't have this table yet -
+        // treat that as "no frames" rather than erroring; a rebuild will populate it.
+        let table = match txn.open_table(FRAMES) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Cow::Owned(Vec::new())),
+            Err(e) => return Err(e.into()),
+        };
+        if let Some(frames_str) = table.get(FRAMES_KEY)? {
+            let frames = deserialize_frames(frames_str.value())?;
+            Ok(Cow::Owned(frames))
+        } else {
+            Ok(Cow::Owned(Vec::new()))
+        }
+    }
+    fn frames_set(&mut self, frames : Vec<(String, String)>) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(FRAMES)?;
+        table.insert(FRAMES_KEY, serialize_frames(frames)?)?;
         Ok(())
     }
 
@@ -1044,4 +1068,12 @@ fn deserialize_deprecation(s : Vec<u8>) -> Result<Vec<DeprecationRecord>> {
 
 fn serialize_deprecations(deprecations : Vec<DeprecationRecord>) -> Result<Vec<u8>> {
     Ok(deprecations.write_to_vec()?)
+}
+
+fn deserialize_frames(s : Vec<u8>) -> Result<Vec<(String, String)>> {
+    Ok(Vec::read_from_buffer(&s)?)
+}
+
+fn serialize_frames(frames : Vec<(String, String)>) -> Result<Vec<u8>> {
+    Ok(frames.write_to_vec()?)
 }

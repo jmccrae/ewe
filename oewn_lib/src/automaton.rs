@@ -6,11 +6,14 @@ use crate::validate::validate;
 use crate::wordnet::{Lexicon, PosKey, SenseId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// Applies a batch of actions, returning the id of the last synset created or referenced
+/// (`SynsetRef::Last`'s target throughout the batch) - `None` if the batch never touched a
+/// synset. Lets callers that just added a synset find out what id it got.
 pub fn apply_automaton<L: Lexicon>(
     actions: Vec<Action>,
     wn: &mut L,
     changes: &mut ChangeList,
-) -> Result<(), String> {
+) -> Result<Option<SynsetId>, String> {
     let mut last_synset_id: Option<SynsetId> = None;
     let mut last_sense_id: Option<SenseId> = None;
     for action in actions {
@@ -440,7 +443,7 @@ pub fn apply_automaton<L: Lexicon>(
             }
         }
     }
-    Ok(())
+    Ok(last_synset_id)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

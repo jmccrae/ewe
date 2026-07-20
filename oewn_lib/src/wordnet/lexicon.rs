@@ -186,6 +186,12 @@ pub trait Lexicon: Sized {
     fn deprecations_get<'a>(&'a self) -> Result<Cow<'a, Vec<DeprecationRecord>>>;
     fn deprecations_push(&mut self, record: DeprecationRecord) -> Result<()>;
 
+    /// The subcategorization frames available to verbs (key, human-readable description),
+    /// loaded from `frames.yaml` - see `Lexicon::load`. Frame keys are what `Sense::subcat`
+    /// actually stores; the description is display/UI-only.
+    fn frames_get<'a>(&'a self) -> Result<Cow<'a, Vec<(String, String)>>>;
+    fn frames_set(&mut self, frames: Vec<(String, String)>) -> Result<()>;
+
     /// Load a lexicon from a folder of YAML files
     fn load<P: AsRef<Path>, Pr: Progress>(
         mut self,
@@ -244,7 +250,29 @@ pub trait Lexicon: Sized {
                     }
                 }
                 self.entries_insert(key, entries2)?;
-            } else if file_name.ends_with(".yaml") && file_name != "frames.yaml" {
+            } else if file_name == "frames.yaml" {
+                // A flat `key: description` mapping, not a synset file - `serde_yaml::Mapping`
+                // preserves declaration order, which is worth keeping for the frame picker in
+                // the editor UI (matches the order in the source file).
+                let mapping: serde_yaml::Mapping =
+                    serde_yaml::from_reader(File::open(&file).map_err(|e| {
+                        WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e))
+                    })?)
+                    .map_err(|e| {
+                        WordNetYAMLIOError::Serde(format!(
+                            "Error reading {} due to {}",
+                            file_name, e
+                        ))
+                    })?;
+                let frames: Vec<(String, String)> = mapping
+                    .into_iter()
+                    .filter_map(|(k, v)| match (k.as_str(), v.as_str()) {
+                        (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
+                        _ => None,
+                    })
+                    .collect();
+                self.frames_set(frames)?;
+            } else if file_name.ends_with(".yaml") {
                 let lexname = file_name[0..file_name.len() - 5].to_string();
                 load_synsets_streaming(&mut self, &file, &file_name, &lexname)?;
             }

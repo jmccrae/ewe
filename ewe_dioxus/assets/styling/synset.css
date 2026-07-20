@@ -37,41 +37,6 @@
     width: 26em;
 }
 
-/* Shared accept/reject/delete controls for every field editor (definition, examples, and
-   eventually lemmas/relations) so they only need styling in one place. */
-.edit-save,
-.edit-cancel,
-.edit-delete {
-    background: none;
-    border: 1px solid var(--color-border);
-    border-radius: 3px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 2px 5px;
-}
-
-.edit-save {
-    color: var(--color-primary);
-}
-
-.edit-cancel,
-.edit-delete {
-    color: var(--color-accent);
-}
-
-.edit-save:disabled,
-.edit-cancel:disabled,
-.edit-delete:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-.edit-error {
-    color: var(--color-accent);
-    font-size: 0.85em;
-    font-style: normal;
-}
-
 .example {
     font-size: 0.8em;
     color: var(--color-text-secondary);
@@ -97,23 +62,6 @@
     font-size: 1em;
     font-family: inherit;
     width: 8em;
-}
-
-/* Shared "add a new row" button style for every list field (examples, lemmas, and eventually
-   relations). Layout (block vs. inline, margins) is context-specific - see `.example-add` and
-   `.lemma-add` below. */
-.list-add {
-    background: none;
-    border: 1px dashed var(--color-border);
-    border-radius: 3px;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    padding: 3px 8px;
-}
-
-.list-add:hover {
-    color: var(--color-text-strong);
-    border-color: var(--color-text-strong);
 }
 
 .example-add {
