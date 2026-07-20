@@ -277,10 +277,21 @@
     min-width: 20em;
 }
 
+/* Positioning context for `.relation-search-results` below - without this, the dropdown's
+   `position: absolute` falls back to the nearest positioned ancestor (or the page itself),
+   landing wherever that happens to be rather than under the input. */
+.relation-search-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
 .relation-search-results {
     position: absolute;
+    top: 100%;
+    left: 0;
     z-index: 20;
     margin-top: 2px;
+    width: max-content;
     max-width: 30em;
     max-height: 16em;
     overflow-y: auto;

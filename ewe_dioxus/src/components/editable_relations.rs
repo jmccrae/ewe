@@ -400,37 +400,40 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                         }
                     }
                 } else {
-                    input {
-                        class: "relation-search-input",
-                        r#type: "text",
-                        placeholder: "Search for a target word or synset…",
-                        value: "{search_query}",
-                        oninput: move |e| {
-                            let value = e.value();
-                            search_query.set(value.clone());
-                            if !value.is_empty() {
-                                suggestions.call(value);
-                            }
-                        },
-                    }
-                    if let Some(Ok(results)) = suggestions.value() {
-                        {
-                            let results = results.cloned();
-                            rsx! {
-                                if !results.is_empty() {
-                                    ul {
-                                        class: "relation-search-results",
-                                        for candidate in results {
-                                            li {
-                                                key: "{candidate.id}",
-                                                onclick: {
-                                                    let candidate = candidate.clone();
-                                                    move |_| {
-                                                        selected_target.set(Some(candidate.clone()));
-                                                        search_query.set(String::new());
-                                                    }
-                                                },
-                                                "{candidate.members.join(\", \")} ({candidate.part_of_speech}) — {candidate.definition}"
+                    div {
+                        class: "relation-search-wrapper",
+                        input {
+                            class: "relation-search-input",
+                            r#type: "text",
+                            placeholder: "Search for a target word or synset…",
+                            value: "{search_query}",
+                            oninput: move |e| {
+                                let value = e.value();
+                                search_query.set(value.clone());
+                                if !value.is_empty() {
+                                    suggestions.call(value);
+                                }
+                            },
+                        }
+                        if let Some(Ok(results)) = suggestions.value() {
+                            {
+                                let results = results.cloned();
+                                rsx! {
+                                    if !results.is_empty() {
+                                        ul {
+                                            class: "relation-search-results",
+                                            for candidate in results {
+                                                li {
+                                                    key: "{candidate.id}",
+                                                    onclick: {
+                                                        let candidate = candidate.clone();
+                                                        move |_| {
+                                                            selected_target.set(Some(candidate.clone()));
+                                                            search_query.set(String::new());
+                                                        }
+                                                    },
+                                                    "{candidate.members.join(\", \")} ({candidate.part_of_speech}) — {candidate.definition}"
+                                                }
                                             }
                                         }
                                     }
