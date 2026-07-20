@@ -139,11 +139,39 @@
     opacity: 0.4;
 }
 
+.lemma-drop-before {
+    box-shadow: -3px 0 0 0 var(--color-accent);
+}
+
+.lemma-drop-after {
+    box-shadow: 3px 0 0 0 var(--color-accent);
+}
+
 .lemma-drag-handle {
     cursor: grab;
     color: var(--color-text-mute);
     font-size: 0.9em;
     user-select: none;
+}
+
+.lemma-shift-buttons {
+    display: inline-flex;
+    flex-direction: column;
+    line-height: 0.6;
+}
+
+.lemma-shift-buttons button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-mute);
+    font-size: 0.6em;
+    padding: 0 2px;
+}
+
+.lemma-shift-buttons button:disabled {
+    opacity: 0.25;
+    cursor: default;
 }
 
 .lemma-input {

@@ -25,8 +25,14 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
     // The index currently being dragged, so `ondrop` on another row knows what to move.
     // Reorders are resolved locally (not via the HTML5 DataTransfer payload) since it's the
     // same list on both ends - simpler and avoids DataTransfer serialization quirks across
-    // web/desktop webviews.
+    // web/desktop webviews. Native HTML5 drag-and-drop is unreliable in some embedded webviews
+    // (namely desktop's webkit2gtk, where it starts but never fires `drop`) - the ▲/▼ buttons
+    // below are the reliable fallback there; the drag handle stays because it's the nicer
+    // interaction everywhere it does work, and webkit2gtk may well catch up on this.
     let mut dragging_index = use_signal(|| None::<usize>);
+    // The row currently being dragged over, purely for the drop-position indicator below -
+    // the reorder itself only needs `dragging_index` and the row `ondrop` fires on.
+    let mut drag_over_index = use_signal(|| None::<usize>);
 
     rsx! {
         span {
@@ -34,11 +40,37 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
             for (index, lemma) in drafts.iter().enumerate() {
                 span {
                     key: "{index}",
-                    class: if dragging_index() == Some(index) { "lemma-editing lemma-dragging" } else { "lemma-editing" },
+                    class: {
+                        let mut classes = vec!["lemma-editing"];
+                        if dragging_index() == Some(index) {
+                            classes.push("lemma-dragging");
+                        }
+                        if let (Some(from), Some(over)) = (dragging_index(), drag_over_index()) {
+                            if over == index && from != index {
+                                // After the remove+insert in `ondrop`, dragging forward (from
+                                // < index) lands the item just after where the target used to
+                                // be; dragging backward lands it just before - so the
+                                // indicator goes on whichever side that'll actually be.
+                                classes.push(if from < index { "lemma-drop-after" } else { "lemma-drop-before" });
+                            }
+                        }
+                        classes.join(" ")
+                    },
                     draggable: "true",
                     ondragstart: move |_| dragging_index.set(Some(index)),
-                    ondragover: move |e| e.prevent_default(),
-                    ondragend: move |_| dragging_index.set(None),
+                    ondragover: move |e| {
+                        e.prevent_default();
+                        drag_over_index.set(Some(index));
+                    },
+                    ondragleave: move |_| {
+                        if drag_over_index() == Some(index) {
+                            drag_over_index.set(None);
+                        }
+                    },
+                    ondragend: move |_| {
+                        dragging_index.set(None);
+                        drag_over_index.set(None);
+                    },
                     ondrop: {
                         let drafts = drafts.clone();
                         move |e| {
@@ -57,12 +89,50 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
                                 }
                             }
                             dragging_index.set(None);
+                            drag_over_index.set(None);
                         }
                     },
                     span {
                         class: "lemma-drag-handle",
                         title: "Drag to reorder",
                         "⠿"
+                    }
+                    span {
+                        class: "lemma-shift-buttons",
+                        button {
+                            class: "lemma-shift-left",
+                            r#type: "button",
+                            title: "Move earlier",
+                            disabled: index == 0,
+                            onclick: {
+                                let drafts = drafts.clone();
+                                move |_| {
+                                    if index > 0 {
+                                        let mut drafts = drafts.clone();
+                                        drafts.swap(index, index - 1);
+                                        on_drafts_changed.call(drafts);
+                                    }
+                                }
+                            },
+                            "◀"
+                        }
+                        button {
+                            class: "lemma-shift-right",
+                            r#type: "button",
+                            title: "Move later",
+                            disabled: index + 1 == drafts.len(),
+                            onclick: {
+                                let drafts = drafts.clone();
+                                move |_| {
+                                    if index + 1 < drafts.len() {
+                                        let mut drafts = drafts.clone();
+                                        drafts.swap(index, index + 1);
+                                        on_drafts_changed.call(drafts);
+                                    }
+                                }
+                            },
+                            "▶"
+                        }
                     }
                     input {
                         class: "lemma-input",
