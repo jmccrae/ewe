@@ -17,6 +17,11 @@ pub use editable_examples::{EditableExamples, ExampleDraft};
 mod editable_lemmas;
 pub use editable_lemmas::EditableLemmas;
 
+pub mod relation_types;
+
+mod editable_relations;
+pub use editable_relations::{EditableRelations, PendingRelation, RelationKey};
+
 mod edit_toggle;
 pub use edit_toggle::EditToggle;
 

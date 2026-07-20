@@ -1009,4 +1009,131 @@ mod tests {
         assert_eq!(synset.example[0].source, None);
         assert_eq!(synset.example[1].text, "second");
     }
+
+    #[test]
+    fn test_is_exemplified_by_canonicalizes_to_exemplifies() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid1 = change_manager::add_synset(
+            &mut lexicon,
+            "def 1".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid1.clone(),
+            "foo".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+        let ssid2 = change_manager::add_synset(
+            &mut lexicon,
+            "def 2".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid2.clone(),
+            "bar".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+
+        // "foo is_exemplified_by bar" (bar is an example of foo) must be persisted
+        // as the canonical inverse "bar exemplifies foo", not stored directly - and
+        // must not recurse/overflow doing it.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(ssid1.clone()),
+            target: SynsetRef::Id(ssid2.clone()),
+            relation: "is_exemplified_by_sense".to_string(),
+            source_sense: Some(SenseRef::lemma("foo")),
+            target_sense: Some(SenseRef::lemma("bar")),
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let foo_sense = lexicon.get_sense_id2("foo", &ssid1).unwrap().unwrap();
+        let bar_sense = lexicon.get_sense_id2("bar", &ssid2).unwrap().unwrap();
+
+        let bar_links = lexicon.sense_links_from_id(&bar_sense).unwrap();
+        assert!(
+            bar_links.contains(&(SenseRelType::Exemplifies, foo_sense.clone())),
+            "expected bar's sense to store 'exemplifies -> foo', got {:?}",
+            bar_links
+        );
+
+        let foo_links = lexicon.sense_links_from_id(&foo_sense).unwrap();
+        assert!(
+            foo_links.is_empty(),
+            "is_exemplified_by must not be stored directly on foo's sense, got {:?}",
+            foo_links
+        );
+    }
+
+    #[test]
+    fn test_add_rel_hyponym_stores_on_target_not_self_loop() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let general = change_manager::add_synset(
+            &mut lexicon,
+            "general".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        let specific = change_manager::add_synset(
+            &mut lexicon,
+            "specific".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+
+        // "general hyponym specific" means specific's hypernym is general.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(general.clone()),
+            target: SynsetRef::Id(specific.clone()),
+            relation: "hyponym".to_string(),
+            source_sense: None,
+            target_sense: None,
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let specific_synset = lexicon.synset_by_id(&specific).unwrap().unwrap();
+        assert!(
+            specific_synset.hypernym.contains(&general),
+            "expected specific's hypernym to contain general, got {:?}",
+            specific_synset.hypernym
+        );
+
+        let general_synset = lexicon.synset_by_id(&general).unwrap().unwrap();
+        assert!(
+            !general_synset.hypernym.contains(&general),
+            "general must not gain a self-loop hypernym, got {:?}",
+            general_synset.hypernym
+        );
+    }
 }

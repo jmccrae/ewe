@@ -1,8 +1,8 @@
 use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_count;
 use crate::components::{
-    EditToggle, EditableDefinition, EditableExamples, EditableLemmas, ExampleDraft, Relation,
-    Subcat,
+    EditToggle, EditableDefinition, EditableExamples, EditableLemmas, EditableRelations,
+    ExampleDraft, PendingRelation, Relation, RelationKey, Subcat,
 };
 use crate::Route;
 use dioxus::prelude::*;
@@ -27,6 +27,8 @@ fn build_actions(
     draft_definition: &str,
     original_examples: &[Example],
     drafts: &[ExampleDraft],
+    relation_deletes: &[RelationKey],
+    relation_adds: &[PendingRelation],
 ) -> Vec<Action> {
     let mut actions = Vec::new();
 
@@ -91,6 +93,51 @@ fn build_actions(
                 source: normalize_source(&draft.source),
             });
         }
+    }
+
+    // `DeleteRelation` clears links between the pair in both directions regardless of type
+    // (see change_manager::delete_rel/delete_sense_rel), so deletes never need the
+    // forward/inverse swap that adds do.
+    for delete in relation_deletes {
+        actions.push(Action::DeleteRelation {
+            source: SynsetRef::Id(synset_id.clone()),
+            source_sense: None,
+            target: SynsetRef::Id(delete.target.clone()),
+            target_sense: None,
+            source_lemma: delete.source_lemma.clone(),
+            target_lemma: delete.target_lemma.clone(),
+        });
+    }
+
+    for add in relation_adds {
+        // About half of the relation types shown are computed by reverse lookup rather than
+        // stored directly (e.g. `hyponym` is derived from the target's `hypernym`) - adding
+        // one of those means inserting the inverse relation with source and target swapped.
+        // See `components::relation_types` for why.
+        let (source, source_lemma, target, target_lemma) = if add.info.swapped {
+            (
+                add.target.clone(),
+                add.target_lemma.clone(),
+                synset_id.clone(),
+                add.source_lemma.clone(),
+            )
+        } else {
+            (
+                synset_id.clone(),
+                add.source_lemma.clone(),
+                add.target.clone(),
+                add.target_lemma.clone(),
+            )
+        };
+        actions.push(Action::AddRelation {
+            source: SynsetRef::Id(source),
+            source_sense: None,
+            relation: add.info.store_as.to_string(),
+            target: SynsetRef::Id(target),
+            target_sense: None,
+            source_lemma,
+            target_lemma,
+        });
     }
 
     actions
@@ -204,6 +251,8 @@ pub fn Synset(props: SynsetProps) -> Element {
     let mut lemma_drafts = use_signal(Vec::<String>::new);
     let mut definition_draft = use_signal(String::new);
     let mut example_drafts = use_signal(Vec::<ExampleDraft>::new);
+    let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
+    let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
     // Only mutated (`.set()`) inside the `edit` feature's accept handler below; harmless when
     // it isn't.
     #[allow(unused_mut)]
@@ -368,7 +417,15 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         subcats: subcats(synset)
                                     }
                                 },
-                                if show_relations() {
+                                if editing() {
+                                    EditableRelations {
+                                        synset: synset.clone(),
+                                        pending_deletes: relation_deletes(),
+                                        pending_adds: relation_adds(),
+                                        on_pending_deletes_changed: move |v| relation_deletes.set(v),
+                                        on_pending_adds_changed: move |v| relation_adds.set(v),
+                                    }
+                                } else if show_relations() {
                                     div {
                                         class: "relations",
                                         if !synset.hypernym.is_empty() {
@@ -758,6 +815,8 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             lemma_drafts.set(members.clone());
                                             definition_draft.set(definition.clone());
                                             example_drafts.set(ExampleDraft::from_examples(&examples));
+                                            relation_deletes.set(Vec::new());
+                                            relation_adds.set(Vec::new());
                                             edit_error.set(None);
                                             editing.set(true);
                                         }
@@ -776,6 +835,8 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 &definition_draft(),
                                                 &original_examples,
                                                 &example_drafts(),
+                                                &relation_deletes(),
+                                                &relation_adds(),
                                             );
                                             if actions.is_empty() {
                                                 editing.set(false);

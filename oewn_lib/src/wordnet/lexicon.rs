@@ -744,16 +744,11 @@ pub trait Lexicon: Sized {
         rel: SenseRelType,
         target: &SenseId,
     ) -> Result<()> {
-        if let Some(inv) = rel.inverse() {
-            if inv != rel {
-                self.add_sense_rel(target, inv, source)?;
-                return Ok(());
-            }
-        }
-        self.sense_links_to_get_or(target.clone(), || Vec::new())?
-            .push((rel.clone(), source.clone()));
+        self.sense_links_to_push(target.clone(), rel.clone(), source.clone())?;
+        let (s2t, rel) = rel.to_canonical();
+        let (store_source, store_target) = if s2t { (source, target) } else { (target, source) };
         let mut lemma_pos = None;
-        match self.sense_id_to_lemma_pos_get(source)? {
+        match self.sense_id_to_lemma_pos_get(store_source)? {
             Some((lemma, pos)) => {
                 lemma_pos = Some((lemma.clone(), pos.clone()));
             }
@@ -764,7 +759,7 @@ pub trait Lexicon: Sized {
         match lemma_pos {
             Some((lemma, pos)) => {
                 self.entries_update(entry_key(&lemma), |e| {
-                    e.add_rel(&lemma, &pos, source, rel, target)
+                    e.add_rel(&lemma, &pos, store_source, rel, store_target)
                 })??;
             }
             None => {}
@@ -799,15 +794,14 @@ pub trait Lexicon: Sized {
 
     /// Add a synset relation to WordNet
     fn add_rel(&mut self, source: &SynsetId, rel: SynsetRelType, target: &SynsetId) -> Result<()> {
-        self.links_to_get_or(target.clone(), || Vec::new())?
-            .push((rel.clone(), source.clone()));
+        self.links_to_push(target.clone(), rel.clone(), source.clone())?;
         let (s2t, rel) = rel.to_yaml();
         if s2t {
             self.update_synset(source, |ss| {
                 ss.insert_rel(&rel, target);
             })?;
         } else {
-            self.update_synset(source, |ss| {
+            self.update_synset(target, |ss| {
                 ss.insert_rel(&rel, source);
             })?;
         }

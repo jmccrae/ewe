@@ -489,7 +489,6 @@ pub enum SenseRelType {
     HasDomainRegion,
     Exemplifies,
     IsExemplifiedBy,
-    IsPertainymOf,
     Similar,
     Agent,
     Material,
@@ -522,7 +521,6 @@ impl SenseRelType {
             SenseRelType::HasDomainRegion => "has_domain_region",
             SenseRelType::Exemplifies => "exemplifies",
             SenseRelType::IsExemplifiedBy => "is_exemplified_by",
-            SenseRelType::IsPertainymOf => "is_pertainym_of",
             SenseRelType::Similar => "similar",
             SenseRelType::Other => "other",
             SenseRelType::Agent => "agent",
@@ -557,7 +555,6 @@ impl SenseRelType {
             "exemplifies_sense" => Some(SenseRelType::Exemplifies),
             "is_exemplified_by" => Some(SenseRelType::IsExemplifiedBy),
             "is_exemplified_by_sense" => Some(SenseRelType::IsExemplifiedBy),
-            "is_pertainym_of" => Some(SenseRelType::IsPertainymOf),
             "similar" => Some(SenseRelType::Similar),
             "other" => Some(SenseRelType::Other),
             "agent" => Some(SenseRelType::Agent),
@@ -600,7 +597,6 @@ impl SenseRelType {
             SenseRelType::HasDomainRegion => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::Exemplifies => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::IsExemplifiedBy => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
-            SenseRelType::IsPertainymOf => vec![&PartOfSpeech::n],
             SenseRelType::Similar => vec![&PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::s],
             SenseRelType::Other => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],
             SenseRelType::Agent => vec![&PartOfSpeech::n, &PartOfSpeech::v],
@@ -627,8 +623,6 @@ impl SenseRelType {
         match self {
             SenseRelType::Antonym => Some(SenseRelType::Antonym),
             SenseRelType::Also => Some(SenseRelType::Also),
-            SenseRelType::IsPertainymOf => Some(SenseRelType::Pertainym),
-            SenseRelType::Pertainym => Some(SenseRelType::IsPertainymOf),
             SenseRelType::DomainTopic => Some(SenseRelType::HasDomainTopic),
             SenseRelType::HasDomainTopic => Some(SenseRelType::DomainTopic),
             SenseRelType::DomainRegion => Some(SenseRelType::HasDomainRegion),
@@ -637,6 +631,18 @@ impl SenseRelType {
             SenseRelType::IsExemplifiedBy => Some(SenseRelType::Exemplifies),
             SenseRelType::Similar => Some(SenseRelType::Similar),
             _ => None
+        }
+    }
+
+    /// Whether this relation is stored as-is on the source sense (`true`), or
+    /// must instead be stored as its canonical inverse with source/target swapped
+    /// (`false`) - the OEWN format only persists a subset of relation kinds.
+    pub fn to_canonical(self) -> (bool, SenseRelType) {
+        match self {
+            SenseRelType::HasDomainTopic => (false, SenseRelType::DomainTopic),
+            SenseRelType::HasDomainRegion => (false, SenseRelType::DomainRegion),
+            SenseRelType::IsExemplifiedBy => (false, SenseRelType::Exemplifies),
+            other => (true, other),
         }
     }
 }

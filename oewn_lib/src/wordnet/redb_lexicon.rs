@@ -294,20 +294,32 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) -> Result<Vec<(SenseRelType, SenseId)>> {
-        let mut manager = self.txn_manager.lock().unwrap();
-        let txn = manager.begin_write()?;
-        let table = txn.open_table(SENSE_LINKS)?;
         let mut new_links = None;
-        let result = if let Some(links_str) = table.get(sense_id.to_string())? {
-            let links = deserialize_sense_links(links_str.value())?;
-            Some(links)
-        } else {
-            let links = f();
-            // We want to do this:
-            //table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
-            // but we can't because we are in a read transaction, so we defer the insertion until later
-            new_links = Some(links);
-            None
+        // Scoped so `manager` (and the `txn`/`table` borrowed from it) drop before the `None`
+        // arm below takes the lock again - `std::sync::Mutex` isn't reentrant, and without this
+        // block the guard from this line is still alive when that second `lock()` runs,
+        // deadlocking the thread against itself. Mirrors `links_to_get_or`, which already gets
+        // this right.
+        let result = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(SENSE_LINKS)?;
+            // Bound to `x` rather than left as the block's tail expression: the temporary
+            // `AccessGuard` `table.get(...)` returns would otherwise be dropped at the end of
+            // this block too, after `table`/`txn`/`manager` - but it borrows from `table`, so
+            // it needs to go first. Mirrors `links_to_get_or`'s `let x = ...; x` pattern.
+            let x = if let Some(links_str) = table.get(sense_id.to_string())? {
+                let links = deserialize_sense_links(links_str.value())?;
+                Some(links)
+            } else {
+                let links = f();
+                // We want to do this:
+                //table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
+                // but we can't because we are in a read transaction, so we defer the insertion until later
+                new_links = Some(links);
+                None
+            };
+            x
         };
         // Now we are outside the read transaction, so we can do the write if necessary
         match result {

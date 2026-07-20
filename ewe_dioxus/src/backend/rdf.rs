@@ -437,8 +437,11 @@ fn write_synset_triples<W: std::io::Write>(
         sense_rel!(participle, "participle");
         sense_rel!(is_participle_of, "isParticipleOf");
         sense_rel!(pertainym, "pertainym");
-        sense_rel!(is_pertainym_of, "isPertainymOf");
         sense_rel!(derivation, "derivation");
+        sense_rel!(domain_topic_sense, "domainTopic");
+        sense_rel!(has_domain_topic_sense, "hasDomainTopic");
+        sense_rel!(domain_region_sense, "domainRegion");
+        sense_rel!(has_domain_region_sense, "hasDomainRegion");
         sense_rel!(exemplifies_sense, "exemplifies");
         sense_rel!(is_exemplified_by_sense, "isExemplifiedBy");
         sense_rel!(agent, "agent");
@@ -612,8 +615,11 @@ mod tests {
             participle: vec![],
             is_participle_of: vec![],
             pertainym: vec![],
-            is_pertainym_of: vec![],
             derivation: vec![],
+            domain_topic_sense: vec![],
+            has_domain_topic_sense: vec![],
+            domain_region_sense: vec![],
+            has_domain_region_sense: vec![],
             exemplifies_sense: vec![],
             is_exemplified_by_sense: vec![],
             agent: vec![],

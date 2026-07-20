@@ -144,10 +144,19 @@ pub struct MemberSynset {
     pub pertainym: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_pertainym_of: Vec<SenseRelation>,
+    pub derivation: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub derivation: Vec<SenseRelation>,
+    pub domain_topic_sense: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub has_domain_topic_sense: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub domain_region_sense: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub has_domain_region_sense: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exemplifies_sense: Vec<SenseRelation>,
@@ -317,6 +326,8 @@ impl MemberSynset {
                     extract_sense_rel!(participle,Participle);
                     extract_sense_rel!(pertainym,Pertainym);
                     extract_sense_rel!(derivation,Derivation);
+                    extract_sense_rel!(domain_topic,DomainTopic);
+                    extract_sense_rel!(domain_region,DomainRegion);
                     extract_sense_rel!(agent,Agent);
                     extract_sense_rel!(exemplifies,Exemplifies);
                     extract_sense_rel!(material,Material);
@@ -408,10 +419,13 @@ impl MemberSynset {
             participle: sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
             is_participle_of: inv_sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
             pertainym: sense_links.remove(&SenseRelType::Pertainym).unwrap_or_else(|| Vec::new()),
-            is_pertainym_of: inv_sense_links.remove(&SenseRelType::Pertainym).unwrap_or_else(|| Vec::new()),
             derivation: sense_links.remove(&SenseRelType::Derivation).unwrap_or_else(|| Vec::new()),
+            domain_topic_sense: sense_links.remove(&SenseRelType::DomainTopic).unwrap_or_else(|| Vec::new()),
+            has_domain_topic_sense: inv_sense_links.remove(&SenseRelType::HasDomainTopic).unwrap_or_else(|| Vec::new()),
+            domain_region_sense: sense_links.remove(&SenseRelType::DomainRegion).unwrap_or_else(|| Vec::new()),
+            has_domain_region_sense: inv_sense_links.remove(&SenseRelType::HasDomainRegion).unwrap_or_else(|| Vec::new()),
             exemplifies_sense: sense_links.remove(&SenseRelType::Exemplifies).unwrap_or_else(|| Vec::new()),
-            is_exemplified_by_sense: inv_sense_links.remove(&SenseRelType::Exemplifies).unwrap_or_else(|| Vec::new()),
+            is_exemplified_by_sense: inv_sense_links.remove(&SenseRelType::IsExemplifiedBy).unwrap_or_else(|| Vec::new()),
             agent: sense_links.remove(&SenseRelType::Agent).unwrap_or_else(|| Vec::new()),
             is_agent_of: inv_sense_links.remove(&SenseRelType::Agent).unwrap_or_else(|| Vec::new()),
             material: sense_links.remove(&SenseRelType::Material).unwrap_or_else(|| Vec::new()),

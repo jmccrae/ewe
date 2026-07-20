@@ -11,9 +11,10 @@ use oewn_lib::automaton::{apply_automaton, Action};
 #[allow(unused_imports)]
 use oewn_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
-use oewn_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
+use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, SynsetId};
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -32,6 +33,15 @@ enum EweEditError {
 fn write_lexicon() -> Result<std::sync::RwLockWriteGuard<'static, ReDBLexicon>> {
     match crate::LEXICON.get() {
         Some(lock) => Ok(lock.write().unwrap()),
+        None => Err(EweEditError::LexiconUnavailable.into()),
+    }
+}
+
+/// Takes a read lock on the shared lexicon, or an error if it failed to load at startup.
+#[cfg(feature = "server")]
+fn read_lexicon() -> Result<std::sync::RwLockReadGuard<'static, ReDBLexicon>> {
+    match crate::LEXICON.get() {
+        Some(lock) => Ok(lock.read().unwrap()),
         None => Err(EweEditError::LexiconUnavailable.into()),
     }
 }
@@ -60,4 +70,61 @@ pub async fn apply_edits(synset: SynsetId, actions: Vec<Action>) -> Result<Membe
         updated.into_owned(),
         &*lexicon,
     )?)
+}
+
+/// A synset candidate for the relation editor's target picker: unlike the main search box
+/// (which returns one entry per lemma), the user needs to pick a specific *sense*, so each
+/// candidate is a synset with enough context (members, definition) to tell them apart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SynsetCandidate {
+    pub id: SynsetId,
+    pub members: Vec<String>,
+    pub definition: String,
+    pub part_of_speech: PartOfSpeech,
+}
+
+/// Looks up synsets by lemma prefix (expanded to every synset each matching lemma belongs to)
+/// or by synset/ILI id prefix, for the relation editor's target picker.
+#[get("/api/edit/search_synsets/{query}?max_results")]
+pub async fn search_synsets(
+    query: String,
+    max_results: Option<usize>,
+) -> Result<Vec<SynsetCandidate>> {
+    let lexicon = read_lexicon()?;
+    let max_results = max_results.unwrap_or(20);
+
+    let mut synset_ids: Vec<SynsetId> = Vec::new();
+    'lemmas: for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
+        for entry in lexicon.entry_by_lemma(&lemma)? {
+            for sense in entry.sense.iter() {
+                if !synset_ids.contains(&sense.synset) {
+                    synset_ids.push(sense.synset.clone());
+                }
+                if synset_ids.len() >= max_results {
+                    break 'lemmas;
+                }
+            }
+        }
+    }
+    if synset_ids.len() < max_results {
+        for ssid in lexicon.ssid_by_prefix(&query, Some(max_results - synset_ids.len()))? {
+            let id = SynsetId::new_owned(ssid);
+            if !synset_ids.contains(&id) {
+                synset_ids.push(id);
+            }
+        }
+    }
+
+    let mut candidates = Vec::with_capacity(synset_ids.len());
+    for id in &synset_ids {
+        if let Some(synset) = lexicon.synset_by_id(id)? {
+            candidates.push(SynsetCandidate {
+                id: id.clone(),
+                members: synset.members.clone(),
+                definition: synset.definition.get(0).cloned().unwrap_or_default(),
+                part_of_speech: synset.part_of_speech.clone(),
+            });
+        }
+    }
+    Ok(candidates)
 }

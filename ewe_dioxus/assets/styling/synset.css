@@ -192,6 +192,101 @@
     padding-left:30px;
 }
 
+.relations-editing {
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.relation-edit-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
+}
+
+.relation-edit-label {
+    font-family: var(--font-heading);
+    color: var(--color-text-strong);
+    font-weight: 500;
+}
+
+.relation-edit-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--color-surface-light);
+    border-radius: 3px;
+    padding: 2px 6px;
+}
+
+.relation-edit-pending {
+    background: var(--color-surface-hover);
+    border: 1px dashed var(--color-border);
+}
+
+.relation-add-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.relation-type-select,
+.relation-lemma-pickers select {
+    font-size: 1em;
+    font-family: inherit;
+}
+
+.relation-search-input {
+    font-size: 1em;
+    font-family: inherit;
+    min-width: 20em;
+}
+
+.relation-search-results {
+    position: absolute;
+    z-index: 20;
+    margin-top: 2px;
+    max-width: 30em;
+    max-height: 16em;
+    overflow-y: auto;
+    background-color: var(--color-surface-dark);
+    color: var(--color-text-on-dark);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    list-style: none;
+    padding: 0;
+}
+
+.relation-search-results li {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.relation-search-results li:hover {
+    background-color: var(--color-navbar-hover);
+}
+
+.relation-selected-target {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.relation-lemma-pickers {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
 .relation-word {
     padding-left:30px;
 }
