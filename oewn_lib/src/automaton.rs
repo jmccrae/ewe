@@ -5,15 +5,21 @@ use crate::rels::{SenseRelType, SynsetRelType};
 use crate::validate::validate;
 use crate::wordnet::{Lexicon, PosKey, SenseId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Applies a batch of actions, returning the id of the last synset created or referenced
 /// (`SynsetRef::Last`'s target throughout the batch) - `None` if the batch never touched a
 /// synset. Lets callers that just added a synset find out what id it got.
+///
+/// On full success, also appends the batch to the change log (see [`ChangeLogEntry`]) - a batch
+/// that fails partway through (via an early `?` return below) is not logged, since the point is a
+/// record of what was actually applied, not what was attempted.
 pub fn apply_automaton<L: Lexicon>(
     actions: Vec<Action>,
     wn: &mut L,
     changes: &mut ChangeList,
 ) -> Result<Option<SynsetId>, String> {
+    let actions_for_log = actions.clone();
     let mut last_synset_id: Option<SynsetId> = None;
     let mut last_sense_id: Option<SenseId> = None;
     for action in actions {
@@ -447,6 +453,9 @@ pub fn apply_automaton<L: Lexicon>(
             }
         }
     }
+    if !actions_for_log.is_empty() {
+        changelog_append(wn, &actions_for_log)?;
+    }
     Ok(last_synset_id)
 }
 
@@ -581,7 +590,7 @@ impl<'de> Deserialize<'de> for SenseRef {
 #[serde(transparent)]
 pub struct ActionWrapper(#[serde(with = "serde_yaml::with::singleton_map")] pub Action);
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     #[serde(rename = "add_entry")]
     AddEntry {
@@ -723,7 +732,159 @@ pub enum Action {
     FixTransitivity,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+impl Action {
+    /// A short, human-readable one-line description of this action, for the change log UI.
+    pub fn summary(&self) -> String {
+        fn sense_ref(r: &SenseRef) -> String {
+            match r {
+                SenseRef::Id(id) => id.as_str().to_string(),
+                SenseRef::Lemma(lemma) => format!("lemma={}", lemma),
+                SenseRef::Last => "last".to_string(),
+            }
+        }
+        fn synset_with_sense(synset: &SynsetRef, sense: &Option<SenseRef>) -> String {
+            match sense {
+                Some(s) => format!("{}[{}]", synset.as_str(), sense_ref(s)),
+                None => synset.as_str().to_string(),
+            }
+        }
+        match self {
+            Action::AddEntry { synset, lemma, pos, .. } => format!(
+                "Added entry \"{}\" ({}) to {}",
+                lemma,
+                pos.as_str(),
+                synset.as_str()
+            ),
+            Action::DeleteEntry { synset, lemma } => {
+                format!("Deleted entry \"{}\" from {}", lemma, synset.as_str())
+            }
+            Action::MoveEntry { synset, lemma, target_synset } => format!(
+                "Moved entry \"{}\" from {} to {}",
+                lemma,
+                synset.as_str(),
+                target_synset.as_str()
+            ),
+            Action::ChangeMembers { synset, members } => format!(
+                "Changed members of {} to [{}]",
+                synset.as_str(),
+                members.join(", ")
+            ),
+            Action::AddSynset { definition, lexfile, lemmas, .. } => format!(
+                "Added synset in {} ({}): {}",
+                lexfile,
+                lemmas.join(", "),
+                definition
+            ),
+            Action::DeleteSynset { synset, reason, superseded_by } => match superseded_by {
+                Some(target) => format!(
+                    "Deleted synset {} (superseded by {}, reason: {})",
+                    synset.as_str(),
+                    target.as_str(),
+                    reason
+                ),
+                None => format!(
+                    "Permanently deleted synset {} (reason: {})",
+                    synset.as_str(),
+                    reason
+                ),
+            },
+            Action::Definition { synset, definition } => {
+                format!("Changed definition of {} to \"{}\"", synset.as_str(), definition)
+            }
+            Action::ChangeILI { synset, ili } => {
+                format!("Changed ILI of {} to {}", synset.as_str(), ili)
+            }
+            Action::ChangeWikidata { synset, wikidata } => format!(
+                "Changed Wikidata links of {} to [{}]",
+                synset.as_str(),
+                wikidata.join(", ")
+            ),
+            Action::ChangeSource { synset, source } => {
+                format!("Changed source of {} to \"{}\"", synset.as_str(), source)
+            }
+            Action::AddExample { synset, example, .. } => {
+                format!("Added example \"{}\" to {}", example, synset.as_str())
+            }
+            Action::UpdateExample { synset, number, example, .. } => format!(
+                "Updated example #{} of {} to \"{}\"",
+                number,
+                synset.as_str(),
+                example
+            ),
+            Action::DeleteExample { synset, number } => {
+                format!("Deleted example #{} from {}", number, synset.as_str())
+            }
+            Action::AddRelation { source, source_sense, relation, target, target_sense, .. } => {
+                format!(
+                    "Added relation {} from {} to {}",
+                    relation,
+                    synset_with_sense(source, source_sense),
+                    synset_with_sense(target, target_sense)
+                )
+            }
+            Action::DeleteRelation { source, source_sense, target, target_sense, .. } => format!(
+                "Deleted relation from {} to {}",
+                synset_with_sense(source, source_sense),
+                synset_with_sense(target, target_sense)
+            ),
+            Action::ReverseRelation { source, source_sense, target, target_sense } => format!(
+                "Reversed relation between {} and {}",
+                synset_with_sense(source, source_sense),
+                synset_with_sense(target, target_sense)
+            ),
+            Action::UpdateRelations { synset, relations } => format!(
+                "Updated {} relation(s) on {}",
+                relations.len(),
+                synset.as_str()
+            ),
+            Action::Validate => "Validated the lexicon".to_string(),
+            Action::FixTransitivity => "Fixed transitivity of relations".to_string(),
+        }
+    }
+}
+
+/// One batch of actions applied through [`apply_automaton`] - what the change log stores, one
+/// entry per call (see `Lexicon::changelog_append`/`changelog_recent`, which store/retrieve these
+/// pre-serialized so the storage layer stays agnostic of `Action`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeLogEntry {
+    pub timestamp_ms: u64,
+    pub actions: Vec<Action>,
+}
+
+/// Serializes `actions` as a [`ChangeLogEntry`] timestamped with the current time and appends it
+/// to `wn`'s change log, returning the id it was stored under.
+fn changelog_append<L: Lexicon>(wn: &mut L, actions: &[Action]) -> Result<u64, String> {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let entry = ChangeLogEntry {
+        timestamp_ms,
+        actions: actions.to_vec(),
+    };
+    let yaml = serde_yaml::to_string(&entry).map_err(|e| e.to_string())?;
+    wn.changelog_append(yaml).map_err(|e| e.to_string())
+}
+
+/// Up to `limit` most recent change log entries, newest first, deserialized back into
+/// [`ChangeLogEntry`]s. `before` (exclusive), if given, paginates further back than a previous
+/// page's oldest id.
+pub fn changelog_recent<L: Lexicon>(
+    wn: &L,
+    limit: usize,
+    before: Option<u64>,
+) -> Result<Vec<(u64, ChangeLogEntry)>, String> {
+    let raw = wn.changelog_recent(limit, before).map_err(|e| e.to_string())?;
+    raw.into_iter()
+        .map(|(id, yaml)| {
+            let entry: ChangeLogEntry = serde_yaml::from_str(&yaml).map_err(|e| e.to_string())?;
+            Ok((id, entry))
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateRelationItem {
     relation: String,
     target: SynsetRef,
@@ -1190,5 +1351,38 @@ mod tests {
             lexicon.deprecations_get().unwrap().is_empty(),
             "a supersede-less delete must not leave a deprecation record behind"
         );
+    }
+
+    #[test]
+    fn test_apply_automaton_appends_one_changelog_entry_per_batch() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+
+        let actions = vec![Action::AddSynset {
+            definition: "a test synset".to_string(),
+            lexfile: "noun.animal".to_string(),
+            pos: Some(PosKey::new("n".to_string())),
+            lemmas: vec!["testword".to_string()],
+            subcats: Vec::new(),
+        }];
+        apply_automaton(actions.clone(), &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let entries = changelog_recent(&lexicon, 10, None).unwrap();
+        assert_eq!(entries.len(), 1, "one apply_automaton call should append exactly one entry");
+        assert_eq!(entries[0].1.actions, actions);
+
+        // A second batch should be newest-first ahead of the one above, and pagination via
+        // `before` should exclude it and fall back to the first.
+        let more_actions = vec![Action::Validate];
+        apply_automaton(more_actions.clone(), &mut lexicon, &mut ChangeList::new()).unwrap();
+        let entries = changelog_recent(&lexicon, 10, None).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].1.actions, more_actions, "newest entry should come first");
+        assert_eq!(entries[1].1.actions, actions);
+
+        let first_id = entries[0].0;
+        let older = changelog_recent(&lexicon, 10, Some(first_id)).unwrap();
+        assert_eq!(older.len(), 1);
+        assert_eq!(older[0].1.actions, actions);
     }
 }

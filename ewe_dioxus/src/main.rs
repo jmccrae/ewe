@@ -11,7 +11,7 @@ use std::sync::RwLock;
 use teanga::disk_corpus::RedbDb;
 #[cfg(feature = "server")]
 use teanga::DiskCorpus;
-use views::{ByLemma, BySenses, BySynset, Downloads, Home, WNLayout};
+use views::{ByLemma, BySenses, BySynset, Downloads, History, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -55,6 +55,9 @@ enum Route {
 
         #[route("/downloads")]
         Downloads {},
+
+        #[route("/history")]
+        History {},
 }
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.

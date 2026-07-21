@@ -192,6 +192,14 @@ pub trait Lexicon: Sized {
     fn frames_get<'a>(&'a self) -> Result<Cow<'a, Vec<(String, String)>>>;
     fn frames_set(&mut self, frames: Vec<(String, String)>) -> Result<()>;
 
+    /// Appends one pre-serialized change-log entry (see `automaton::ChangeLogEntry`, which
+    /// this is agnostic of - the storage layer just deals in opaque blobs) to the append-only
+    /// log and returns the id it was stored under.
+    fn changelog_append(&mut self, entry: String) -> Result<u64>;
+    /// Up to `limit` most recent change log entries, newest first. `before` (exclusive), if
+    /// given, paginates further back than a previous page's oldest id.
+    fn changelog_recent(&self, limit: usize, before: Option<u64>) -> Result<Vec<(u64, String)>>;
+
     /// Load a lexicon from a folder of YAML files
     fn load<P: AsRef<Path>, Pr: Progress>(
         mut self,

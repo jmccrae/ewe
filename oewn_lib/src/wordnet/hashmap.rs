@@ -12,7 +12,8 @@ pub struct LexiconHashMapBackend {
     links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
     sense_id_to_lemma_pos : HashMap<SenseId, (String, PosKey)>,
     deprecations : Vec<DeprecationRecord>,
-    frames : Vec<(String, String)>
+    frames : Vec<(String, String)>,
+    changelog : Vec<(u64, String)>
 }
 
 impl LexiconHashMapBackend {
@@ -25,7 +26,8 @@ impl LexiconHashMapBackend {
             links_to : HashMap::new(),
             sense_id_to_lemma_pos : HashMap::new(),
             deprecations : Vec::new(),
-            frames : Vec::new()
+            frames : Vec::new(),
+            changelog : Vec::new()
         }
     }
     #[cfg(test)]
@@ -192,6 +194,19 @@ impl Lexicon for LexiconHashMapBackend {
     fn frames_set(&mut self, frames : Vec<(String, String)>) -> Result<()> {
         self.frames = frames;
         Ok(())
+    }
+    fn changelog_append(&mut self, entry : String) -> Result<u64> {
+        let next_id = self.changelog.last().map_or(0, |(id, _)| id + 1);
+        self.changelog.push((next_id, entry));
+        Ok(next_id)
+    }
+    fn changelog_recent(&self, limit : usize, before : Option<u64>) -> Result<Vec<(u64, String)>> {
+        Ok(self.changelog.iter()
+            .rev()
+            .filter(|(id, _)| before.map_or(true, |b| *id < b))
+            .take(limit)
+            .cloned()
+            .collect())
     }
 }
 

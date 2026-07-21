@@ -16,6 +16,10 @@ thiserror = "2.0.18"
 oxrdf = { version = "0.3.3", optional = true }
 oxrdfio = { version = "0.2.4", optional = true }
 quick-xml = { version = "0.37.5", optional = true }
+# Only used to format change-log timestamps server-side (`backend::edit::get_changelog`) - no
+# "clock" feature, since that needs current-time access that doesn't build cleanly on wasm32;
+# formatting an already-known `u64` millis value doesn't need it.
+chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
 percent-encoding = "2.3.2"
 teanga = { git = "https://github.com/TeangaNLP/teanga.rs", branch = "main", features = ["redb"] }
 
@@ -40,7 +44,7 @@ mobile = ["dioxus/mobile"]
 # `--features edit` to test editing on web/mobile, and desktop always needs it passed explicitly too.
 edit = []
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
-server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml"]
+server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml", "dep:chrono"]
 oxrdf = ["dep:oxrdf"]
 oxrdfio = ["dep:oxrdfio"]
 quick-xml = ["dep:quick-xml"]

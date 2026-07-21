@@ -7,13 +7,15 @@
 
 use dioxus::prelude::*;
 #[allow(unused_imports)]
-use oewn_lib::automaton::{apply_automaton, Action, SynsetRef};
+use oewn_lib::automaton::{apply_automaton, changelog_recent, Action, SynsetRef};
 #[allow(unused_imports)]
 use oewn_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
 use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
+#[cfg(feature = "server")]
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -204,4 +206,41 @@ pub async fn delete_synset(
     apply_automaton(actions, &mut *lexicon, &mut ChangeList::new())
         .map_err(EweEditError::Automaton)?;
     Ok(navigate_to)
+}
+
+#[cfg(feature = "server")]
+fn format_timestamp(timestamp_ms: u64) -> String {
+    DateTime::<Utc>::from_timestamp_millis(timestamp_ms as i64)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+        .unwrap_or_else(|| "unknown time".to_string())
+}
+
+/// One batch of actions from the change log, ready to display: a formatted timestamp and a short
+/// summary per action (see `Action::summary`) rather than the raw action data, since the client
+/// only ever displays it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChangeLogEntryView {
+    pub id: u64,
+    pub timestamp: String,
+    pub summaries: Vec<String>,
+}
+
+/// The `limit` most recent change log entries, newest first. `before` (exclusive), if given,
+/// paginates further back than a previous page's oldest id - see `History`'s "Load more".
+#[get("/api/edit/changelog?limit&before")]
+pub async fn get_changelog(
+    limit: Option<usize>,
+    before: Option<u64>,
+) -> Result<Vec<ChangeLogEntryView>> {
+    let lexicon = read_lexicon()?;
+    let limit = limit.unwrap_or(50).min(200);
+    let entries = changelog_recent(&*lexicon, limit, before).map_err(EweEditError::Automaton)?;
+    Ok(entries
+        .into_iter()
+        .map(|(id, entry)| ChangeLogEntryView {
+            id,
+            timestamp: format_timestamp(entry.timestamp_ms),
+            summaries: entry.actions.iter().map(Action::summary).collect(),
+        })
+        .collect())
 }

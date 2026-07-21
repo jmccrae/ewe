@@ -36,6 +36,11 @@ const DEPRECATION_KEY:&'static str = "deprecations";
 /// FRAMES_KEY -> Vec<(frame key, human-readable description)>, loaded from `frames.yaml`
 const FRAMES: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("frames");
 const FRAMES_KEY:&'static str = "frames";
+/// (id, auto-incrementing) -> a YAML-serialized `automaton::ChangeLogEntry`. An append-only log
+/// of every batch of actions ever applied - values are stored as plain `String` (unlike the
+/// speedy-encoded tables above) since this table has no dependency on `automaton::Action`, it
+/// just stores whatever blob `Lexicon::changelog_append`'s caller already serialized.
+const CHANGE_LOG: TableDefinition<u64, String> = TableDefinition::new("change_log");
 /// (ili) -> synset_id. Maintained incrementally wherever a synset is written,
 /// so `ili_by_prefix` can do a direct sorted-range scan instead of building
 /// an in-memory index by scanning (and fully deserializing) every synset.
@@ -123,6 +128,7 @@ impl ReDBLexicon {
             txn.open_table(DEPRECATIONS)?;
             txn.open_table(ILI_TO_SYNSET_ID)?;
             txn.open_table(FRAMES)?;
+            txn.open_table(CHANGE_LOG)?;
         }
 
 
@@ -494,6 +500,46 @@ impl Lexicon for ReDBLexicon {
         let mut table = txn.open_table(FRAMES)?;
         table.insert(FRAMES_KEY, serialize_frames(frames)?)?;
         Ok(())
+    }
+    fn changelog_append(&mut self, entry : String) -> Result<u64> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let id = {
+            // Write-txn `open_table` auto-creates the table, so a database written before this
+            // table existed needs no migration.
+            let mut table = txn.open_table(CHANGE_LOG)?;
+            let next_id = match table.iter()?.next_back() {
+                Some(kv) => kv?.0.value() + 1,
+                None => 0,
+            };
+            table.insert(next_id, entry)?;
+            next_id
+        };
+        Ok(id)
+    }
+    fn changelog_recent(&self, limit : usize, before : Option<u64>) -> Result<Vec<(u64, String)>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        // A database written before the change log existed won't have this table yet - treat
+        // that as "no history" rather than erroring; new entries will populate it from here on.
+        let table = match txn.open_table(CHANGE_LOG) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let range = match before {
+            Some(b) => table.range::<u64>(..b)?,
+            None => table.range::<u64>(..)?,
+        };
+        let mut out = Vec::with_capacity(limit.min(64));
+        for kv in range.rev() {
+            let (k, v) = kv?;
+            out.push((k.value(), v.value().to_string()));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
     }
 
 

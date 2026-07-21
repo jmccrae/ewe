@@ -55,6 +55,8 @@ pub fn WNLayout() -> Element {
                     Link { to: Route::Downloads {}, "Downloads" }
                     " | "
                     a { href: "/api/docs", "JSON API documentation" }
+                    " | "
+                    Link { to: Route::History {}, "History" }
                 }
             }
         }

@@ -15,3 +15,6 @@ pub use by_senses::BySenses;
 
 mod downloads;
 pub use downloads::Downloads;
+
+mod history;
+pub use history::History;
