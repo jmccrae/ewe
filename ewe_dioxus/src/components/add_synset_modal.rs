@@ -125,7 +125,7 @@ fn LemmaFramesPicker(props: LemmaFramesPickerProps) -> Element {
                                 on_change.call(updated);
                             }
                         },
-                        "✗"
+                        "×"
                     }
                 }
             }
@@ -232,7 +232,7 @@ fn AddSynsetModal(props: AddSynsetModalProps) -> Element {
                         r#type: "button",
                         title: "Close",
                         onclick: move |_| props.on_close.call(()),
-                        "✗"
+                        "×"
                     }
                 }
                 if metadata.loading() {

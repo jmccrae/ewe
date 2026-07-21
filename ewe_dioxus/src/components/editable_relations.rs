@@ -166,7 +166,7 @@ fn render_synset_relation_group(
                             });
                             move |_| on_pending_deletes_changed.call(updated.clone())
                         },
-                        "✗"
+                        "×"
                     }
                 }
             }
@@ -187,7 +187,7 @@ fn render_synset_relation_group(
                                 .collect();
                             move |_| on_pending_adds_changed.call(remaining.clone())
                         },
-                        "✗"
+                        "×"
                     }
                 }
             }
@@ -252,7 +252,7 @@ fn render_sense_relation_group(
                             });
                             move |_| on_pending_deletes_changed.call(updated.clone())
                         },
-                        "✗"
+                        "×"
                     }
                 }
             }
@@ -273,7 +273,7 @@ fn render_sense_relation_group(
                                 .collect();
                             move |_| on_pending_adds_changed.call(remaining.clone())
                         },
-                        "✗"
+                        "×"
                     }
                 }
             }
@@ -374,7 +374,7 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                             class: "edit-delete",
                             title: "Change target",
                             onclick: move |_| selected_target.set(None),
-                            "✗"
+                            "×"
                         }
                     }
                     if selected_info.map(|i| i.is_sense).unwrap_or(false) {

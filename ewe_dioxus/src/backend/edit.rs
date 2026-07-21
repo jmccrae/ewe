@@ -7,7 +7,7 @@
 
 use dioxus::prelude::*;
 #[allow(unused_imports)]
-use oewn_lib::automaton::{apply_automaton, Action};
+use oewn_lib::automaton::{apply_automaton, Action, SynsetRef};
 #[allow(unused_imports)]
 use oewn_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
@@ -181,4 +181,27 @@ pub async fn add_synset(
         synset.into_owned(),
         &*lexicon,
     )?)
+}
+
+/// Deletes a synset, either deprecating it in favor of `superseded_by` (hands off its entries,
+/// examples and relations, and leaves a deprecation record - the traditional, deliberate-edit
+/// path) or, if `superseded_by` is omitted, removing it outright with no trail - appropriate for
+/// a synset a user just created through this same UI and immediately decided against. Returns
+/// the id of the synset the client should navigate to next (`superseded_by`, if given).
+#[post("/api/edit/delete_synset")]
+pub async fn delete_synset(
+    synset: SynsetId,
+    reason: String,
+    superseded_by: Option<SynsetId>,
+) -> Result<Option<SynsetId>> {
+    let mut lexicon = write_lexicon()?;
+    let navigate_to = superseded_by.clone();
+    let actions = vec![Action::DeleteSynset {
+        synset: SynsetRef::Id(synset),
+        reason,
+        superseded_by: superseded_by.map(SynsetRef::Id),
+    }];
+    apply_automaton(actions, &mut *lexicon, &mut ChangeList::new())
+        .map_err(EweEditError::Automaton)?;
+    Ok(navigate_to)
 }

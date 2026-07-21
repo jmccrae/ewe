@@ -41,3 +41,11 @@ pub use download_links::DownloadLinks;
 
 mod add_synset_modal;
 pub use add_synset_modal::AddSynsetTrigger;
+
+mod delete_synset_modal;
+pub use delete_synset_modal::DeleteSynsetButton;
+
+#[cfg(feature = "edit")]
+mod synset_picker;
+#[cfg(feature = "edit")]
+pub use synset_picker::SynsetPicker;

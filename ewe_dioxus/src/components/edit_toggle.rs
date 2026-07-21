@@ -10,7 +10,7 @@ pub struct EditToggleProps {
     /// Click the accept (✓) button to commit every pending edit across all fields as one
     /// batch and leave edit mode.
     pub on_accept: EventHandler<()>,
-    /// Click the reject (✗) button to discard every pending edit and leave edit mode.
+    /// Click the reject (×) button to discard every pending edit and leave edit mode.
     pub on_reject: EventHandler<()>,
 }
 
@@ -40,7 +40,7 @@ pub fn EditToggle(props: EditToggleProps) -> Element {
                     title: "Discard all changes",
                     disabled: props.saving,
                     onclick: move |_| props.on_reject.call(()),
-                    "✗"
+                    "×"
                 }
             }
         } else {

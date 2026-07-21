@@ -1,8 +1,8 @@
 use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_count;
 use crate::components::{
-    EditToggle, EditableDefinition, EditableExamples, EditableLemmas, EditableRelations,
-    ExampleDraft, PendingRelation, Relation, RelationKey, Subcat,
+    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableLemmas,
+    EditableRelations, ExampleDraft, PendingRelation, Relation, RelationKey, Subcat,
 };
 use crate::Route;
 use dioxus::prelude::*;
@@ -866,6 +866,9 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         editing.set(false);
                                         edit_error.set(None);
                                     },
+                                }
+                                if editing() {
+                                    DeleteSynsetButton { synset_id: synset.id.clone() }
                                 }
                                 if let Some(err) = edit_error() {
                                     span { class: "edit-error", "{err}" }

@@ -164,10 +164,14 @@ pub fn apply_automaton<L: Lexicon>(
                 reason,
                 superseded_by,
             } => {
+                let superseded_by = match superseded_by {
+                    Some(superseded_by) => Some(superseded_by.resolve(&last_synset_id)?),
+                    None => None,
+                };
                 change_manager::delete_synset(
                     wn,
                     &synset.resolve(&last_synset_id)?,
-                    Some(&superseded_by.resolve(&last_synset_id)?),
+                    superseded_by.as_ref(),
                     reason,
                     changes,
                 )
@@ -617,7 +621,13 @@ pub enum Action {
     DeleteSynset {
         synset: SynsetRef,
         reason: String,
-        superseded_by: SynsetRef,
+        /// `None` permanently removes the synset with no deprecation record and no relation/
+        /// entry hand-off - appropriate for e.g. a synset a user just created and immediately
+        /// decided against, as opposed to `Some(...)`'s "this synset is deprecated in favor of
+        /// that one" trail, which is what deletion meant before this was reachable from a UI.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        superseded_by: Option<SynsetRef>,
     },
     #[serde(rename = "change_definition")]
     Definition {
@@ -832,7 +842,7 @@ mod tests {
             Action::DeleteSynset {
                 synset: SynsetRef::Last,
                 reason: "Duplicate (#123)".to_string(),
-                superseded_by: SynsetRef::id("00001741-n"),
+                superseded_by: Some(SynsetRef::id("00001741-n")),
             },
             Action::Definition {
                 synset: SynsetRef::id("00001740-n"),
@@ -1137,6 +1147,48 @@ mod tests {
             !general_synset.hypernym.contains(&general),
             "general must not gain a self-loop hypernym, got {:?}",
             general_synset.hypernym
+        );
+    }
+
+    #[test]
+    fn test_delete_synset_without_supersede_leaves_no_deprecation() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid = change_manager::add_synset(
+            &mut lexicon,
+            "a mistake".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid.clone(),
+            "oops".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+
+        let actions = vec![Action::DeleteSynset {
+            synset: SynsetRef::Id(ssid.clone()),
+            reason: String::new(),
+            superseded_by: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        assert!(
+            lexicon.synset_by_id(&ssid).unwrap().is_none(),
+            "synset should be fully removed, not just marked deprecated"
+        );
+        assert!(
+            lexicon.deprecations_get().unwrap().is_empty(),
+            "a supersede-less delete must not leave a deprecation record behind"
         );
     }
 }
