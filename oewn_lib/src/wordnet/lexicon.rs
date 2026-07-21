@@ -200,6 +200,12 @@ pub trait Lexicon: Sized {
     /// given, paginates further back than a previous page's oldest id.
     fn changelog_recent(&self, limit: usize, before: Option<u64>) -> Result<Vec<(u64, String)>>;
 
+    /// The change log id as of the last successful save-to-YAML (`None` if never saved) - see
+    /// `automaton::has_unsaved_changes`, which compares this against the newest `changelog_recent`
+    /// id to tell whether there's anything a save would actually write that isn't already on disk.
+    fn last_saved_changelog_id_get(&self) -> Result<Option<u64>>;
+    fn last_saved_changelog_id_set(&mut self, id: u64) -> Result<()>;
+
     /// Load a lexicon from a folder of YAML files
     fn load<P: AsRef<Path>, Pr: Progress>(
         mut self,

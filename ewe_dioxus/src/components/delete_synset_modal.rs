@@ -64,6 +64,7 @@ fn DeleteSynsetModal(props: DeleteSynsetModalProps) -> Element {
     use crate::backend::edit::{delete_synset, SynsetCandidate};
     use crate::components::SynsetPicker;
 
+    let mut dirty = use_context::<Signal<bool>>();
     let mut reason = use_signal(String::new);
     let mut superseding = use_signal(|| None::<SynsetCandidate>);
     let mut submitting = use_signal(|| false);
@@ -147,6 +148,7 @@ fn DeleteSynsetModal(props: DeleteSynsetModalProps) -> Element {
                                     error.set(None);
                                     match delete_synset(synset_id, String::new(), None).await {
                                         Ok(_) => {
+                                            dirty.set(true);
                                             navigator().push(Route::Home {});
                                             props.on_close.call(());
                                         }
@@ -173,6 +175,7 @@ fn DeleteSynsetModal(props: DeleteSynsetModalProps) -> Element {
                                     error.set(None);
                                     match delete_synset(synset_id, reason_val, target_id).await {
                                         Ok(navigate_to) => {
+                                            dirty.set(true);
                                             match navigate_to {
                                                 Some(id) => {
                                                     navigator().push(Route::BySynset { synset: id.as_str().to_string() });

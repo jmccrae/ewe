@@ -884,6 +884,24 @@ pub fn changelog_recent<L: Lexicon>(
         .collect()
 }
 
+/// Whether there's anything a save would actually write that isn't already reflected on disk:
+/// the newest change log entry (if any) is newer than the id recorded at the last successful
+/// save (if any).
+pub fn has_unsaved_changes<L: Lexicon>(wn: &L) -> Result<bool, String> {
+    let latest_id = wn
+        .changelog_recent(1, None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next()
+        .map(|(id, _)| id);
+    let last_saved = wn.last_saved_changelog_id_get().map_err(|e| e.to_string())?;
+    Ok(match (latest_id, last_saved) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(latest), Some(saved)) => latest > saved,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateRelationItem {
     relation: String,
@@ -1384,5 +1402,29 @@ mod tests {
         let older = changelog_recent(&lexicon, 10, Some(first_id)).unwrap();
         assert_eq!(older.len(), 1);
         assert_eq!(older[0].1.actions, actions);
+    }
+
+    #[test]
+    fn test_has_unsaved_changes() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        assert!(!has_unsaved_changes(&lexicon).unwrap(), "a fresh lexicon has nothing to save");
+
+        let actions = vec![Action::AddSynset {
+            definition: "a test synset".to_string(),
+            lexfile: "noun.animal".to_string(),
+            pos: Some(PosKey::new("n".to_string())),
+            lemmas: vec!["testword".to_string()],
+            subcats: Vec::new(),
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+        assert!(has_unsaved_changes(&lexicon).unwrap(), "an applied batch should be unsaved");
+
+        let latest_id = changelog_recent(&lexicon, 1, None).unwrap()[0].0;
+        lexicon.last_saved_changelog_id_set(latest_id).unwrap();
+        assert!(!has_unsaved_changes(&lexicon).unwrap(), "marking the latest id as saved should clear it");
+
+        apply_automaton(vec![Action::Validate], &mut lexicon, &mut ChangeList::new()).unwrap();
+        assert!(has_unsaved_changes(&lexicon).unwrap(), "a later batch should be unsaved again");
     }
 }

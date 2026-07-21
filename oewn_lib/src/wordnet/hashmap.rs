@@ -13,7 +13,8 @@ pub struct LexiconHashMapBackend {
     sense_id_to_lemma_pos : HashMap<SenseId, (String, PosKey)>,
     deprecations : Vec<DeprecationRecord>,
     frames : Vec<(String, String)>,
-    changelog : Vec<(u64, String)>
+    changelog : Vec<(u64, String)>,
+    last_saved_changelog_id : Option<u64>
 }
 
 impl LexiconHashMapBackend {
@@ -27,7 +28,8 @@ impl LexiconHashMapBackend {
             sense_id_to_lemma_pos : HashMap::new(),
             deprecations : Vec::new(),
             frames : Vec::new(),
-            changelog : Vec::new()
+            changelog : Vec::new(),
+            last_saved_changelog_id : None
         }
     }
     #[cfg(test)]
@@ -207,6 +209,13 @@ impl Lexicon for LexiconHashMapBackend {
             .take(limit)
             .cloned()
             .collect())
+    }
+    fn last_saved_changelog_id_get(&self) -> Result<Option<u64>> {
+        Ok(self.last_saved_changelog_id)
+    }
+    fn last_saved_changelog_id_set(&mut self, id : u64) -> Result<()> {
+        self.last_saved_changelog_id = Some(id);
+        Ok(())
     }
 }
 

@@ -258,6 +258,9 @@ pub fn Synset(props: SynsetProps) -> Element {
     #[allow(unused_mut)]
     let mut saving = use_signal(|| false);
     let mut edit_error = use_signal(|| None::<String>);
+    // Only mutated inside the `edit` feature's accept handler below; harmless when it isn't.
+    #[allow(unused_mut, unused_variables)]
+    let mut dirty = use_context::<Signal<bool>>();
 
     // `ss_load` only needs `.write()` (hence `mut`) when the `edit` feature's accept handler
     // below is reachable; harmless when it isn't.
@@ -854,6 +857,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                                 *s = updated;
                                                             }
                                                             editing.set(false);
+                                                            dirty.set(true);
                                                         }
                                                         Err(e) => edit_error.set(Some(e.to_string())),
                                                     }

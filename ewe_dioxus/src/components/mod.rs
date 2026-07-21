@@ -45,6 +45,17 @@ pub use add_synset_modal::AddSynsetTrigger;
 mod delete_synset_modal;
 pub use delete_synset_modal::DeleteSynsetButton;
 
+mod unsaved_changes;
+pub use unsaved_changes::{provide_dirty_state, UnsavedChangesToast};
+
+mod validate_button;
+pub use validate_button::ValidateButton;
+
+#[cfg(feature = "edit")]
+mod edit_progress_bar;
+#[cfg(feature = "edit")]
+pub use edit_progress_bar::EditProgressBar;
+
 #[cfg(feature = "edit")]
 mod synset_picker;
 #[cfg(feature = "edit")]

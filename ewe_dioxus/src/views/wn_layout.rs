@@ -1,12 +1,16 @@
 use dioxus::prelude::*;
 use crate::backend::api::get_branding;
-use crate::components::{provide_display_options, provide_panel_visibility};
+use crate::components::{
+    provide_display_options, provide_dirty_state, provide_panel_visibility, UnsavedChangesToast,
+    ValidateButton,
+};
 use crate::Route;
 
 #[component]
 pub fn WNLayout() -> Element {
     provide_display_options();
     provide_panel_visibility();
+    provide_dirty_state();
 
     // Branding is fetched through a server function rather than reading
     // `crate::SETTINGS` here directly, since this component also runs in the
@@ -57,8 +61,11 @@ pub fn WNLayout() -> Element {
                     a { href: "/api/docs", "JSON API documentation" }
                     " | "
                     Link { to: Route::History {}, "History" }
+                    " | "
+                    ValidateButton {}
                 }
             }
+            UnsavedChangesToast {}
         }
     }
 }

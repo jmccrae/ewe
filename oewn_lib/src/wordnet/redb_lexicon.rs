@@ -41,6 +41,9 @@ const FRAMES_KEY:&'static str = "frames";
 /// speedy-encoded tables above) since this table has no dependency on `automaton::Action`, it
 /// just stores whatever blob `Lexicon::changelog_append`'s caller already serialized.
 const CHANGE_LOG: TableDefinition<u64, String> = TableDefinition::new("change_log");
+/// SAVE_STATE_KEY -> the change log id as of the last successful save-to-YAML.
+const SAVE_STATE: TableDefinition<&'static str, u64> = TableDefinition::new("save_state");
+const LAST_SAVED_CHANGELOG_ID_KEY: &'static str = "last_saved_changelog_id";
 /// (ili) -> synset_id. Maintained incrementally wherever a synset is written,
 /// so `ili_by_prefix` can do a direct sorted-range scan instead of building
 /// an in-memory index by scanning (and fully deserializing) every synset.
@@ -129,6 +132,7 @@ impl ReDBLexicon {
             txn.open_table(ILI_TO_SYNSET_ID)?;
             txn.open_table(FRAMES)?;
             txn.open_table(CHANGE_LOG)?;
+            txn.open_table(SAVE_STATE)?;
         }
 
 
@@ -540,6 +544,23 @@ impl Lexicon for ReDBLexicon {
             }
         }
         Ok(out)
+    }
+    fn last_saved_changelog_id_get(&self) -> Result<Option<u64>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        let table = match txn.open_table(SAVE_STATE) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        Ok(table.get(LAST_SAVED_CHANGELOG_ID_KEY)?.map(|v| v.value()))
+    }
+    fn last_saved_changelog_id_set(&mut self, id : u64) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SAVE_STATE)?;
+        table.insert(LAST_SAVED_CHANGELOG_ID_KEY, id)?;
+        Ok(())
     }
 
 

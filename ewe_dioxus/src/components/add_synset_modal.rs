@@ -188,6 +188,7 @@ fn AddSynsetModal(props: AddSynsetModalProps) -> Element {
     });
     let mut submitting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    let mut dirty = use_context::<Signal<bool>>();
 
     // Pick a sensible default lexfile once the list loads, and whenever the lexfile changes,
     // reset `pos` to the (first) valid option for it rather than leaving a stale, possibly
@@ -374,6 +375,7 @@ fn AddSynsetModal(props: AddSynsetModalProps) -> Element {
                                                 subcats,
                                             ).await {
                                                 Ok(created) => {
+                                                    dirty.set(true);
                                                     navigator().push(Route::BySynset { synset: created.id.as_str().to_string() });
                                                     props.on_close.call(());
                                                 }

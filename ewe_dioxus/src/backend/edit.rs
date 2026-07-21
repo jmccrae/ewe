@@ -7,13 +7,17 @@
 
 use dioxus::prelude::*;
 #[allow(unused_imports)]
-use oewn_lib::automaton::{apply_automaton, changelog_recent, Action, SynsetRef};
+use oewn_lib::automaton::{apply_automaton, changelog_recent, has_unsaved_changes, Action, SynsetRef};
 #[allow(unused_imports)]
 use oewn_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
 use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
 #[cfg(feature = "server")]
 use oewn_lib::wordnet::ReDBLexicon;
+#[cfg(feature = "server")]
+use oewn_lib::validate::validate;
+#[cfg(feature = "server")]
+use oewn_lib::progress::{NullProgress, Progress};
 #[cfg(feature = "server")]
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -28,6 +32,8 @@ enum EweEditError {
     Automaton(String),
     #[error("Synset {0} not found after edit")]
     SynsetNotFoundAfterEdit(String),
+    #[error("{0}")]
+    Save(String),
 }
 
 /// Takes a write lock on the shared lexicon, or an error if it failed to load at startup.
@@ -243,4 +249,202 @@ pub async fn get_changelog(
             summaries: entry.actions.iter().map(Action::summary).collect(),
         })
         .collect())
+}
+
+/// Whether there are edits not yet reflected in `settings.wordnet_source` - see
+/// `automaton::has_unsaved_changes`. Used to drive the "unsaved changes" toast.
+#[get("/api/edit/dirty")]
+pub async fn get_dirty() -> Result<bool> {
+    let lexicon = read_lexicon()?;
+    has_unsaved_changes(&*lexicon).map_err(|e| EweEditError::Automaton(e).into())
+}
+
+/// The last `start`/`inc` reported by whichever save/validate call is currently running, if any -
+/// polled by `EditProgressBar` via `get_progress`. A single slot is enough since this is a
+/// single-user editor and save/validate both hold the lexicon lock anyway, so two can't
+/// meaningfully run at once.
+#[cfg(feature = "server")]
+static PROGRESS: std::sync::RwLock<Option<ProgressStatus>> = std::sync::RwLock::new(None);
+
+/// A snapshot of a long-running save/validate operation's progress.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProgressStatus {
+    pub operation: String,
+    pub current: u64,
+    pub total: u64,
+}
+
+/// Reports into the shared [`PROGRESS`] static as it runs, so a concurrent `GET /api/edit/progress`
+/// poll can show a live bar. `validate` and `Lexicon::save` already call `start`/`inc`/`finish` at
+/// the right points - this just gives those calls somewhere to go, instead of nowhere
+/// (`NullProgress`) or stderr (`LoggingProgress`).
+#[cfg(feature = "server")]
+struct SharedProgress {
+    operation: &'static str,
+    current: u64,
+}
+
+#[cfg(feature = "server")]
+impl SharedProgress {
+    fn new(operation: &'static str) -> Self {
+        Self { operation, current: 0 }
+    }
+}
+
+#[cfg(feature = "server")]
+impl Progress for SharedProgress {
+    fn start(&mut self, total: u64) {
+        self.current = 0;
+        *PROGRESS.write().unwrap() = Some(ProgressStatus {
+            operation: self.operation.to_string(),
+            current: 0,
+            total,
+        });
+    }
+    fn inc(&mut self, amount: u64) {
+        self.current += amount;
+        if let Some(status) = PROGRESS.write().unwrap().as_mut() {
+            status.current = self.current;
+        }
+    }
+    fn finish(&mut self) {
+        *PROGRESS.write().unwrap() = None;
+    }
+    fn set_percent_mode(&mut self, _percent_mode: bool) {}
+}
+
+/// The current save/validate progress, if either is running.
+#[get("/api/edit/progress")]
+pub async fn get_progress() -> Result<Option<ProgressStatus>> {
+    Ok(PROGRESS.read().unwrap().clone())
+}
+
+/// Runs the validator against the current lexicon without saving - a standalone sanity check,
+/// independent of the save flow below (which also runs it as a gate). Empty means no errors.
+///
+/// Validating the full lexicon is a synchronous scan that can take well over a minute, so it runs
+/// on a blocking thread (`spawn_blocking`) rather than inline - otherwise it would occupy the
+/// async runtime's worker thread for that whole time, and a concurrent `GET /api/edit/progress`
+/// poll (which needs no lock this call holds) could end up waiting behind it for no reason.
+#[get("/api/edit/validate")]
+pub async fn validate_lexicon() -> Result<Vec<String>> {
+    let outcome = tokio::task::spawn_blocking(|| -> Result<Vec<String>> {
+        let lexicon = read_lexicon()?;
+        let mut progress = SharedProgress::new("Validating");
+        let errors = validate(&*lexicon, &mut progress)
+            .map_err(|e| EweEditError::Automaton(e.to_string()))?;
+        Ok(errors.into_iter().map(|e| e.to_string()).collect())
+    })
+    .await;
+
+    // Defensive: `validate` calls `bar.finish()` itself on the success path, but an early `?`
+    // return inside it wouldn't reach that - never leave a stale bar showing after this call
+    // ends, error or not.
+    *PROGRESS.write().unwrap() = None;
+
+    match outcome {
+        Ok(inner) => inner,
+        Err(e) => Err(EweEditError::Automaton(format!("Validation task panicked: {e}")).into()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveResult {
+    pub saved: bool,
+    pub validation_errors: Vec<String>,
+}
+
+/// Writes the current lexicon out to `settings.wordnet_source`'s YAML files (the actual
+/// `english-wordnet` source tree in a normal deployment). Validates first: if there are errors
+/// and `force` is false, returns them without writing anything - the client is expected to show
+/// them and let the user retry with `force: true` ("save anyway") if they still want to.
+#[post("/api/edit/save")]
+pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
+    let settings = crate::SETTINGS.get();
+    let source = settings.wordnet_source.clone().ok_or_else(|| {
+        EweEditError::Save("No wordnet_source is configured - nowhere to save to".to_string())
+    })?;
+
+    // Runs on a blocking thread for the same reason `validate_lexicon` does - this holds the
+    // write lock and does two long synchronous passes (validate, then the actual file writes),
+    // and a concurrent `GET /api/edit/progress` poll shouldn't have to wait behind either.
+    let outcome = tokio::task::spawn_blocking(move || -> Result<SaveResult> {
+        let mut lexicon = write_lexicon()?;
+        let mut progress = SharedProgress::new("Validating");
+        let validation_errors: Vec<String> = validate(&*lexicon, &mut progress)
+            .map_err(|e| EweEditError::Automaton(e.to_string()))?
+            .into_iter()
+            .map(|e| e.to_string())
+            .collect();
+
+        if !validation_errors.is_empty() && !force {
+            return Ok(SaveResult { saved: false, validation_errors });
+        }
+
+        let mut progress = SharedProgress::new("Saving");
+        lexicon
+            .save(&source, &mut progress)
+            .map_err(|e| EweEditError::Save(e.to_string()))?;
+
+        if let Some((latest_id, _)) = changelog_recent(&*lexicon, 1, None)
+            .map_err(EweEditError::Automaton)?
+            .into_iter()
+            .next()
+        {
+            lexicon
+                .last_saved_changelog_id_set(latest_id)
+                .map_err(|e| EweEditError::Save(e.to_string()))?;
+        }
+
+        Ok(SaveResult { saved: true, validation_errors })
+    })
+    .await;
+
+    // Defensive, same reasoning as `validate_lexicon`: don't leave a stale bar showing.
+    *PROGRESS.write().unwrap() = None;
+
+    match outcome {
+        Ok(inner) => inner,
+        Err(e) => Err(EweEditError::Save(format!("Save task panicked: {e}")).into()),
+    }
+}
+
+/// Discards every unsaved edit by rebuilding the database from `settings.wordnet_source` and
+/// swapping it in for the live lexicon.
+///
+/// `ReDBLexicon::create` reinitializes its target file in place rather than replacing it, and the
+/// live lexicon already has that same file open - reformatting it out from under a still-open
+/// handle would risk corrupting it. So the fresh database is built at a temp path first (while
+/// the old one keeps serving other requests), swapped into the shared lock (which drops, and
+/// therefore closes, the old one), and only then renamed over the real path.
+#[post("/api/edit/revert")]
+pub async fn revert_lexicon() -> Result<()> {
+    let settings = crate::SETTINGS.get();
+    let source = settings.wordnet_source.clone().ok_or_else(|| {
+        EweEditError::Save("No wordnet_source is configured - nothing to revert to".to_string())
+    })?;
+    let cache_size_bytes = settings.lexicon_cache_mb * 1024 * 1024;
+    let tmp_path = format!("{}.revert-tmp", settings.database);
+    // Clean up a leftover temp file from a previous failed attempt, if any.
+    let _ = std::fs::remove_file(&tmp_path);
+
+    let mut progress = NullProgress;
+    let fresh = ReDBLexicon::create(&tmp_path, cache_size_bytes)
+        .map_err(|e| EweEditError::Save(e.to_string()))?
+        .load(&source, &mut progress)
+        .map_err(|e| EweEditError::Save(e.to_string()))?;
+
+    {
+        let mut lexicon = write_lexicon()?;
+        *lexicon = fresh;
+    }
+
+    std::fs::rename(&tmp_path, &settings.database).map_err(|e| {
+        EweEditError::Save(format!(
+            "Reverted in memory, but failed to move the rebuilt database into place: {}. A restart may lose this revert.",
+            e
+        ))
+    })?;
+
+    Ok(())
 }

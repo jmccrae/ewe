@@ -20,6 +20,10 @@ quick-xml = { version = "0.37.5", optional = true }
 # "clock" feature, since that needs current-time access that doesn't build cleanly on wasm32;
 # formatting an already-known `u64` millis value doesn't need it.
 chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
+# Only used server-side, to run save/validate on a blocking thread pool (see
+# `backend::edit::save_lexicon`/`validate_lexicon`) so a concurrent progress-poll request isn't
+# starved by their long synchronous scans. Already pulled in transitively via `dioxus/server`.
+tokio = { version = "1", features = ["rt"], optional = true }
 percent-encoding = "2.3.2"
 teanga = { git = "https://github.com/TeangaNLP/teanga.rs", branch = "main", features = ["redb"] }
 
@@ -44,7 +48,7 @@ mobile = ["dioxus/mobile"]
 # `--features edit` to test editing on web/mobile, and desktop always needs it passed explicitly too.
 edit = []
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
-server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml", "dep:chrono"]
+server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml", "dep:chrono", "dep:tokio"]
 oxrdf = ["dep:oxrdf"]
 oxrdfio = ["dep:oxrdfio"]
 quick-xml = ["dep:quick-xml"]
