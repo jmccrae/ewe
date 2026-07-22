@@ -8,7 +8,8 @@
 }
 
 .synset {
-    padding: 6px 15px 12px;
+    padding-left:15px;
+    padding-bottom:10px;
     border-radius: 8px;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -43,6 +44,7 @@
     font-size: 0.8em;
     color: var(--color-text);
     font-style: italic;
+    margin-left: 4px;
 }
 
 .definition-editing {
@@ -64,6 +66,7 @@
     font-size: 0.8em;
     color: var(--color-text-secondary);
     font-style: italic;
+    margin-left: 4px;
 }
 
 .example-editing {
@@ -333,8 +336,8 @@
 }
 
 .more {
-    padding-top: 6px;
-    padding-left: 20px;
+    padding-top:5px;
+    padding-left:20px;
 }
 
 .more a {
@@ -480,7 +483,6 @@
 
 .pos {
     color: var(--color-accent);
-    font-style: italic;
     margin-right: 4px;
 }
 
