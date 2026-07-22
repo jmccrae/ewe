@@ -303,7 +303,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                 rsx! {
                     document::Style { href: CSS },
                     div {
-                        class: "synset",
+                        class: if editing() { "synset editing" } else { "synset" },
                         if props.display_ids || editing() {
                             div {
                                 class: "synset-id",
@@ -340,6 +340,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     for (idx, wikidata) in synset.wikidata.iter().enumerate() {
                                         span {
                                             b {
+                                                class: "synset-id-title",
                                                 "Wikidata:"
                                             },
                                             a {
@@ -359,24 +360,6 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     }
                                 }
                                 hr {}
-                            },
-                            // Editing the ILI/Wikidata identifiers doesn't depend on the "Show
-                            // Synset Identifier" display option above - only the caller
-                            // mounting this while the synset-wide edit toggle is on does. Shown
-                            // as its own block below the divider rather than inline with the
-                            // id, since it's a list-like editor rather than a single value.
-                            if editing() {
-                                div {
-                                    class: "synset-identifiers-editing",
-                                    EditableIli {
-                                        value: ili_draft(),
-                                        on_input: move |v| ili_draft.set(v),
-                                    }
-                                    EditableWikidata {
-                                        drafts: wikidata_drafts(),
-                                        on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
-                                    }
-                                }
                             }
                         },
                         div {
@@ -441,20 +424,61 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         }
                                     }
                                 },
-                                EditableDefinition {
-                                    editing: editing(),
-                                    value: if editing() {
-                                        definition_draft()
-                                    } else {
-                                        synset.definition.get(0).cloned().unwrap_or_default()
-                                    },
-                                    on_input: move |v| definition_draft.set(v),
+                                // Editing the ILI/Wikidata identifiers doesn't depend on the
+                                // "Show Synset Identifier" display option above - only the
+                                // caller mounting this while the synset-wide edit toggle is on
+                                // does. Sits between the lemma list and Definition/Examples/
+                                // Relations, and (unlike `.side-icons`, a sibling of `.lemmas`
+                                // below) only exists at all while editing, since there's nothing
+                                // to show otherwise.
+                                if editing() {
+                                    div {
+                                        class: "synset-identifiers-editing",
+                                        EditableIli {
+                                            value: ili_draft(),
+                                            on_input: move |v| ili_draft.set(v),
+                                        }
+                                        EditableWikidata {
+                                            drafts: wikidata_drafts(),
+                                            on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
+                                        }
+                                    }
                                 }
-                                EditableExamples {
-                                    editing: editing(),
-                                    examples: synset.example.clone(),
-                                    drafts: example_drafts(),
-                                    on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                if editing() {
+                                    div {
+                                        class: "field-row",
+                                        b { class: "field-label", "Definition: " }
+                                        EditableDefinition {
+                                            editing: true,
+                                            value: definition_draft(),
+                                            on_input: move |v| definition_draft.set(v),
+                                        }
+                                    }
+                                } else {
+                                    EditableDefinition {
+                                        editing: false,
+                                        value: synset.definition.get(0).cloned().unwrap_or_default(),
+                                        on_input: move |v| definition_draft.set(v),
+                                    }
+                                }
+                                if editing() {
+                                    div {
+                                        class: "field-row",
+                                        b { class: "field-label", "Examples: " }
+                                        EditableExamples {
+                                            editing: true,
+                                            examples: synset.example.clone(),
+                                            drafts: example_drafts(),
+                                            on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                        }
+                                    }
+                                } else {
+                                    EditableExamples {
+                                        editing: false,
+                                        examples: synset.example.clone(),
+                                        drafts: example_drafts(),
+                                        on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                    }
                                 }
                                 if props.display_topics {
                                     div {
@@ -928,20 +952,22 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         editing.set(false);
                                         edit_error.set(None);
                                     },
-                                }
-                                if editing() {
-                                    DeleteSynsetButton { synset_id: synset.id.clone() }
+                                    if editing() {
+                                        DeleteSynsetButton { synset_id: synset.id.clone() }
+                                    }
                                 }
                                 if let Some(err) = edit_error() {
                                     span { class: "edit-error", "{err}" }
                                 }
-                                if let Some(wd) = synset.wikidata.first() {
-                                    div {
-                                        class: "wikidata",
-                                        a {
-                                            href: "https://www.wikidata.org/entity/{wd}",
-                                            img {
-                                                src: WIKIDATA_ICON,
+                                if !editing() {
+                                    if let Some(wd) = synset.wikidata.first() {
+                                        div {
+                                            class: "wikidata",
+                                            a {
+                                                href: "https://www.wikidata.org/entity/{wd}",
+                                                img {
+                                                    src: WIKIDATA_ICON,
+                                                }
                                             }
                                         }
                                     }

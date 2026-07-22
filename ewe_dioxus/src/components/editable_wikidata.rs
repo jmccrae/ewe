@@ -22,7 +22,7 @@ pub fn EditableWikidata(props: EditableWikidataProps) -> Element {
     rsx! {
         span {
             class: "wikidata-editing",
-            b { "Wikidata: " }
+            b { class: "synset-id-title", "Wikidata: " }
             for (index, wikidata) in drafts.iter().enumerate() {
                 span {
                     key: "{index}",

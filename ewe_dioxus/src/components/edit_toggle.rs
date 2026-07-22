@@ -12,6 +12,10 @@ pub struct EditToggleProps {
     pub on_accept: EventHandler<()>,
     /// Click the reject (×) button to discard every pending edit and leave edit mode.
     pub on_reject: EventHandler<()>,
+    /// Extra controls (currently just `DeleteSynsetButton`) rendered alongside the accept/
+    /// reject pair while editing - grouped here, rather than as a separate sibling, so every
+    /// action for this synset lives in the same `edit-toggle-actions` row.
+    pub children: Element,
 }
 
 /// The synset-wide edit control, styled and positioned like the Wikidata icon it sits next to.
@@ -42,6 +46,7 @@ pub fn EditToggle(props: EditToggleProps) -> Element {
                     onclick: move |_| props.on_reject.call(()),
                     "×"
                 }
+                {props.children}
             }
         } else {
             div {
