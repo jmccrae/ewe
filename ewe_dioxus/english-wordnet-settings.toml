@@ -1,11 +1,14 @@
 database = "wordnet.db"
 wordnet_source = "/home/john-mccrae/p/globalwordnet/english-wordnet/src/yaml/"
-semcor_database = "semcor.db"
-semcor_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
+corpus_database = "semcor.db"
+corpus_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
 logo = "assets/english.svg"
 theme = "assets/styling/theme.css"
 project_name = "Open English Wordnet"
 tagline = "The free, open lexical database of English"
+id_prefix = "oewn"
+contact_email = "english-wordnet@googlegroups.com"
+source_url = "https://github.com/globalwordnet/english-wordnet"
 intro = """
 <p>
     The Open English Wordnet is a free, open-source lexical database of English,

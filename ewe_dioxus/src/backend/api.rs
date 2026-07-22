@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 #[allow(unused_imports)]
-use oewn_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
+use ewe_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use std::collections::BTreeSet;
@@ -91,13 +91,15 @@ pub struct SearchResult {
     pub value: String,
 }
 
-/// Users may search by lemma, by synset id (with or without the `oewn-`
-/// prefix used in the RDF/XML/Turtle exports), or by ILI. Strips a leading
-/// `oewn-`/`OEWN-` so both `00001740-n` and `oewn-00001740-n` match.
+/// Users may search by lemma, by synset id (with or without the configured
+/// `id_prefix` used in the RDF/XML/Turtle exports), or by ILI. Strips a
+/// leading, case-insensitive `{id_prefix}-` so both `00001740-n` and
+/// `oewn-00001740-n` (with the default `id_prefix`) match.
 #[allow(dead_code)]
-fn strip_id_prefix(query: &str) -> &str {
-    match query.get(..5) {
-        Some(prefix) if prefix.eq_ignore_ascii_case("oewn-") => &query[5..],
+fn strip_id_prefix<'a>(query: &'a str, id_prefix: &str) -> &'a str {
+    let prefixed = format!("{}-", id_prefix);
+    match query.get(..prefixed.len()) {
+        Some(prefix) if prefix.eq_ignore_ascii_case(&prefixed) => &query[prefixed.len()..],
         _ => query,
     }
 }
@@ -154,11 +156,12 @@ pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<V
             });
         }
 
-        // Synset ids may be typed bare ("00001740-n") or with the "oewn-"
-        // prefix used in the RDF/XML/Turtle exports.
-        for ssid in lexicon.ssid_by_prefix(strip_id_prefix(&query), Some(max_results))? {
+        // Synset ids may be typed bare ("00001740-n") or with the configured
+        // id_prefix used in the RDF/XML/Turtle exports.
+        let id_prefix = &crate::SETTINGS.get().id_prefix;
+        for ssid in lexicon.ssid_by_prefix(strip_id_prefix(&query, id_prefix), Some(max_results))? {
             results.push(SearchResult {
-                display: format!("oewn-{}", ssid),
+                display: format!("{}-{}", id_prefix, ssid),
                 kind: SearchResultKind::Synset,
                 value: ssid,
             });

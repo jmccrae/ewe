@@ -1,5 +1,5 @@
 //! Write endpoints for the Wordnet editor. Every edit goes through
-//! [`oewn_lib::automaton::apply_automaton`] rather than mutating the lexicon directly, so edits
+//! [`ewe_lib::automaton::apply_automaton`] rather than mutating the lexicon directly, so edits
 //! made through the UI are subject to the same rules as edits made through the `ewe_cli`
 //! automaton scripts.
 //!
@@ -7,17 +7,17 @@
 
 use dioxus::prelude::*;
 #[allow(unused_imports)]
-use oewn_lib::automaton::{apply_automaton, changelog_recent, has_unsaved_changes, Action, SynsetRef};
+use ewe_lib::automaton::{apply_automaton, changelog_recent, has_unsaved_changes, Action, SynsetRef};
 #[allow(unused_imports)]
-use oewn_lib::change_manager::ChangeList;
+use ewe_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
-use oewn_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
+use ewe_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
 #[cfg(feature = "server")]
-use oewn_lib::wordnet::ReDBLexicon;
+use ewe_lib::wordnet::ReDBLexicon;
 #[cfg(feature = "server")]
-use oewn_lib::validate::validate;
+use ewe_lib::validate::validate;
 #[cfg(feature = "server")]
-use oewn_lib::progress::{NullProgress, Progress};
+use ewe_lib::progress::{NullProgress, Progress};
 #[cfg(feature = "server")]
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

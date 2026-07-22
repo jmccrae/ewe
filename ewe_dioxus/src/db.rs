@@ -1,12 +1,12 @@
 /// Opening (and, if necessary, rebuilding) the ReDB lexicon database.
-use oewn_lib::progress::LoggingProgress;
-use oewn_lib::wordnet::{Lexicon, ReDBLexicon};
+use ewe_lib::progress::LoggingProgress;
+use ewe_lib::wordnet::{Lexicon, ReDBLexicon};
 use std::path::Path;
 use std::time::SystemTime;
 use teanga::disk_corpus::RedbDb;
 use teanga::{Corpus, DiskCorpus};
 
-use crate::backend::senses::OEWN_KEY_LAYER;
+use crate::backend::senses::key_layer_name;
 use crate::settings::EweSettings;
 
 /// Open the lexicon database at `settings.database`. If it doesn't exist yet, or (unless
@@ -69,38 +69,40 @@ fn latest_mtime_recursive(dir: &Path, latest: &mut SystemTime) -> Result<(), Box
     Ok(())
 }
 
-/// Open the Semcor corpus database at `settings.semcor_database`. If it doesn't exist yet,
-/// or (unless `settings.disable_auto_reload` is set) `settings.semcor_source` has been
+/// Open the corpus database at `settings.corpus_database`. If it doesn't exist yet,
+/// or (unless `settings.disable_auto_reload` is set) `settings.corpus_source` has been
 /// modified more recently than the database, the database is rebuilt from source first.
-/// Either way, a search index on `OEWN_KEY_LAYER` is guaranteed to exist by the time this
-/// returns, so sense lookups don't have to scan every document.
+/// Either way, a search index on the configured key layer (see [`key_layer_name`]) is
+/// guaranteed to exist by the time this returns, so sense lookups don't have to scan
+/// every document.
 pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
-    let mut corpus = if let Some(source) = &settings.semcor_source {
-        if is_file_stale(&settings.semcor_database, source, settings.disable_auto_reload)? {
+    let mut corpus = if let Some(source) = &settings.corpus_source {
+        if is_file_stale(&settings.corpus_database, source, settings.disable_auto_reload)? {
             eprintln!(
-                "Semcor source at {} is newer than {}, rebuilding database",
-                source, settings.semcor_database
+                "Corpus source at {} is newer than {}, rebuilding database",
+                source, settings.corpus_database
             );
-            if Path::new(&settings.semcor_database).exists() {
-                std::fs::remove_file(&settings.semcor_database)?;
+            if Path::new(&settings.corpus_database).exists() {
+                std::fs::remove_file(&settings.corpus_database)?;
             }
-            let mut corpus = DiskCorpus::<RedbDb>::new(&settings.semcor_database)?;
+            let mut corpus = DiskCorpus::<RedbDb>::new(&settings.corpus_database)?;
             let file = std::fs::File::open(source)?;
             teanga::read_yaml(file, &mut corpus)?;
             corpus.commit()?;
             corpus
         } else {
-            DiskCorpus::<RedbDb>::new(&settings.semcor_database)?
+            DiskCorpus::<RedbDb>::new(&settings.corpus_database)?
         }
     } else {
-        DiskCorpus::<RedbDb>::new(&settings.semcor_database)?
+        DiskCorpus::<RedbDb>::new(&settings.corpus_database)?
     };
 
     // The index is persisted in the database file, so this is a no-op (just an
     // index-file lookup) on every startup after the first.
-    if !corpus.has_index(OEWN_KEY_LAYER) {
-        eprintln!("Building search index on '{}' layer", OEWN_KEY_LAYER);
-        corpus.create_index(OEWN_KEY_LAYER)?;
+    let layer = key_layer_name(&settings.id_prefix);
+    if !corpus.has_index(&layer) {
+        eprintln!("Building search index on '{}' layer", layer);
+        corpus.create_index(&layer)?;
         corpus.commit()?;
     }
 

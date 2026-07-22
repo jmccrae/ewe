@@ -31,7 +31,7 @@ const API_DOCS_HTML: &str = r##"<!doctype html>
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Open English WordNet API docs</title>
+    <title>EWE Wordnet Editor API docs</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
 </head>
 <body>

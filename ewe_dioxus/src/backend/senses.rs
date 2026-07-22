@@ -1,7 +1,7 @@
-//! API endpoints for looking up where a sense occurs in the Semcor corpus.
+//! API endpoints for looking up where a sense occurs in the corpus.
 
 use dioxus::prelude::*;
-use oewn_lib::wordnet::SynsetId;
+use ewe_lib::wordnet::SynsetId;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use teanga::query::QueryBuilder;
@@ -10,15 +10,19 @@ use teanga::{Corpus, Layer, ReadableCorpus};
 use thiserror::Error;
 
 /// The corpus layer that carries sense annotations, and the one that
-/// `db::open_corpus` builds a search index for. Shared as a constant so the
-/// indexed layer name and the queried layer name can never drift apart.
+/// `db::open_corpus` builds a search index for. Derived from `settings.id_prefix`
+/// (e.g. `"oewn"` -> `"oewn_key"`) so the indexed layer name and the queried
+/// layer name can never drift apart, and a deployment with a different id
+/// prefix picks up its own corpus schema automatically.
 #[allow(dead_code)]
-pub(crate) const OEWN_KEY_LAYER: &str = "oewn_key";
+pub(crate) fn key_layer_name(id_prefix: &str) -> String {
+    format!("{}_key", id_prefix)
+}
 
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 enum EweSensesError {
-    #[error("Semcor corpus not available")]
+    #[error("Corpus not available")]
     CorpusUnavailable,
 }
 
@@ -29,12 +33,12 @@ enum EweSensesError {
 #[allow(dead_code)]
 const CONTEXT_WORDS: usize = 20;
 
-/// The Semcor `oewn_key` layer stores sense keys with an `oewn-` prefix
+/// The corpus's key layer stores sense keys with the configured `id_prefix`
 /// (e.g. `oewn-00001740-n`), unlike the bare synset ids used elsewhere in
 /// this app.
 #[allow(dead_code)]
-fn oewn_key(id: &SynsetId) -> String {
-    format!("oewn-{}", id.as_str())
+fn prefixed_key(id_prefix: &str, id: &SynsetId) -> String {
+    format!("{}-{}", id_prefix, id.as_str())
 }
 
 /// A token can carry more than one sense key, joined by `;`, when the
@@ -75,9 +79,9 @@ pub struct ConcordancePage {
 /// more than one row).
 ///
 /// Candidate documents come from `corpus.search`, which uses the index
-/// `db::open_corpus` builds on [`OEWN_KEY_LAYER`] to avoid scanning every
+/// `db::open_corpus` builds on [`key_layer_name`] to avoid scanning every
 /// document. That index (like the query it serves) matches a token's
-/// `oewn_key` value exactly, so a document whose *only* occurrence of this
+/// key value exactly, so a document whose *only* occurrence of this
 /// sense is packed into a `;`-joined multi-key token (see [`has_sense`])
 /// won't be found here even though the sense is technically present. Once a
 /// document *is* found this way, every occurrence within it - combined keys
@@ -86,13 +90,15 @@ pub struct ConcordancePage {
 #[allow(dead_code)]
 async fn all_concordance_lines(id: SynsetId) -> Result<Vec<ConcordanceLine>> {
     if let Some(corpus) = crate::CORPUS.get() {
-        let target = oewn_key(&id);
+        let id_prefix = &crate::SETTINGS.get().id_prefix;
+        let layer = key_layer_name(id_prefix);
+        let target = prefixed_key(id_prefix, &id);
         let meta = corpus.get_meta();
-        let query = QueryBuilder::new().value(OEWN_KEY_LAYER, target.clone()).build();
+        let query = QueryBuilder::new().value(&layer, target.clone()).build();
         let mut lines = Vec::new();
         for result in corpus.search(query) {
             let (doc_id, doc) = result?;
-            let Some(Layer::L1S(pairs)) = doc.get(OEWN_KEY_LAYER) else {
+            let Some(Layer::L1S(pairs)) = doc.get(&layer) else {
                 continue;
             };
             let matches: Vec<usize> = pairs
@@ -155,8 +161,9 @@ pub async fn get_sense_concordance(id: SynsetId, page: usize) -> Result<Concorda
 #[get("/api/senses/{id}/count")]
 pub async fn get_sense_count(id: SynsetId) -> Result<usize> {
     if let Some(corpus) = crate::CORPUS.get() {
+        let id_prefix = &crate::SETTINGS.get().id_prefix;
         let query = QueryBuilder::new()
-            .value(OEWN_KEY_LAYER, oewn_key(&id))
+            .value(&key_layer_name(id_prefix), prefixed_key(id_prefix, &id))
             .build();
         Ok(corpus.estimate_query_count(query)?)
     } else {
@@ -183,9 +190,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_oewn_key() {
+    fn test_prefixed_key() {
         let id = SynsetId::new_owned("00001740-n".to_string());
-        assert_eq!(oewn_key(&id), "oewn-00001740-n");
+        assert_eq!(prefixed_key("oewn", &id), "oewn-00001740-n");
     }
 
     #[test]

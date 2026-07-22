@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 
 use dioxus_fullstack::Lazy;
 #[cfg(feature = "server")]
-use oewn_lib::wordnet::ReDBLexicon;
+use ewe_lib::wordnet::ReDBLexicon;
 #[cfg(feature = "server")]
 use std::sync::RwLock;
 #[cfg(feature = "server")]
@@ -110,7 +110,7 @@ static CORPUS: Lazy<Option<DiskCorpus<RedbDb>>> = Lazy::new(|| async move {
     match db::open_corpus(SETTINGS.get()) {
         Ok(corpus) => dioxus::Ok(Some(corpus)),
         Err(e) => {
-            eprintln!("Failed to open semcor corpus: {}", e);
+            eprintln!("Failed to open corpus: {}", e);
             dioxus::Ok(None)
         }
     }
@@ -190,7 +190,7 @@ async fn strip_referer_from_export_links(
 #[cfg(feature = "server")]
 #[component]
 fn App() -> Element {
-    // Eagerly load the Semcor corpus alongside the lexicon. It's supplementary
+    // Eagerly load the corpus alongside the lexicon. It's supplementary
     // (used for showing usages), so a failure is logged but doesn't block the app.
     CORPUS.get();
     match LEXICON.get() {

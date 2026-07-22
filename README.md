@@ -1,16 +1,29 @@
-English WordNet Editor (EWE)
-============================
+EWE Wordnet Editor
+===================
 
-English WordNet Editor is an editor for working with Open English WordNet, which
-is developed at https://github.com/globalwordnet/english-wordnet. This ensures
+EWE ("EWE Wordnet Editor") is a set of tools for working with wordnets built in the
+[Global Wordnet Association](https://globalwordnet.github.io/) family of formats — it
+started as an editor for the [Open English Wordnet](https://github.com/globalwordnet/english-wordnet),
+but is designed to be configured for any wordnet project, in any language. It ensures
 that changes are consistent and validates the resulting files.
+
+The project is a Cargo workspace of three crates:
+
+- [`ewe_lib`](ewe_lib) — the core Wordnet data model, storage, validation, and the
+  "automaton" engine that applies batches of edits. Used by both tools below.
+- [`ewe_cli`](ewe_cli) — a menu-driven command-line editor (documented in this file).
+- [`ewe_dioxus`](ewe_dioxus) — a web/desktop UI built with [Dioxus](https://dioxuslabs.com/),
+  offering both read-only browsing (search, lemma/synset pages, JSON/RDF/XML/Turtle
+  export) and, behind an `edit` feature, a full in-browser editor. See
+  [`ewe_dioxus/README.md`](ewe_dioxus/README.md) for details.
 
 Installation
 ------------
 
-Release builds can be obtained from the [release section](https://github.com/jmccrae/ewe/releases). These are executables and can be run directly. 
-We recommend saving these to the same folder that contains the Git repository
-for Open English WordNet. EWE can be started by executing this file
+Release builds of `ewe_cli` can be obtained from the [release section](https://github.com/jmccrae/ewe/releases).
+These are executables and can be run directly. We recommend saving these to the same
+folder that contains the Git repository for the wordnet you're editing. EWE can be
+started by executing this file.
 
 Usage
 -----
@@ -22,7 +35,7 @@ you should see something like this:
 
          ,ww                             
    wWWWWWWW_)  Welcome to EWE            
-   `WWWWWW'    - English WordNet Editor  
+   `WWWWWW'    - EWE Wordnet Editor       
     II  II                               
 
 Loading WordNet
@@ -118,3 +131,21 @@ An example of the usage of the automaton file is given below
           target_lemma: test
 - validate
 ```
+
+The web/desktop editor
+-----------------------
+
+`ewe_dioxus` provides a browser-based (or desktop) alternative to the CLI, built on
+the same `ewe_lib` automaton engine. From the `ewe_dioxus` directory:
+
+```bash
+cargo install dioxus-cli
+dx serve --features edit
+```
+
+This runs a read-only Wordnet browser plus, with `--features edit` enabled, a full
+in-browser editor: editing lemmas, definitions, examples, relations, and ILI/Wikidata
+identifiers; creating and deleting synsets; a change-log/history view; and saving
+edits back out to the YAML source (with validation, and the option to revert to the
+source instead). See [`ewe_dioxus/README.md`](ewe_dioxus/README.md) for full setup,
+configuration, and route documentation.

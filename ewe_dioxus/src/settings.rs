@@ -7,12 +7,12 @@ pub struct EweSettings {
     pub database: String,
     /// The source to load from
     pub wordnet_source: Option<String>,
-    /// The Semcor corpus database file
-    #[serde(default = "default_semcor_database")]
-    pub semcor_database: String,
-    /// The Semcor corpus YAML file to load from
+    /// The corpus database file
+    #[serde(default = "default_corpus_database")]
+    pub corpus_database: String,
+    /// The corpus YAML file to load from
     #[serde(default)]
-    pub semcor_source: Option<String>,
+    pub corpus_source: Option<String>,
     /// Path (relative to the working directory) of the logo image, served at `/logo`
     #[serde(default = "default_logo")]
     pub logo: String,
@@ -32,7 +32,7 @@ pub struct EweSettings {
     /// (colours and fonts), served at `/theme.css`
     #[serde(default = "default_theme")]
     pub theme: String,
-    /// If true, skip checking whether `wordnet_source`/`semcor_source` are newer
+    /// If true, skip checking whether `wordnet_source`/`corpus_source` are newer
     /// than the existing databases on startup, so the databases are never
     /// automatically rebuilt (they're still built if missing). Useful to avoid
     /// a slow source scan on startup with very large sources such as NameNet.
@@ -43,6 +43,17 @@ pub struct EweSettings {
     /// file's actual size, which is wasteful on memory-constrained servers.
     #[serde(default = "default_lexicon_cache_mb")]
     pub lexicon_cache_mb: usize,
+    /// Prefix used for synset/entry ids in XML/RDF export and in RDF-URI
+    /// lookups (e.g. `oewn-00001740-n`). Deployments of a different wordnet
+    /// should set this to their own project's id prefix.
+    #[serde(default = "default_id_prefix")]
+    pub id_prefix: String,
+    /// Contact email recorded in exported WN-LMF XML's `<Lexicon>` element
+    #[serde(default)]
+    pub contact_email: Option<String>,
+    /// Source/homepage URL recorded in exported WN-LMF XML's `<Lexicon>` element
+    #[serde(default)]
+    pub source_url: Option<String>,
 }
 
 fn default_lexicon_cache_mb() -> usize {
@@ -53,8 +64,8 @@ fn default_logo() -> String {
     "assets/english.svg".to_string()
 }
 
-fn default_semcor_database() -> String {
-    "semcor.db".to_string()
+fn default_corpus_database() -> String {
+    "corpus.db".to_string()
 }
 
 fn default_theme() -> String {
@@ -62,33 +73,23 @@ fn default_theme() -> String {
 }
 
 fn default_project_name() -> String {
-    "Open English Wordnet".to_string()
+    "EWE Wordnet Editor".to_string()
 }
 
 fn default_tagline() -> String {
-    "The free, open lexical database of English".to_string()
+    "A free, open lexical database".to_string()
 }
 
 fn default_intro() -> String {
     r#"<p>
         Search for a word above to see its meanings, synonyms, and how it
-        relates to other words in the Open English Wordnet.
+        relates to other words in this Wordnet.
     </p>"#
         .to_string()
 }
 
 fn default_footer() -> String {
-    r#"<p class="footer1">
-        Open English Wordnet is derived from <a href="http://wordnet.princeton.edu/">Princeton WordNet</a>
-        by the Open English Wordnet Community and released under the
-        <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution (CC-BY) 4.0 License</a>.
-        <a href="https://globalwordnet.github.io/gwadoc/">Further information about Wordnet</a>.
-        We welcome any corrections, improvements or other contributions at
-        <a href="http://github.com/globalwordnet/english-wordnet">GitHub</a>.
-        A full list of contributors is available on
-        <a href="https://github.com/globalwordnet/english-wordnet/blob/master/README.md">GitHub</a>.
-    </p>
-    <p class="footer2">
+    r#"<p class="footer2">
         This interface was created by <a href="http://john.mccr.ae/">John P. McCrae</a> at the
         <a href="https://dsi.nuigalway.ie/">Data Science Institute</a>,
         <a href="http://www.universityofgalway.ie">University of Galway</a>
@@ -101,13 +102,17 @@ fn default_footer() -> String {
         .to_string()
 }
 
+fn default_id_prefix() -> String {
+    "oewn".to_string()
+}
+
 impl EweSettings {
     pub fn default() -> Self {
         Self {
             database: "wordnet.db".to_string(),
             wordnet_source: None,
-            semcor_database: default_semcor_database(),
-            semcor_source: None,
+            corpus_database: default_corpus_database(),
+            corpus_source: None,
             logo: default_logo(),
             project_name: default_project_name(),
             tagline: default_tagline(),
@@ -116,6 +121,9 @@ impl EweSettings {
             theme: default_theme(),
             disable_auto_reload: false,
             lexicon_cache_mb: default_lexicon_cache_mb(),
+            id_prefix: default_id_prefix(),
+            contact_email: None,
+            source_url: None,
         }
     }
 

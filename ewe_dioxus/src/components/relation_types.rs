@@ -4,7 +4,7 @@
 //!
 //! About half of these fields are computed by reverse lookup rather than stored directly (for
 //! example `hyponym` is derived from *other* synsets' `hypernym`, not stored on this one) - see
-//! `MemberSynset::from_synset` in oewn_lib. Deleting is unaffected (`Action::DeleteRelation`
+//! `MemberSynset::from_synset` in ewe_lib. Deleting is unaffected (`Action::DeleteRelation`
 //! clears links between the pair in both directions regardless of type), but *adding* one of
 //! these needs the inverse relation inserted with source and target swapped. `store_as` and
 //! `swapped` capture that so the rest of the editor can stay agnostic to it.

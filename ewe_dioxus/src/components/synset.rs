@@ -7,8 +7,8 @@ use crate::components::{
 };
 use crate::Route;
 use dioxus::prelude::*;
-use oewn_lib::automaton::{Action, SynsetRef};
-use oewn_lib::wordnet::{Example, MemberSynset, SenseRelation, SynsetId};
+use ewe_lib::automaton::{Action, SynsetRef};
+use ewe_lib::wordnet::{Example, MemberSynset, SenseRelation, SynsetId};
 use std::collections::HashMap;
 
 /// Diffs `drafts` (and `draft_definition`/`lemma_drafts`) against the synset's last-saved

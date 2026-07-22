@@ -56,7 +56,7 @@ struct AddSynsetModalProps {
 }
 
 /// Which part-of-speech values a lexicographer file allows, mirroring
-/// `oewn_lib::wordnet::Lexicon::pos_for_lexfile`'s prefix rule exactly (kept in sync manually -
+/// `ewe_lib::wordnet::Lexicon::pos_for_lexfile`'s prefix rule exactly (kept in sync manually -
 /// there's no server round trip for this since it's a pure function of the lexfile name).
 #[cfg(feature = "edit")]
 fn pos_options_for_lexfile(lexfile: &str) -> Vec<(&'static str, &'static str)> {
@@ -370,7 +370,7 @@ fn AddSynsetModal(props: AddSynsetModalProps) -> Element {
                                             match add_synset(
                                                 definition_val,
                                                 lexfile_val,
-                                                Some(oewn_lib::wordnet::PosKey::new(pos_val)),
+                                                Some(ewe_lib::wordnet::PosKey::new(pos_val)),
                                                 lemmas,
                                                 subcats,
                                             ).await {

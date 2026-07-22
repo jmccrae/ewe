@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use oewn_lib::wordnet::Example;
+use ewe_lib::wordnet::Example;
 
 /// One example row as currently drafted in the editor. Nothing here is saved until the shared
 /// accept button (`EditToggle`) commits every field's draft as a single batch.

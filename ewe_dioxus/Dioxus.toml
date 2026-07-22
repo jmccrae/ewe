@@ -3,7 +3,7 @@
 [web.app]
 
 # HTML title tag content
-title = "Open English Wordnet"
+title = "EWE Wordnet Editor"
 
 # include `assets` in web platform
 [web.resource]

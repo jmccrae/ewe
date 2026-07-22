@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks};
-use oewn_lib::wordnet::SynsetId;
+use ewe_lib::wordnet::SynsetId;
 
 #[component]
 pub fn BySynset(synset: ReadSignal<String>) -> Element {

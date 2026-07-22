@@ -3,7 +3,7 @@ use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_concordance;
 use crate::components::WordNet;
 use crate::Route;
-use oewn_lib::wordnet::{MemberSynset, SynsetId};
+use ewe_lib::wordnet::{MemberSynset, SynsetId};
 
 static CSS: Asset = asset!("/assets/styling/senses.css");
 

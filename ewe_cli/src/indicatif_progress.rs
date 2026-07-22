@@ -1,4 +1,4 @@
-use oewn_lib::progress::Progress;
+use ewe_lib::progress::Progress;
 use indicatif::ProgressBar;
 
 pub struct IndicatifProgress {

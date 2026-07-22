@@ -5,20 +5,22 @@
 use crate::dioxus_fullstack::response::IntoResponse;
 use crate::dioxus_fullstack::{body::Body, http::Response, HeaderMap, Redirect};
 use dioxus::prelude::*;
-use oewn_lib::wordnet::{Lexicon, MemberSynset, PosKey, SynsetId};
+use ewe_lib::wordnet::{Lexicon, MemberSynset, PosKey, SynsetId};
 use oxrdf::vocab::rdf;
 use oxrdf::*;
 use oxrdfio::{RdfFormat, RdfSerializer, WriterQuadSerializer};
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use std::collections::BTreeSet;
 
-/// Legacy WordNet ids come prefixed with the dataset name - `oewn-` for
-/// this project ("Open English WordNet"), or `ewn-` from when it was called
+/// Legacy WordNet ids come prefixed with the dataset name - the deployment's
+/// configured `settings.id_prefix` (`oewn-` for the Open English Wordnet), or
+/// `ewn-` as a hardcoded legacy fallback from when this project was called
 /// just "English WordNet" - e.g. `oewn-00001740-n`, whereas every route in
 /// this app (`/synset/{id}`, `/api/synset/{id}`, etc.) takes the bare id,
 /// e.g. `00001740-n`. Returns `None` if `id` carries neither prefix.
-fn strip_synset_id_prefix(id: &str) -> Option<&str> {
-    id.strip_prefix("oewn-").or_else(|| id.strip_prefix("ewn-"))
+fn strip_synset_id_prefix<'a>(id: &'a str, id_prefix: &str) -> Option<&'a str> {
+    id.strip_prefix(&format!("{}-", id_prefix))
+        .or_else(|| id.strip_prefix("ewn-"))
 }
 
 /// Legacy synset lookup paths: `/id/{id}` and `/synset/{id}` where `id`
@@ -27,13 +29,15 @@ fn strip_synset_id_prefix(id: &str) -> Option<&str> {
 /// which then does the normal content negotiation.
 #[get("/id/{id}")]
 pub async fn synset_id_alias(id: String) -> Result<Response<Body>> {
-    let bare_id = strip_synset_id_prefix(&id).unwrap_or(&id);
+    let id_prefix = &crate::SETTINGS.get().id_prefix;
+    let bare_id = strip_synset_id_prefix(&id, id_prefix).unwrap_or(&id);
     Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response())
 }
 
 #[get("/synset/{id}", headers : HeaderMap)]
 pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
-    if let Some(bare_id) = strip_synset_id_prefix(&id) {
+    let id_prefix = &crate::SETTINGS.get().id_prefix;
+    if let Some(bare_id) = strip_synset_id_prefix(&id, id_prefix) {
         return Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response());
     }
     let content_type = negotiate(headers);
@@ -557,7 +561,7 @@ pub(crate) fn lemma_id(lemma: &str, pos_key: &PosKey) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oewn_lib::wordnet::{Example, MemberSynset, PartOfSpeech, PosKey, SenseRelation, SynsetId};
+    use ewe_lib::wordnet::{Example, MemberSynset, PartOfSpeech, PosKey, SenseRelation, SynsetId};
     use oxrdf::NamedNode;
 
     /// `MemberSynset` has no public constructor besides `from_synset` (which needs a
@@ -655,17 +659,23 @@ mod tests {
 
     #[test]
     fn test_strip_synset_id_prefix_oewn() {
-        assert_eq!(strip_synset_id_prefix("oewn-00001740-n"), Some("00001740-n"));
+        assert_eq!(
+            strip_synset_id_prefix("oewn-00001740-n", "oewn"),
+            Some("00001740-n")
+        );
     }
 
     #[test]
     fn test_strip_synset_id_prefix_ewn() {
-        assert_eq!(strip_synset_id_prefix("ewn-00001740-n"), Some("00001740-n"));
+        assert_eq!(
+            strip_synset_id_prefix("ewn-00001740-n", "oewn"),
+            Some("00001740-n")
+        );
     }
 
     #[test]
     fn test_strip_synset_id_prefix_none() {
-        assert_eq!(strip_synset_id_prefix("00001740-n"), None);
+        assert_eq!(strip_synset_id_prefix("00001740-n", "oewn"), None);
     }
 
     #[test]

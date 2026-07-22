@@ -13,14 +13,14 @@
 
 use crate::backend::rdf::{lemma_id, resolve_lemma_synsets, resolve_synset};
 use crate::dioxus_fullstack::{body::Body, http::Response};
+use crate::settings::EweSettings;
 use dioxus::prelude::*;
-use oewn_lib::wordnet::synset_members::Member;
-use oewn_lib::wordnet::{MemberSynset, PosKey, Pronunciation, SynsetId};
+use ewe_lib::wordnet::synset_members::Member;
+use ewe_lib::wordnet::{MemberSynset, PosKey, Pronunciation, SynsetId};
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 use std::collections::BTreeMap;
 
-const ID_PREFIX: &str = "oewn";
 const DOCTYPE: &str =
     "LexicalResource SYSTEM \"http://globalwordnet.github.io/schemas/WN-LMF-relaxed-1.4.dtd\"";
 
@@ -28,7 +28,7 @@ const DOCTYPE: &str =
 pub async fn synset_xml(id: String) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
     match resolve_synset(&id) {
-        Ok(Some(ms)) => match gen_lexicon_xml(std::slice::from_ref(&ms)) {
+        Ok(Some(ms)) => match gen_lexicon_xml(std::slice::from_ref(&ms), crate::SETTINGS.get()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },
@@ -41,7 +41,7 @@ pub async fn synset_xml(id: String) -> Result<Response<Body>> {
 pub async fn lemma_xml(lemma: String) -> Result<Response<Body>> {
     match resolve_lemma_synsets(&lemma) {
         Ok(synsets) if synsets.is_empty() => Ok(not_found("Lemma not found")),
-        Ok(synsets) => match gen_lexicon_xml(&synsets) {
+        Ok(synsets) => match gen_lexicon_xml(&synsets, crate::SETTINGS.get()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },
@@ -70,16 +70,20 @@ fn server_error(e: impl std::fmt::Display) -> Response<Body> {
         .unwrap()
 }
 
-fn entry_xml_id(lemma: &str, poskey: &PosKey) -> String {
-    format!("{}-{}", ID_PREFIX, lemma_id(lemma, poskey))
+fn entry_xml_id(id_prefix: &str, lemma: &str, poskey: &PosKey) -> String {
+    format!("{}-{}", id_prefix, lemma_id(lemma, poskey))
 }
 
-fn synset_xml_id(id: &SynsetId) -> String {
-    format!("{}-{}", ID_PREFIX, id.as_str())
+fn synset_xml_id(id_prefix: &str, id: &SynsetId) -> String {
+    format!("{}-{}", id_prefix, id.as_str())
 }
 
-fn sense_xml_id(lemma: &str, poskey: &PosKey, synset_id: &SynsetId) -> String {
-    format!("{}-{}", entry_xml_id(lemma, poskey), synset_id.as_str())
+fn sense_xml_id(id_prefix: &str, lemma: &str, poskey: &PosKey, synset_id: &SynsetId) -> String {
+    format!(
+        "{}-{}",
+        entry_xml_id(id_prefix, lemma, poskey),
+        synset_id.as_str()
+    )
 }
 
 struct EntryAcc<'a> {
@@ -87,7 +91,8 @@ struct EntryAcc<'a> {
     senses: Vec<(&'a MemberSynset, &'a Member)>,
 }
 
-fn gen_lexicon_xml(synsets: &[MemberSynset]) -> Result<Vec<u8>> {
+fn gen_lexicon_xml(synsets: &[MemberSynset], settings: &EweSettings) -> Result<Vec<u8>> {
+    let id_prefix = settings.id_prefix.as_str();
     let mut entries: BTreeMap<(String, PosKey), EntryAcc> = BTreeMap::new();
     for synset in synsets {
         for member in &synset.members {
@@ -111,21 +116,21 @@ fn gen_lexicon_xml(synsets: &[MemberSynset]) -> Result<Vec<u8>> {
     writer.write_event(Event::Start(lexical_resource))?;
 
     let mut lexicon = BytesStart::new("Lexicon");
-    lexicon.push_attribute(("id", ID_PREFIX));
-    lexicon.push_attribute(("label", "Open English Wordnet"));
+    lexicon.push_attribute(("id", id_prefix));
+    lexicon.push_attribute(("label", settings.project_name.as_str()));
     lexicon.push_attribute(("language", "en"));
-    lexicon.push_attribute(("email", "english-wordnet@googlegroups.com"));
+    lexicon.push_attribute(("email", settings.contact_email.as_deref().unwrap_or("")));
     lexicon.push_attribute(("license", "https://creativecommons.org/licenses/by/4.0"));
     lexicon.push_attribute(("version", "2024"));
-    lexicon.push_attribute(("url", "https://github.com/globalwordnet/english-wordnet"));
+    lexicon.push_attribute(("url", settings.source_url.as_deref().unwrap_or("")));
     writer.write_event(Event::Start(lexicon))?;
 
     for ((lemma, poskey), acc) in &entries {
-        write_lexical_entry(&mut writer, lemma, poskey, acc)?;
+        write_lexical_entry(&mut writer, id_prefix, lemma, poskey, acc)?;
     }
 
     for synset in synsets {
-        write_synset(&mut writer, synset)?;
+        write_synset(&mut writer, id_prefix, synset)?;
     }
 
     writer.write_event(Event::End(BytesEnd::new("Lexicon")))?;
@@ -136,12 +141,13 @@ fn gen_lexicon_xml(synsets: &[MemberSynset]) -> Result<Vec<u8>> {
 
 fn write_lexical_entry<W: std::io::Write>(
     writer: &mut Writer<W>,
+    id_prefix: &str,
     lemma: &str,
     poskey: &PosKey,
     acc: &EntryAcc,
 ) -> Result<()> {
     let mut entry = BytesStart::new("LexicalEntry");
-    entry.push_attribute(("id", entry_xml_id(lemma, poskey).as_str()));
+    entry.push_attribute(("id", entry_xml_id(id_prefix, lemma, poskey).as_str()));
     writer.write_event(Event::Start(entry))?;
 
     let pos = poskey
@@ -168,7 +174,7 @@ fn write_lexical_entry<W: std::io::Write>(
     }
 
     for (synset, member) in &acc.senses {
-        write_sense(writer, lemma, poskey, synset, member)?;
+        write_sense(writer, id_prefix, lemma, poskey, synset, member)?;
     }
 
     writer.write_event(Event::End(BytesEnd::new("LexicalEntry")))?;
@@ -191,17 +197,18 @@ fn write_pronunciation<W: std::io::Write>(
 
 fn write_sense<W: std::io::Write>(
     writer: &mut Writer<W>,
+    id_prefix: &str,
     lemma: &str,
     poskey: &PosKey,
     synset: &MemberSynset,
     member: &Member,
 ) -> Result<()> {
     let mut sense = BytesStart::new("Sense");
-    sense.push_attribute(("id", sense_xml_id(lemma, poskey, &synset.id).as_str()));
-    sense.push_attribute(("synset", synset_xml_id(&synset.id).as_str()));
+    sense.push_attribute(("id", sense_xml_id(id_prefix, lemma, poskey, &synset.id).as_str()));
+    sense.push_attribute(("synset", synset_xml_id(id_prefix, &synset.id).as_str()));
     sense.push_attribute(("dc:identifier", member.sense.id.as_str()));
 
-    let relations = sense_relations_xml(synset, lemma);
+    let relations = sense_relations_xml(id_prefix, synset, lemma);
     if relations.is_empty() {
         writer.write_event(Event::Empty(sense))?;
     } else {
@@ -222,7 +229,11 @@ fn write_sense<W: std::io::Write>(
 /// model tracks (is_agent_of, is_material_of, etc.) have no corresponding
 /// relType in the DTD - they're meant to be derived by reversing the forward
 /// relation, not stored - so they're intentionally skipped.
-fn sense_relations_xml(synset: &MemberSynset, lemma: &str) -> Vec<(&'static str, String)> {
+fn sense_relations_xml(
+    id_prefix: &str,
+    synset: &MemberSynset,
+    lemma: &str,
+) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     macro_rules! rel {
         ($field:ident, $rel_type:expr) => {
@@ -230,7 +241,12 @@ fn sense_relations_xml(synset: &MemberSynset, lemma: &str) -> Vec<(&'static str,
                 if rel.source_lemma == lemma {
                     out.push((
                         $rel_type,
-                        sense_xml_id(&rel.target_lemma, &rel.target_poskey, &rel.target_synset),
+                        sense_xml_id(
+                            id_prefix,
+                            &rel.target_lemma,
+                            &rel.target_poskey,
+                            &rel.target_synset,
+                        ),
                     ));
                 }
             }
@@ -261,9 +277,13 @@ fn sense_relations_xml(synset: &MemberSynset, lemma: &str) -> Vec<(&'static str,
     out
 }
 
-fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, synset: &MemberSynset) -> Result<()> {
+fn write_synset<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    id_prefix: &str,
+    synset: &MemberSynset,
+) -> Result<()> {
     let mut el = BytesStart::new("Synset");
-    el.push_attribute(("id", synset_xml_id(&synset.id).as_str()));
+    el.push_attribute(("id", synset_xml_id(id_prefix, &synset.id).as_str()));
     let ili = synset
         .ili
         .as_ref()
@@ -274,7 +294,7 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, synset: &MemberSynset
     let members = synset
         .members
         .iter()
-        .map(|m| entry_xml_id(&m.lemma, &m.poskey))
+        .map(|m| entry_xml_id(id_prefix, &m.lemma, &m.poskey))
         .collect::<Vec<_>>()
         .join(" ");
     if !members.is_empty() {
@@ -291,7 +311,7 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, synset: &MemberSynset
         writer.write_event(Event::End(BytesEnd::new("Definition")))?;
     }
 
-    for (rel_type, target) in synset_relations_xml(synset) {
+    for (rel_type, target) in synset_relations_xml(id_prefix, synset) {
         let mut rel_el = BytesStart::new("SynsetRelation");
         rel_el.push_attribute(("relType", rel_type));
         rel_el.push_attribute(("target", target.as_str()));
@@ -313,12 +333,12 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, synset: &MemberSynset
     Ok(())
 }
 
-fn synset_relations_xml(synset: &MemberSynset) -> Vec<(&'static str, String)> {
+fn synset_relations_xml(id_prefix: &str, synset: &MemberSynset) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     macro_rules! rel {
         ($field:ident, $rel_type:expr) => {
             for target in &synset.$field {
-                out.push(($rel_type, synset_xml_id(target)));
+                out.push(($rel_type, synset_xml_id(id_prefix, target)));
             }
         };
     }
@@ -366,12 +386,12 @@ mod tests {
     #[test]
     fn test_entry_xml_id() {
         let pos_key = PosKey::new("n");
-        assert_eq!(entry_xml_id("dog", &pos_key), "oewn-dog-n");
+        assert_eq!(entry_xml_id("oewn", "dog", &pos_key), "oewn-dog-n");
     }
 
     #[test]
     fn test_synset_xml_id() {
         let id = SynsetId::new_owned("00001740-n".to_string());
-        assert_eq!(synset_xml_id(&id), "oewn-00001740-n");
+        assert_eq!(synset_xml_id("oewn", &id), "oewn-00001740-n");
     }
 }
