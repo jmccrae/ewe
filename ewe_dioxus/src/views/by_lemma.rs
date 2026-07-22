@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks};
+use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks, ProjectName};
 use crate::backend::api::get_lemma;
 
 #[component]
@@ -11,10 +11,14 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
         }
     })?;
     let options = use_context::<Signal<DisplayOptions>>();
+    let project_name = use_context::<Signal<ProjectName>>();
 
     let x = if let Some(Ok(synsets)) = &*synsets.read() {
         rsx! {
             div {
+                if !project_name().0.is_empty() {
+                    document::Title { "{lemma} - {project_name().0}" }
+                }
                 WordNet {},
                 {
                     let (nouns, rest) = synsets.into_iter().partition::<Vec<_>, _>(|s| s.as_str().ends_with('n'));

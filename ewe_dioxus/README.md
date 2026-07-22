@@ -156,7 +156,7 @@ Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`
 
 ### Pages
 
-Defined in `src/main.rs`, rendered inside the shared `WNLayout` (logo, title, footer) in `src/views/wn_layout.rs`:
+Defined in `src/main.rs`, rendered inside the shared `WNLayout` (logo, title, footer) in `src/views/wn_layout.rs`. Each page also sets its own browser tab title via `document::Title` (e.g. `dog - EWE Wordnet Editor`, `00001740-n - EWE Wordnet Editor`), composed from `project_name` (shared via context from `WNLayout`, see `src/components/branding.rs`) and the page's lemma/synset id/section name; `Dioxus.toml`'s static `title` is only the fallback shown before that resolves.
 
 - `/` — `Home` (search box)
 - `/view/lemma/:lemma` — `ByLemma` (lists synsets for a given lemma, grouped by part of speech)

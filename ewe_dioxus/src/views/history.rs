@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::components::WordNet;
+use crate::components::{ProjectName, WordNet};
 
 /// How many entries `get_changelog` is asked for per page - also what the client compares a
 /// page's length against to decide whether there's more to load (a short page means the log ran
@@ -15,9 +15,14 @@ const PAGE_SIZE: usize = 50;
 pub fn History() -> Element {
     use crate::backend::edit::{get_changelog, ChangeLogEntryView};
 
+    let project_name = use_context::<Signal<ProjectName>>();
+
     let Ok(first_page) = use_loader(move || get_changelog(Some(PAGE_SIZE), None)) else {
         return rsx! {
             div {
+                if !project_name().0.is_empty() {
+                    document::Title { "History - {project_name().0}" }
+                }
                 WordNet {}
                 div { class: "history", p { "Failed to load change history." } }
             }
@@ -59,6 +64,9 @@ pub fn History() -> Element {
 
     rsx! {
         div {
+            if !project_name().0.is_empty() {
+                document::Title { "History - {project_name().0}" }
+            }
             WordNet {}
             div {
                 class: "history",
@@ -103,8 +111,12 @@ pub fn History() -> Element {
 #[cfg(not(feature = "edit"))]
 #[component]
 pub fn History() -> Element {
+    let project_name = use_context::<Signal<ProjectName>>();
     rsx! {
         div {
+            if !project_name().0.is_empty() {
+                document::Title { "History - {project_name().0}" }
+            }
             WordNet {}
             div { class: "history", p { "History is not available in this build." } }
         }

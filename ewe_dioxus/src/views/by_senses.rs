@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_concordance;
-use crate::components::WordNet;
+use crate::components::{ProjectName, WordNet};
 use crate::Route;
 use ewe_lib::wordnet::{MemberSynset, SynsetId};
 
@@ -38,8 +38,12 @@ pub fn BySenses(id: ReadSignal<String>, page: ReadSignal<usize>) -> Element {
         let page = page.cloned();
         async move { get_sense_concordance(SynsetId::new_owned(value), page).await }
     });
+    let project_name = use_context::<Signal<ProjectName>>();
 
     rsx! {
+        if !project_name().0.is_empty() {
+            document::Title { "{id} - {project_name().0}" }
+        }
         document::Style { href: CSS },
         div {
             WordNet {},
