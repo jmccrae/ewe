@@ -1,3 +1,4 @@
+#![cfg(not(feature = "desktop"))]
 use dioxus::prelude::*;
 use crate::backend::downloads::get_downloads;
 use crate::components::WordNet;

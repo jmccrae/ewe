@@ -6,6 +6,25 @@ use crate::components::{
 };
 use crate::Route;
 
+/// The Downloads page and JSON API docs are web-facing features that don't apply to the
+/// single-user desktop app (which already has direct local access to its own data).
+#[cfg(not(feature = "desktop"))]
+#[component]
+fn WebOnlyFooterLinks() -> Element {
+    rsx! {
+        Link { to: Route::Downloads {}, "Downloads" }
+        " | "
+        a { href: "/api/docs", "JSON API documentation" }
+        " | "
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[component]
+fn WebOnlyFooterLinks() -> Element {
+    rsx! {}
+}
+
 #[component]
 pub fn WNLayout() -> Element {
     provide_display_options();
@@ -56,10 +75,7 @@ pub fn WNLayout() -> Element {
                 }
                 p {
                     class: "api-docs-link",
-                    Link { to: Route::Downloads {}, "Downloads" }
-                    " | "
-                    a { href: "/api/docs", "JSON API documentation" }
-                    " | "
+                    WebOnlyFooterLinks {}
                     Link { to: Route::History {}, "History" }
                     " | "
                     ValidateButton {}

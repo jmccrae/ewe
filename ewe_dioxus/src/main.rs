@@ -11,7 +11,9 @@ use std::sync::RwLock;
 use teanga::disk_corpus::RedbDb;
 #[cfg(feature = "server")]
 use teanga::DiskCorpus;
-use views::{ByLemma, BySenses, BySynset, Downloads, History, Home, WNLayout};
+use views::{ByLemma, BySenses, BySynset, History, Home, WNLayout};
+#[cfg(not(feature = "desktop"))]
+use views::Downloads;
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -53,6 +55,7 @@ enum Route {
         #[route("/view/senses/:id?:page")]
         BySenses { id: String, page: usize },
 
+        #[cfg(not(feature = "desktop"))]
         #[route("/downloads")]
         Downloads {},
 

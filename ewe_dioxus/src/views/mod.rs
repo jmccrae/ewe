@@ -13,7 +13,9 @@ pub use by_synset::BySynset;
 mod by_senses;
 pub use by_senses::BySenses;
 
+#[cfg(not(feature = "desktop"))]
 mod downloads;
+#[cfg(not(feature = "desktop"))]
 pub use downloads::Downloads;
 
 mod history;
