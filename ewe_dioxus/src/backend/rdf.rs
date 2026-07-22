@@ -154,13 +154,14 @@ pub(crate) fn resolve_synset(id: &SynsetId) -> Result<Option<MemberSynset>> {
     let Some(lexicon) = crate::LEXICON.get().as_ref() else {
         return Ok(None);
     };
+    let lexicon = lexicon.read().unwrap();
     let Some(synset) = lexicon.synset_by_id(id)? else {
         return Ok(None);
     };
     Ok(Some(MemberSynset::from_synset(
         id,
         synset.into_owned(),
-        lexicon,
+        &*lexicon,
     )?))
 }
 
@@ -171,6 +172,7 @@ pub(crate) fn resolve_lemma_synsets(lemma: &str) -> Result<Vec<MemberSynset>> {
     let Some(lexicon) = crate::LEXICON.get().as_ref() else {
         return Ok(Vec::new());
     };
+    let lexicon = lexicon.read().unwrap();
 
     let entries = lexicon.entry_by_lemma(lemma)?;
     let synset_ids: BTreeSet<SynsetId> = entries
@@ -435,8 +437,11 @@ fn write_synset_triples<W: std::io::Write>(
         sense_rel!(participle, "participle");
         sense_rel!(is_participle_of, "isParticipleOf");
         sense_rel!(pertainym, "pertainym");
-        sense_rel!(is_pertainym_of, "isPertainymOf");
         sense_rel!(derivation, "derivation");
+        sense_rel!(domain_topic_sense, "domainTopic");
+        sense_rel!(has_domain_topic_sense, "hasDomainTopic");
+        sense_rel!(domain_region_sense, "domainRegion");
+        sense_rel!(has_domain_region_sense, "hasDomainRegion");
         sense_rel!(exemplifies_sense, "exemplifies");
         sense_rel!(is_exemplified_by_sense, "isExemplifiedBy");
         sense_rel!(agent, "agent");
@@ -610,8 +615,11 @@ mod tests {
             participle: vec![],
             is_participle_of: vec![],
             pertainym: vec![],
-            is_pertainym_of: vec![],
             derivation: vec![],
+            domain_topic_sense: vec![],
+            has_domain_topic_sense: vec![],
+            domain_region_sense: vec![],
+            has_domain_region_sense: vec![],
             exemplifies_sense: vec![],
             is_exemplified_by_sense: vec![],
             agent: vec![],

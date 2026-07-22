@@ -36,19 +36,10 @@ pub struct Sense {
     pub domain_topic: Vec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub has_domain_topic: Vec<SenseId>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub domain_region: Vec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub has_domain_region: Vec<SenseId>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exemplifies: Vec<SenseId>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_exemplified_by: Vec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub similar: Vec<SenseId>,
@@ -115,11 +106,8 @@ impl Sense {
             pertainym: Vec::new(),
             derivation: Vec::new(),
             domain_topic: Vec::new(),
-            has_domain_topic: Vec::new(),
             domain_region: Vec::new(),
-            has_domain_region: Vec::new(),
             exemplifies: Vec::new(),
-            is_exemplified_by: Vec::new(),
             similar: Vec::new(),
             other: Vec::new(),
             agent: Vec::new(),
@@ -148,11 +136,8 @@ impl Sense {
         self.pertainym.retain(|x| x != target);
         self.derivation.retain(|x| x != target);
         self.domain_topic.retain(|x| x != target);
-        self.has_domain_topic.retain(|x| x != target);
         self.domain_region.retain(|x| x != target);
-        self.has_domain_region.retain(|x| x != target);
         self.exemplifies.retain(|x| x != target);
-        self.is_exemplified_by.retain(|x| x != target);
         self.similar.retain(|x| x != target);
         self.agent.retain(|x| x != target);
         self.material.retain(|x| x != target);
@@ -192,8 +177,6 @@ impl Sense {
         first = write_prop_sense(w, &self.domain_topic, "domain_topic", first)?;
         first = write_prop_sense(w, &self.event, "event", first)?;
         first = write_prop_sense(w, &self.exemplifies, "exemplifies", first)?;
-        first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
-        first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
         if first {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
@@ -205,7 +188,6 @@ impl Sense {
             )?;
         }
         write_prop_sense(w, &self.instrument, "instrument", first)?;
-        write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
         write_prop_sense(w, &self.location, "location", first)?;
         write_prop_sense(w, &self.material, "material", first)?;
         write_prop_sense(w, &self.other, "other", first)?;
@@ -242,11 +224,8 @@ impl Sense {
         self.pertainym.iter().map(|id| (SenseRelType::Pertainym, id.clone())).chain(
         self.derivation.iter().map(|id| (SenseRelType::Derivation, id.clone())).chain(
         self.domain_topic.iter().map(|id| (SenseRelType::DomainTopic, id.clone())).chain(
-        self.has_domain_topic.iter().map(|id| (SenseRelType::HasDomainTopic, id.clone())).chain(
         self.domain_region.iter().map(|id| (SenseRelType::DomainRegion, id.clone())).chain(
-        self.has_domain_region.iter().map(|id| (SenseRelType::HasDomainRegion, id.clone())).chain(
         self.exemplifies.iter().map(|id| (SenseRelType::Exemplifies, id.clone())).chain(
-        self.is_exemplified_by.iter().map(|id| (SenseRelType::IsExemplifiedBy, id.clone())).chain(
         self.similar.iter().map(|id| (SenseRelType::Similar, id.clone())).chain(
         self.other.iter().map(|id| (SenseRelType::Antonym, id.clone())).chain(
         self.agent.iter().map(|id| (SenseRelType::Agent, id.clone())).chain(
@@ -263,7 +242,7 @@ impl Sense {
         self.destination.iter().map(|id| (SenseRelType::Destination, id.clone())).chain(
         self.body_part.iter().map(|id| (SenseRelType::BodyPart, id.clone())).chain(
         self.vehicle.iter().map(|id| (SenseRelType::Vehicle, id.clone()))
-                                                    )))))))))))))))))))))))))).collect()
+                                                    ))))))))))))))))))))))).collect()
     }
 
     pub(crate) fn add_rel(&mut self, rel: SenseRelType, target: SenseId) {
@@ -298,32 +277,22 @@ impl Sense {
                     self.domain_topic.push(target)
                 }
             }
-            SenseRelType::HasDomainTopic => {
-                if !self.has_domain_topic.iter().any(|x| *x == target) {
-                    self.has_domain_topic.push(target)
-                }
-            }
+            // Not directly storable - the OEWN format only persists the canonical
+            // direction; add_sense_rel in lexicon.rs swaps these to their canonical
+            // form (DomainTopic/DomainRegion/Exemplifies) before this is ever reached.
+            SenseRelType::HasDomainTopic => {}
             SenseRelType::DomainRegion => {
                 if !self.domain_region.iter().any(|x| *x == target) {
                     self.domain_region.push(target)
                 }
             }
-            SenseRelType::HasDomainRegion => {
-                if !self.has_domain_region.iter().any(|x| *x == target) {
-                    self.has_domain_region.push(target)
-                }
-            }
+            SenseRelType::HasDomainRegion => {}
             SenseRelType::Exemplifies => {
                 if !self.exemplifies.iter().any(|x| *x == target) {
                     self.exemplifies.push(target)
                 }
             }
-            SenseRelType::IsExemplifiedBy => {
-                if !self.is_exemplified_by.iter().any(|x| *x == target) {
-                    self.is_exemplified_by.push(target)
-                }
-            }
-            SenseRelType::IsPertainymOf => {}
+            SenseRelType::IsExemplifiedBy => {}
             SenseRelType::Similar => {
                 if !self.similar.iter().any(|x| *x == target) {
                     self.similar.push(target)

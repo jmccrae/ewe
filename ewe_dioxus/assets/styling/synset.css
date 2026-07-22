@@ -1,6 +1,24 @@
+/* Local tints derived from the site's own navy/red palette (theme.css) - alpha-blended
+   variants for chip backgrounds, focus rings and hover fills, not new hues. */
+:root {
+    --synset-tint-bg: rgba(0, 40, 104, 0.06);
+    --synset-tint-border: rgba(0, 40, 104, 0.18);
+    --synset-tint-hover: rgba(0, 40, 104, 0.1);
+    --synset-danger-tint: rgba(191, 10, 48, 0.08);
+}
+
 .synset {
     padding-left:15px;
     padding-bottom:10px;
+    border-radius: 8px;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Set on the outer div only while the synset-wide edit toggle is on (see synset.rs) - gives
+   the entry being edited a visibly distinct "workspace" without changing layout. */
+.synset.editing {
+    background: var(--color-surface-hover);
+    box-shadow: 0 0 0 1px var(--color-border-light);
 }
 
 .lemmas {
@@ -14,6 +32,14 @@
     align-items: flex-start; /* Keeps icon at the top */
 }
 
+/* Wraps a "Definition:"/"Examples:" `.field-label` and its value on their own line, indented
+   to match `.relations-editing`'s 18px so every field block in the synset lines up under the
+   lemma row instead of running on after it. */
+.field-row {
+    padding-left: 18px;
+    margin-top: 4px;
+}
+
 .definition {
     font-size: 0.8em;
     color: var(--color-text);
@@ -21,10 +47,119 @@
     margin-left: 4px;
 }
 
+.definition-editing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.definition-input {
+    font-size: 1em;
+    font-style: italic;
+    font-family: inherit;
+    /* Matches the combined width of an example row's three elements (text + source + delete
+       button) below, so the two editable blocks line up. */
+    width: 26em;
+}
+
 .example {
     font-size: 0.8em;
     color: var(--color-text-secondary);
     font-style: italic;
+    margin-left: 4px;
+}
+
+.example-editing {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    transition: background-color 0.15s ease;
+}
+
+.example-editing:hover {
+    background: var(--color-surface-hover);
+}
+
+.example-text-input {
+    font-size: 1em;
+    font-style: italic;
+    font-family: inherit;
+    width: 16em;
+}
+
+.example-source-input {
+    font-size: 1em;
+    font-family: inherit;
+    width: 8em;
+}
+
+.example-add {
+    display: block;
+    margin-top: 4px;
+}
+
+.lemmas-editing {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.lemma-editing {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--color-surface-light);
+    border-radius: 999px;
+    padding: 2px 4px 2px 8px;
+}
+
+.lemma-dragging {
+    opacity: 0.4;
+}
+
+.lemma-drop-before {
+    box-shadow: -3px 0 0 0 var(--color-accent);
+}
+
+.lemma-drop-after {
+    box-shadow: 3px 0 0 0 var(--color-accent);
+}
+
+.lemma-drag-handle {
+    cursor: grab;
+    color: var(--color-text-mute);
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.lemma-shift-buttons {
+    display: inline-flex;
+    flex-direction: column;
+    line-height: 0.6;
+}
+
+.lemma-shift-buttons button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-mute);
+    font-size: 0.6em;
+    padding: 0 2px;
+}
+
+.lemma-shift-buttons button:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.lemma-input {
+    font-size: 1em;
+    font-family: inherit;
+    width: 8em;
 }
 
 .sense_key:before {
@@ -41,30 +176,305 @@
 }
 
 .synset-id {
-    font-size: 16pt;
+    font-size: 15pt;
+    font-weight: 600;
 }
 
 .identifier {
     font-family: var(--font-mono);
 }
 
-.more {
-    padding-top:5px;
-    padding-left:20px;
-    font-size: 16px;
-    text-decoration: none;
+/* Everything else directly in the id row (the "(", ", ", ")" separators and the ILI/Wikidata
+   wrapper spans) is secondary metadata - shrink and mute it so the id badge above stays the
+   visual anchor. `.synset-id-title`/`.field-label` (below) deliberately don't re-set font-size,
+   so they just inherit this instead of compounding two shrinks into unreadably small text. */
+.synset-id > span:not(.identifier) {
+    font-size: 0.62em;
+    font-weight: 400;
+    color: var(--color-text-muted);
 }
 
-.more a {
+/* `.synset-id-title` (the "Interlingual Index:"/"Wikidata:" labels) and `.field-label` (the
+   "Definition:"/"Examples:" labels) use the same heading font/weight/size as `.relation-edit-label`
+   (below), so every field-name label in the synset reads as the same kind of thing. `rem` (not
+   `em`) keeps the size equal across the three despite each sitting in a different ancestor
+   font-size context (16pt `.synset-id`, the 0.75em identifiers-editing block, `.lemmas`, and
+   `.relation-edit-group`'s own 0.9em). Color is the one property left out: `.synset-id-title`
+   stays muted since it sits inside the already-secondary parenthetical metadata, while
+   `.field-label`/`.relation-edit-label` are strong, matching the primary content they introduce. */
+.synset-id-title,
+.field-label,
+.relation-edit-label {
+    font-family: var(--font-heading);
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+
+.synset-id-title {
+    color: var(--color-text-muted);
+}
+
+.field-label,
+.relation-edit-label {
     color: var(--color-text-strong);
 }
 
-.more:hover {
-    text-decoration: underline;
+.field-label {
+    margin-right: 2px;
+}
+
+.synset-identifiers-editing {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 4px 0 6px;
+    font-size: 0.75em;
+}
+
+.synset-id-editing {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ili-input {
+    font-family: var(--font-mono);
+    font-size: 1em;
+    width: 10em;
+}
+
+.wikidata-editing {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.wikidata-editing-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--color-surface-light);
+    border-radius: 999px;
+    padding: 2px 4px 2px 8px;
+}
+
+.wikidata-input {
+    font-family: var(--font-mono);
+    font-size: 1em;
+    width: 8em;
+}
+
+/* Ghost inputs: transparent by default, showing only text and a faint underline; a solid
+   underline plus a matching 1px "glow" on focus signals the active field without the heavier
+   boxed-input look used elsewhere in the app. */
+.definition-input,
+.example-text-input,
+.example-source-input,
+.lemma-input,
+.ili-input,
+.wikidata-input,
+.relation-search-input,
+.relation-type-select,
+.relation-lemma-pickers select {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    padding: 2px 2px 3px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.definition-input:focus,
+.example-text-input:focus,
+.example-source-input:focus,
+.lemma-input:focus,
+.ili-input:focus,
+.wikidata-input:focus,
+.relation-search-input:focus,
+.relation-type-select:focus,
+.relation-lemma-pickers select:focus {
+    outline: none;
+    border-bottom-color: var(--color-primary);
+    box-shadow: 0 1px 0 0 var(--color-primary);
+}
+
+/* Minimal ghost delete controls for the token/chip rows above - overrides the boxed, always-
+   accented `.edit-delete` (main.css) just within these synset-only contexts, since a bordered
+   button per pill reads as heavier than the rest of this row style. */
+.lemma-editing .edit-delete,
+.wikidata-editing-item .edit-delete,
+.relation-edit-item .edit-delete,
+.example-editing .edit-delete {
+    border: none;
+    background: none;
+    color: var(--color-text-mute);
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 0.85em;
+    line-height: 1;
+}
+
+.lemma-editing .edit-delete:hover,
+.wikidata-editing-item .edit-delete:hover,
+.relation-edit-item .edit-delete:hover,
+.example-editing .edit-delete:hover {
+    background: var(--synset-danger-tint);
+    color: var(--color-accent);
+}
+
+.example-add,
+.lemma-add,
+.wikidata-add,
+.relation-queue {
+    border-radius: 999px;
+}
+
+.more {
+    padding-top:5px;
+    padding-left:20px;
+}
+
+.more a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-text-strong);
+    font-size: 0.85em;
+    padding: 2px 10px;
+    border-radius: 999px;
 }
 
 .relations {
     padding-left:30px;
+}
+
+.relations-editing {
+    padding-left: 18px;
+    padding-top: 8px;
+    margin-top: 6px;
+    border-top: 1px dashed var(--color-border-light);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.relation-edit-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
+}
+
+.relation-edit-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--synset-tint-bg);
+    border: 1px solid var(--synset-tint-border);
+    border-radius: 999px;
+    padding: 2px 3px 2px 10px;
+    color: var(--color-primary);
+    transition: box-shadow 0.15s ease;
+}
+
+.relation-edit-item a {
+    color: var(--color-primary);
+}
+
+.relation-edit-item:hover {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.relation-edit-pending {
+    background: var(--color-surface-hover);
+    border: 1px dashed var(--color-border);
+    color: var(--color-text-muted);
+}
+
+.relation-edit-pending a {
+    color: var(--color-text-muted);
+}
+
+.relation-add-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--color-surface-hover);
+    border: 1px solid var(--color-border-light);
+}
+
+.relation-type-select,
+.relation-lemma-pickers select {
+    font-size: 1em;
+    font-family: inherit;
+}
+
+.relation-search-input {
+    font-size: 1em;
+    font-family: inherit;
+    min-width: 20em;
+}
+
+/* Positioning context for `.relation-search-results` below - without this, the dropdown's
+   `position: absolute` falls back to the nearest positioned ancestor (or the page itself),
+   landing wherever that happens to be rather than under the input. */
+.relation-search-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.relation-search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 20;
+    margin-top: 4px;
+    width: max-content;
+    max-width: 30em;
+    max-height: 16em;
+    overflow-y: auto;
+    background-color: var(--color-surface-dark);
+    color: var(--color-text-on-dark);
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    list-style: none;
+    padding: 0;
+}
+
+.relation-search-results li {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.relation-search-results li:hover {
+    background-color: var(--color-navbar-hover);
+}
+
+.relation-selected-target {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 6px;
+    width: 350px;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.relation-lemma-pickers {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .relation-word {
@@ -81,7 +491,7 @@
 }
 
 .synset-id hr {
-    margin-top:2px;
+    margin-top:6px;
     margin-bottom:2px;
     border: 1px solid var(--color-surface-light);
     height: 0px;
@@ -134,15 +544,127 @@
 }
 
 .wikidata img {
-    height: 30px;
+    height: 22px;
 }
 
 .wikidata {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
     background: none;
     border: none;
+    border-radius: 50%;
     cursor: pointer;
-    font-size: 1.2rem;
     color: var(--color-text-muted);
     padding: 0;
-    transition: color 0.2s;
+    transition: background-color 0.2s ease;
+}
+
+.wikidata:hover {
+    background: var(--synset-tint-bg);
+}
+
+.side-icons {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.edit-toggle {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--color-text-mute);
+    transition: color 0.2s ease, background-color 0.2s ease;
+    user-select: none;
+}
+
+.edit-toggle:hover {
+    color: var(--color-primary);
+    background: var(--synset-tint-bg);
+}
+
+.edit-toggle-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.edit-toggle-btn {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+/* Overrides main.css's flat `.edit-save`/`.edit-cancel` box just for the accept/reject pair
+   next to the pencil icon - everywhere else those classes appear (modals, the unsaved-changes
+   toast) keeps the plain button look, since this pair is the one place styled to match
+   `.edit-toggle`'s circular icon. */
+.edit-toggle-actions .edit-save {
+    border-color: var(--color-primary);
+}
+
+.edit-toggle-actions .edit-save:hover:not(:disabled) {
+    background: var(--color-primary);
+    color: var(--color-white);
+}
+
+.edit-toggle-actions .edit-cancel {
+    border-color: var(--color-accent);
+}
+
+.edit-toggle-actions .edit-cancel:hover:not(:disabled) {
+    background: var(--color-accent);
+    color: var(--color-white);
+}
+
+/* The 🗑 emoji's glyph fills its em-box far more than the ✓/× text glyphs do at the same
+   font-size, making the button look tighter-padded than its neighbors even though the box
+   itself (font-size + line-height + padding) is identical. Scaling just the glyph, rather than
+   lowering the button's own font-size, shrinks the ink without shrinking the button's box (and
+   therefore its height/alignment) to match. */
+.delete-synset-icon {
+    display: inline-block;
+    transform: scale(0.7);
+}
+
+.edit-delete-synset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: none;
+    border: 1px solid var(--color-accent);
+    border-radius: 50%;
+    color: var(--color-accent);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.edit-delete-synset:hover {
+    background: var(--color-accent);
+    color: var(--color-white);
+}
+
+.edit-delete-synset:disabled {
+    opacity: 0.5;
+    cursor: default;
+    background: none;
+    color: var(--color-accent);
 }

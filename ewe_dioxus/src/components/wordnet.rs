@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus::events::{FormEvent, KeyboardEvent};
 use dioxus::prelude::Key;
 use crate::backend::api::{autocomplete, SearchResult, SearchResultKind};
-use crate::components::DisplayOptionsButton;
+use crate::components::{AddSynsetTrigger, DisplayOptionsButton};
 use crate::Route;
 
 #[component]
@@ -90,24 +90,35 @@ pub fn WordNet() -> Element {
                         oninput: update_lemma,
                         onkeydown,
                     }
-                    if *show_suggestions.read() {
-                        ul {
-                            class: "suggestions",
-                            if let Some(Err(_e)) = suggestions.value() {
-                                div { "Failed to load suggestions" }
-                            } else {
-                                for (i, s) in visible_suggestions.read().iter().cloned().enumerate() {
-                                    li {
-                                        key: "{s.display}",
-                                        class: if i == selected() { "selected" },
-                                        onmousedown: {
-                                            let s = s.clone();
-                                            move |_| go_to(s.clone())
-                                        },
-                                        "{s.display}"
+                    // A single positioned dropdown box containing the matched results (when
+                    // any) and, always, the "add a new synset" row - the latter deliberately
+                    // isn't one of the `<li>` results (it isn't a search *result*), so it stays
+                    // available regardless of whether there are any matches, any suggestions
+                    // loaded yet, or the fetch errored.
+                    if !lemma().trim().is_empty() {
+                        div {
+                            class: "suggestions-dropdown",
+                            if *show_suggestions.read() {
+                                ul {
+                                    class: "suggestions",
+                                    if let Some(Err(_e)) = suggestions.value() {
+                                        div { "Failed to load suggestions" }
+                                    } else {
+                                        for (i, s) in visible_suggestions.read().iter().cloned().enumerate() {
+                                            li {
+                                                key: "{s.display}",
+                                                class: if i == selected() { "selected" },
+                                                onmousedown: {
+                                                    let s = s.clone();
+                                                    move |_| go_to(s.clone())
+                                                },
+                                                "{s.display}"
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            AddSynsetTrigger { query: lemma() }
                         }
                     }
                 }

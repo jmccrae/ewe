@@ -89,8 +89,9 @@ h1.en-title {
     }
 }
 
-/* The Dropdown List */
-.suggestions {
+/* The Dropdown List - a single positioned box that holds the matched-results list (when
+   shown) and the always-available "add a new synset" row underneath it. */
+.suggestions-dropdown {
     position: absolute;
     top: 50px;
     left: 0;
@@ -99,17 +100,16 @@ h1.en-title {
     border: 1px solid var(--color-border-light);
     border-top: none;
     border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+}
+
+.suggestions {
     margin: 0;
     padding: 0;
     list-style: none;
     max-height: 200px;
     overflow-y: auto;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    z-index: 1000;
-}
-
-.suggestions:empty {
-    display: none;
 }
 
 /* Individual Suggestions */
@@ -127,6 +127,204 @@ h1.en-title {
 .suggestion-link {
     text-decoration: none;
     color: var(--color-text);
+}
+
+.add-synset-suggestion {
+    padding: 10px;
+    cursor: pointer;
+    font-style: italic;
+    color: var(--color-text-muted);
+    transition: background 0.2s ease;
+}
+
+.add-synset-suggestion:hover {
+    background-color: var(--color-surface-hover);
+}
+
+.suggestions:not(:empty) + .add-synset-suggestion {
+    border-top: 1px solid var(--color-border-light);
+}
+
+/* Shared accept/reject/delete controls for every field editor (definition, examples, lemmas,
+   relations, and the add-synset modal) and the main search's own "add a new synset" flow - kept
+   here (loaded on every page) rather than in synset.css (only loaded on synset pages) since the
+   modal can be opened from anywhere the search box appears. */
+.edit-save,
+.edit-cancel,
+.edit-delete {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 5px;
+}
+
+.edit-save {
+    color: var(--color-primary);
+}
+
+.edit-cancel,
+.edit-delete {
+    color: var(--color-accent);
+}
+
+.edit-save:disabled,
+.edit-cancel:disabled,
+.edit-delete:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.edit-error {
+    color: var(--color-accent);
+    font-size: 0.85em;
+    font-style: normal;
+}
+
+/* Shared "add a new row" button style for every list field (examples, lemmas, relations, and
+   the add-synset modal's lemma list). Layout (block vs. inline, margins) is context-specific -
+   see e.g. `.example-add`/`.lemma-add` in synset.css. */
+.list-add {
+    background: none;
+    border: 1px dashed var(--color-border);
+    border-radius: 3px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 3px 8px;
+}
+
+.list-add:hover {
+    color: var(--color-text-strong);
+    border-color: var(--color-text-strong);
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 5vh 0;
+    z-index: 2000;
+}
+
+/* `margin: auto 0` (rather than `.modal-overlay`'s `align-items: center`) centers this
+   vertically via flexbox auto-margins - unlike `align-items: center`, that keeps working when
+   content (e.g. a relation-search dropdown popping out of a field near the bottom) grows taller
+   than the viewport, instead of clipping it against an `overflow-y: auto` box sized to the
+   content's own pre-dropdown height. */
+.modal-content {
+    background: var(--color-white);
+    color: var(--color-text);
+    border-radius: 6px;
+    padding: 16px 20px;
+    max-width: 40em;
+    margin: auto 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: 1em;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.add-synset-field {
+    margin-bottom: 12px;
+}
+
+.add-synset-field label {
+    display: block;
+    font-weight: bold;
+    font-size: 0.85em;
+    margin-bottom: 4px;
+}
+
+.add-synset-field textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 1em;
+    min-height: 4em;
+}
+
+/* Matches `.relation-search-input`'s `min-width: 20em` (in synset.css) so a text field sitting
+   above a synset-picker field, like delete_synset_modal's "Reason"/"Superseding synset" pair,
+   lines up instead of looking arbitrarily narrower. */
+.add-synset-field input[type="text"] {
+    font-family: inherit;
+    font-size: 1em;
+    width: 20em;
+}
+
+.add-synset-field select {
+    font-family: inherit;
+    font-size: 1em;
+}
+
+.add-synset-lemma-row {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.add-synset-frames {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-left: 1.5em;
+}
+
+.add-synset-frame-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--color-surface-light);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 0.85em;
+}
+
+.add-synset-frame-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.add-synset-frame-picker select {
+    font-family: inherit;
+    font-size: 0.9em;
+    max-width: 20em;
 }
 
 /* Optional: style for when no results are found */
@@ -168,4 +366,103 @@ h1.en-title {
 .footer2 {
     padding-bottom: 20px;
     color: var(--color-text-dim);
+}
+
+.history {
+    padding: 10px 15px;
+}
+
+.history-entry {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.history-timestamp {
+    font-size: 0.8em;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+}
+
+.history-summaries {
+    margin: 4px 0 0;
+    padding-left: 20px;
+}
+
+.footer-action {
+    cursor: pointer;
+}
+
+.unsaved-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    max-width: 34em;
+    /* `.edit-save`/`.edit-delete` (used for the Save/Revert buttons below) are styled for a
+       light background, like everywhere else they appear (modals, the synset edit toolbar) -
+       reusing that here (rather than the dark surface this used to have) keeps them legible
+       instead of low-contrast navy/red text on dark gray. */
+    background: var(--color-white);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-size: 1.1em;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    z-index: 1500;
+}
+
+.unsaved-toast-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.unsaved-toast-message {
+    font-weight: 500;
+}
+
+.unsaved-toast-actions {
+    display: flex;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+
+.unsaved-toast-actions button {
+    font-size: 1em;
+    padding: 6px 14px;
+}
+
+.unsaved-toast-validation {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.unsaved-toast-validation p {
+    margin: 0 0 4px;
+    font-weight: bold;
+}
+
+.edit-progress {
+    margin-top: 10px;
+}
+
+.edit-progress-label {
+    font-size: 0.85em;
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+}
+
+.edit-progress-track {
+    background: var(--color-border-light);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.edit-progress-fill {
+    background: var(--color-primary);
+    height: 100%;
+    transition: width 0.2s ease-out;
 }

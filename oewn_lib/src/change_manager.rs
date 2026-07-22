@@ -540,6 +540,27 @@ pub fn delete_ex<L : Lexicon>(wn : &mut L,
     });
 }
 
+/// Replace the nth example in place, preserving its position (unlike a delete followed by
+/// an add, which would move it to the end of the list).
+pub fn update_ex<L : Lexicon>(wn : &mut L,
+             synset_id : &SynsetId, idx : usize,
+             example : String, source : Option<String>,
+             change_list : &mut ChangeList) {
+    wn.update_synset(synset_id, |ss| {
+        match ss.example.get_mut(idx) {
+            Some(ex) => {
+                *ex = Example::new(example, source);
+                change_list.mark();
+            }
+            None => {
+                eprintln!("Example index {} out of range", idx);
+            }
+        }
+    }).unwrap_or_else(|_| {
+        eprintln!("Updating example of non-existant synset");
+    });
+}
+
 /// Remove all indirect relations
 pub fn fix_indirect_relations<L : Lexicon>(wn : &mut L,
             change_list : &mut ChangeList) -> Result<()> {

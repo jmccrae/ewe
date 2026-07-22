@@ -5,12 +5,21 @@ use crate::rels::{SenseRelType, SynsetRelType};
 use crate::validate::validate;
 use crate::wordnet::{Lexicon, PosKey, SenseId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Applies a batch of actions, returning the id of the last synset created or referenced
+/// (`SynsetRef::Last`'s target throughout the batch) - `None` if the batch never touched a
+/// synset. Lets callers that just added a synset find out what id it got.
+///
+/// On full success, also appends the batch to the change log (see [`ChangeLogEntry`]) - a batch
+/// that fails partway through (via an early `?` return below) is not logged, since the point is a
+/// record of what was actually applied, not what was attempted.
 pub fn apply_automaton<L: Lexicon>(
     actions: Vec<Action>,
     wn: &mut L,
     changes: &mut ChangeList,
-) -> Result<(), String> {
+) -> Result<Option<SynsetId>, String> {
+    let actions_for_log = actions.clone();
     let mut last_synset_id: Option<SynsetId> = None;
     let mut last_sense_id: Option<SenseId> = None;
     for action in actions {
@@ -161,10 +170,14 @@ pub fn apply_automaton<L: Lexicon>(
                 reason,
                 superseded_by,
             } => {
+                let superseded_by = match superseded_by {
+                    Some(superseded_by) => Some(superseded_by.resolve(&last_synset_id)?),
+                    None => None,
+                };
                 change_manager::delete_synset(
                     wn,
                     &synset.resolve(&last_synset_id)?,
-                    Some(&superseded_by.resolve(&last_synset_id)?),
+                    superseded_by.as_ref(),
                     reason,
                     changes,
                 )
@@ -187,7 +200,24 @@ pub fn apply_automaton<L: Lexicon>(
                     wn,
                     &synset.resolve(&last_synset_id)?,
                     example,
-                    source,
+                    // An empty source is not a valid value - treat it the same as omitting
+                    // `source` entirely.
+                    source.filter(|s| !s.is_empty()),
+                    changes,
+                );
+            }
+            Action::UpdateExample {
+                synset,
+                number,
+                example,
+                source,
+            } => {
+                change_manager::update_ex(
+                    wn,
+                    &synset.resolve(&last_synset_id)?,
+                    number - 1,
+                    example,
+                    source.filter(|s| !s.is_empty()),
                     changes,
                 );
             }
@@ -423,7 +453,10 @@ pub fn apply_automaton<L: Lexicon>(
             }
         }
     }
-    Ok(())
+    if !actions_for_log.is_empty() {
+        changelog_append(wn, &actions_for_log)?;
+    }
+    Ok(last_synset_id)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -557,7 +590,7 @@ impl<'de> Deserialize<'de> for SenseRef {
 #[serde(transparent)]
 pub struct ActionWrapper(#[serde(with = "serde_yaml::with::singleton_map")] pub Action);
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     #[serde(rename = "add_entry")]
     AddEntry {
@@ -597,7 +630,13 @@ pub enum Action {
     DeleteSynset {
         synset: SynsetRef,
         reason: String,
-        superseded_by: SynsetRef,
+        /// `None` permanently removes the synset with no deprecation record and no relation/
+        /// entry hand-off - appropriate for e.g. a synset a user just created and immediately
+        /// decided against, as opposed to `Some(...)`'s "this synset is deprecated in favor of
+        /// that one" trail, which is what deletion meant before this was reachable from a UI.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        superseded_by: Option<SynsetRef>,
     },
     #[serde(rename = "change_definition")]
     Definition {
@@ -617,6 +656,16 @@ pub enum Action {
     #[serde(rename = "add_example")]
     AddExample {
         synset: SynsetRef,
+        example: String,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
+    #[serde(rename = "update_example")]
+    UpdateExample {
+        synset: SynsetRef,
+        /// 1-indexed, matching `delete_example`.
+        number: usize,
         example: String,
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -683,7 +732,177 @@ pub enum Action {
     FixTransitivity,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+impl Action {
+    /// A short, human-readable one-line description of this action, for the change log UI.
+    pub fn summary(&self) -> String {
+        fn sense_ref(r: &SenseRef) -> String {
+            match r {
+                SenseRef::Id(id) => id.as_str().to_string(),
+                SenseRef::Lemma(lemma) => format!("lemma={}", lemma),
+                SenseRef::Last => "last".to_string(),
+            }
+        }
+        fn synset_with_sense(synset: &SynsetRef, sense: &Option<SenseRef>) -> String {
+            match sense {
+                Some(s) => format!("{}[{}]", synset.as_str(), sense_ref(s)),
+                None => synset.as_str().to_string(),
+            }
+        }
+        match self {
+            Action::AddEntry { synset, lemma, pos, .. } => format!(
+                "Added entry \"{}\" ({}) to {}",
+                lemma,
+                pos.as_str(),
+                synset.as_str()
+            ),
+            Action::DeleteEntry { synset, lemma } => {
+                format!("Deleted entry \"{}\" from {}", lemma, synset.as_str())
+            }
+            Action::MoveEntry { synset, lemma, target_synset } => format!(
+                "Moved entry \"{}\" from {} to {}",
+                lemma,
+                synset.as_str(),
+                target_synset.as_str()
+            ),
+            Action::ChangeMembers { synset, members } => format!(
+                "Changed members of {} to [{}]",
+                synset.as_str(),
+                members.join(", ")
+            ),
+            Action::AddSynset { definition, lexfile, lemmas, .. } => format!(
+                "Added synset in {} ({}): {}",
+                lexfile,
+                lemmas.join(", "),
+                definition
+            ),
+            Action::DeleteSynset { synset, reason, superseded_by } => match superseded_by {
+                Some(target) => format!(
+                    "Deleted synset {} (superseded by {}, reason: {})",
+                    synset.as_str(),
+                    target.as_str(),
+                    reason
+                ),
+                None => format!(
+                    "Permanently deleted synset {} (reason: {})",
+                    synset.as_str(),
+                    reason
+                ),
+            },
+            Action::Definition { synset, definition } => {
+                format!("Changed definition of {} to \"{}\"", synset.as_str(), definition)
+            }
+            Action::ChangeILI { synset, ili } => {
+                format!("Changed ILI of {} to {}", synset.as_str(), ili)
+            }
+            Action::ChangeWikidata { synset, wikidata } => format!(
+                "Changed Wikidata links of {} to [{}]",
+                synset.as_str(),
+                wikidata.join(", ")
+            ),
+            Action::ChangeSource { synset, source } => {
+                format!("Changed source of {} to \"{}\"", synset.as_str(), source)
+            }
+            Action::AddExample { synset, example, .. } => {
+                format!("Added example \"{}\" to {}", example, synset.as_str())
+            }
+            Action::UpdateExample { synset, number, example, .. } => format!(
+                "Updated example #{} of {} to \"{}\"",
+                number,
+                synset.as_str(),
+                example
+            ),
+            Action::DeleteExample { synset, number } => {
+                format!("Deleted example #{} from {}", number, synset.as_str())
+            }
+            Action::AddRelation { source, source_sense, relation, target, target_sense, .. } => {
+                format!(
+                    "Added relation {} from {} to {}",
+                    relation,
+                    synset_with_sense(source, source_sense),
+                    synset_with_sense(target, target_sense)
+                )
+            }
+            Action::DeleteRelation { source, source_sense, target, target_sense, .. } => format!(
+                "Deleted relation from {} to {}",
+                synset_with_sense(source, source_sense),
+                synset_with_sense(target, target_sense)
+            ),
+            Action::ReverseRelation { source, source_sense, target, target_sense } => format!(
+                "Reversed relation between {} and {}",
+                synset_with_sense(source, source_sense),
+                synset_with_sense(target, target_sense)
+            ),
+            Action::UpdateRelations { synset, relations } => format!(
+                "Updated {} relation(s) on {}",
+                relations.len(),
+                synset.as_str()
+            ),
+            Action::Validate => "Validated the lexicon".to_string(),
+            Action::FixTransitivity => "Fixed transitivity of relations".to_string(),
+        }
+    }
+}
+
+/// One batch of actions applied through [`apply_automaton`] - what the change log stores, one
+/// entry per call (see `Lexicon::changelog_append`/`changelog_recent`, which store/retrieve these
+/// pre-serialized so the storage layer stays agnostic of `Action`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChangeLogEntry {
+    pub timestamp_ms: u64,
+    pub actions: Vec<Action>,
+}
+
+/// Serializes `actions` as a [`ChangeLogEntry`] timestamped with the current time and appends it
+/// to `wn`'s change log, returning the id it was stored under.
+fn changelog_append<L: Lexicon>(wn: &mut L, actions: &[Action]) -> Result<u64, String> {
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let entry = ChangeLogEntry {
+        timestamp_ms,
+        actions: actions.to_vec(),
+    };
+    let yaml = serde_yaml::to_string(&entry).map_err(|e| e.to_string())?;
+    wn.changelog_append(yaml).map_err(|e| e.to_string())
+}
+
+/// Up to `limit` most recent change log entries, newest first, deserialized back into
+/// [`ChangeLogEntry`]s. `before` (exclusive), if given, paginates further back than a previous
+/// page's oldest id.
+pub fn changelog_recent<L: Lexicon>(
+    wn: &L,
+    limit: usize,
+    before: Option<u64>,
+) -> Result<Vec<(u64, ChangeLogEntry)>, String> {
+    let raw = wn.changelog_recent(limit, before).map_err(|e| e.to_string())?;
+    raw.into_iter()
+        .map(|(id, yaml)| {
+            let entry: ChangeLogEntry = serde_yaml::from_str(&yaml).map_err(|e| e.to_string())?;
+            Ok((id, entry))
+        })
+        .collect()
+}
+
+/// Whether there's anything a save would actually write that isn't already reflected on disk:
+/// the newest change log entry (if any) is newer than the id recorded at the last successful
+/// save (if any).
+pub fn has_unsaved_changes<L: Lexicon>(wn: &L) -> Result<bool, String> {
+    let latest_id = wn
+        .changelog_recent(1, None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next()
+        .map(|(id, _)| id);
+    let last_saved = wn.last_saved_changelog_id_get().map_err(|e| e.to_string())?;
+    Ok(match (latest_id, last_saved) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(latest), Some(saved)) => latest > saved,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateRelationItem {
     relation: String,
     target: SynsetRef,
@@ -775,7 +994,7 @@ mod tests {
         // slightly from the pre-0.9 original because serde_yaml 0.9 swapped its YAML
         // emitter backend (yaml-rust -> unsafe-libyaml); that formatting isn't
         // configurable through serde_yaml's public API.
-        let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
+        let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- update_example:\n    synset: 00001740-n\n    number: 1\n    example: This is an updated example\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
         let data = vec![
             Action::AddEntry {
                 synset: SynsetRef::id("00001740-n"),
@@ -802,7 +1021,7 @@ mod tests {
             Action::DeleteSynset {
                 synset: SynsetRef::Last,
                 reason: "Duplicate (#123)".to_string(),
-                superseded_by: SynsetRef::id("00001741-n"),
+                superseded_by: Some(SynsetRef::id("00001741-n")),
             },
             Action::Definition {
                 synset: SynsetRef::id("00001740-n"),
@@ -812,6 +1031,12 @@ mod tests {
                 synset: SynsetRef::id("00001740-n"),
                 example: "This is an example".to_string(),
                 source: Some("This is a source".to_string()),
+            },
+            Action::UpdateExample {
+                synset: SynsetRef::id("00001740-n"),
+                number: 1,
+                example: "This is an updated example".to_string(),
+                source: None,
             },
             Action::DeleteExample {
                 synset: SynsetRef::id("00001740-n"),
@@ -932,5 +1157,274 @@ mod tests {
             target_lemma: None,
         }];
         apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+    }
+
+    #[test]
+    fn test_update_example_preserves_position() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid = change_manager::add_synset(
+            &mut lexicon,
+            "def".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+
+        let actions = vec![
+            Action::AddExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                example: "first".to_string(),
+                source: None,
+            },
+            Action::AddExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                example: "second".to_string(),
+                source: None,
+            },
+            Action::UpdateExample {
+                synset: SynsetRef::Id(ssid.clone()),
+                number: 1,
+                example: "first, edited".to_string(),
+                // An empty source should be normalized to None, not stored as `Some("")`.
+                source: Some("".to_string()),
+            },
+        ];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let synset = lexicon.synset_by_id(&ssid).unwrap().unwrap();
+        assert_eq!(synset.example.len(), 2);
+        assert_eq!(synset.example[0].text, "first, edited");
+        assert_eq!(synset.example[0].source, None);
+        assert_eq!(synset.example[1].text, "second");
+    }
+
+    #[test]
+    fn test_is_exemplified_by_canonicalizes_to_exemplifies() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid1 = change_manager::add_synset(
+            &mut lexicon,
+            "def 1".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid1.clone(),
+            "foo".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+        let ssid2 = change_manager::add_synset(
+            &mut lexicon,
+            "def 2".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid2.clone(),
+            "bar".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+
+        // "foo is_exemplified_by bar" (bar is an example of foo) must be persisted
+        // as the canonical inverse "bar exemplifies foo", not stored directly - and
+        // must not recurse/overflow doing it.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(ssid1.clone()),
+            target: SynsetRef::Id(ssid2.clone()),
+            relation: "is_exemplified_by_sense".to_string(),
+            source_sense: Some(SenseRef::lemma("foo")),
+            target_sense: Some(SenseRef::lemma("bar")),
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let foo_sense = lexicon.get_sense_id2("foo", &ssid1).unwrap().unwrap();
+        let bar_sense = lexicon.get_sense_id2("bar", &ssid2).unwrap().unwrap();
+
+        let bar_links = lexicon.sense_links_from_id(&bar_sense).unwrap();
+        assert!(
+            bar_links.contains(&(SenseRelType::Exemplifies, foo_sense.clone())),
+            "expected bar's sense to store 'exemplifies -> foo', got {:?}",
+            bar_links
+        );
+
+        let foo_links = lexicon.sense_links_from_id(&foo_sense).unwrap();
+        assert!(
+            foo_links.is_empty(),
+            "is_exemplified_by must not be stored directly on foo's sense, got {:?}",
+            foo_links
+        );
+    }
+
+    #[test]
+    fn test_add_rel_hyponym_stores_on_target_not_self_loop() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let general = change_manager::add_synset(
+            &mut lexicon,
+            "general".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        let specific = change_manager::add_synset(
+            &mut lexicon,
+            "specific".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+
+        // "general hyponym specific" means specific's hypernym is general.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(general.clone()),
+            target: SynsetRef::Id(specific.clone()),
+            relation: "hyponym".to_string(),
+            source_sense: None,
+            target_sense: None,
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let specific_synset = lexicon.synset_by_id(&specific).unwrap().unwrap();
+        assert!(
+            specific_synset.hypernym.contains(&general),
+            "expected specific's hypernym to contain general, got {:?}",
+            specific_synset.hypernym
+        );
+
+        let general_synset = lexicon.synset_by_id(&general).unwrap().unwrap();
+        assert!(
+            !general_synset.hypernym.contains(&general),
+            "general must not gain a self-loop hypernym, got {:?}",
+            general_synset.hypernym
+        );
+    }
+
+    #[test]
+    fn test_delete_synset_without_supersede_leaves_no_deprecation() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid = change_manager::add_synset(
+            &mut lexicon,
+            "a mistake".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid.clone(),
+            "oops".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+
+        let actions = vec![Action::DeleteSynset {
+            synset: SynsetRef::Id(ssid.clone()),
+            reason: String::new(),
+            superseded_by: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        assert!(
+            lexicon.synset_by_id(&ssid).unwrap().is_none(),
+            "synset should be fully removed, not just marked deprecated"
+        );
+        assert!(
+            lexicon.deprecations_get().unwrap().is_empty(),
+            "a supersede-less delete must not leave a deprecation record behind"
+        );
+    }
+
+    #[test]
+    fn test_apply_automaton_appends_one_changelog_entry_per_batch() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+
+        let actions = vec![Action::AddSynset {
+            definition: "a test synset".to_string(),
+            lexfile: "noun.animal".to_string(),
+            pos: Some(PosKey::new("n".to_string())),
+            lemmas: vec!["testword".to_string()],
+            subcats: Vec::new(),
+        }];
+        apply_automaton(actions.clone(), &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let entries = changelog_recent(&lexicon, 10, None).unwrap();
+        assert_eq!(entries.len(), 1, "one apply_automaton call should append exactly one entry");
+        assert_eq!(entries[0].1.actions, actions);
+
+        // A second batch should be newest-first ahead of the one above, and pagination via
+        // `before` should exclude it and fall back to the first.
+        let more_actions = vec![Action::Validate];
+        apply_automaton(more_actions.clone(), &mut lexicon, &mut ChangeList::new()).unwrap();
+        let entries = changelog_recent(&lexicon, 10, None).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].1.actions, more_actions, "newest entry should come first");
+        assert_eq!(entries[1].1.actions, actions);
+
+        let first_id = entries[0].0;
+        let older = changelog_recent(&lexicon, 10, Some(first_id)).unwrap();
+        assert_eq!(older.len(), 1);
+        assert_eq!(older[0].1.actions, actions);
+    }
+
+    #[test]
+    fn test_has_unsaved_changes() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        assert!(!has_unsaved_changes(&lexicon).unwrap(), "a fresh lexicon has nothing to save");
+
+        let actions = vec![Action::AddSynset {
+            definition: "a test synset".to_string(),
+            lexfile: "noun.animal".to_string(),
+            pos: Some(PosKey::new("n".to_string())),
+            lemmas: vec!["testword".to_string()],
+            subcats: Vec::new(),
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+        assert!(has_unsaved_changes(&lexicon).unwrap(), "an applied batch should be unsaved");
+
+        let latest_id = changelog_recent(&lexicon, 1, None).unwrap()[0].0;
+        lexicon.last_saved_changelog_id_set(latest_id).unwrap();
+        assert!(!has_unsaved_changes(&lexicon).unwrap(), "marking the latest id as saved should clear it");
+
+        apply_automaton(vec![Action::Validate], &mut lexicon, &mut ChangeList::new()).unwrap();
+        assert!(has_unsaved_changes(&lexicon).unwrap(), "a later batch should be unsaved again");
     }
 }

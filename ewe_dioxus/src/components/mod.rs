@@ -8,6 +8,29 @@ pub use wordnet::WordNet;
 mod synset;
 pub use synset::Synset;
 
+mod editable_definition;
+pub use editable_definition::EditableDefinition;
+
+mod editable_examples;
+pub use editable_examples::{EditableExamples, ExampleDraft};
+
+mod editable_lemmas;
+pub use editable_lemmas::EditableLemmas;
+
+mod editable_ili;
+pub use editable_ili::EditableIli;
+
+mod editable_wikidata;
+pub use editable_wikidata::EditableWikidata;
+
+pub mod relation_types;
+
+mod editable_relations;
+pub use editable_relations::{EditableRelations, PendingRelation, RelationKey};
+
+mod edit_toggle;
+pub use edit_toggle::EditToggle;
+
 mod subcat;
 pub use subcat::Subcat;
 
@@ -21,3 +44,25 @@ pub use display_options::{
 
 mod download_links;
 pub use download_links::DownloadLinks;
+
+mod add_synset_modal;
+pub use add_synset_modal::AddSynsetTrigger;
+
+mod delete_synset_modal;
+pub use delete_synset_modal::DeleteSynsetButton;
+
+mod unsaved_changes;
+pub use unsaved_changes::{provide_dirty_state, UnsavedChangesToast};
+
+mod validate_button;
+pub use validate_button::ValidateButton;
+
+#[cfg(feature = "edit")]
+mod edit_progress_bar;
+#[cfg(feature = "edit")]
+pub use edit_progress_bar::EditProgressBar;
+
+#[cfg(feature = "edit")]
+mod synset_picker;
+#[cfg(feature = "edit")]
+pub use synset_picker::SynsetPicker;

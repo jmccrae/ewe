@@ -1,10 +1,180 @@
 use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_count;
-use crate::components::{Relation, Subcat};
+use crate::components::{
+    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableIli,
+    EditableLemmas, EditableRelations, EditableWikidata, ExampleDraft, PendingRelation, Relation,
+    RelationKey, Subcat,
+};
 use crate::Route;
 use dioxus::prelude::*;
-use oewn_lib::wordnet::{MemberSynset, SenseRelation, SynsetId};
+use oewn_lib::automaton::{Action, SynsetRef};
+use oewn_lib::wordnet::{Example, MemberSynset, SenseRelation, SynsetId};
 use std::collections::HashMap;
+
+/// Diffs `drafts` (and `draft_definition`/`lemma_drafts`) against the synset's last-saved
+/// state and returns the `automaton` actions needed to bring it up to date - empty if nothing
+/// changed.
+///
+/// Members go first (`ChangeMembers` handles its own add/delete of entries internally), then
+/// the definition, then examples: updates first (they only replace content in place), then
+/// deletes in descending original-number order (so an earlier delete never shifts the position
+/// a later one, or an update above it, expects), then adds last (which always append, so
+/// ordering doesn't matter for them).
+fn build_actions(
+    synset_id: &SynsetId,
+    original_members: &[String],
+    lemma_drafts: &[String],
+    original_definition: &str,
+    draft_definition: &str,
+    original_examples: &[Example],
+    drafts: &[ExampleDraft],
+    relation_deletes: &[RelationKey],
+    relation_adds: &[PendingRelation],
+    original_ili: &str,
+    draft_ili: &str,
+    original_wikidata: &[String],
+    draft_wikidata: &[String],
+) -> Vec<Action> {
+    let mut actions = Vec::new();
+
+    let members: Vec<String> = lemma_drafts
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if members != original_members {
+        actions.push(Action::ChangeMembers {
+            synset: SynsetRef::Id(synset_id.clone()),
+            members,
+        });
+    }
+
+    if draft_definition != original_definition {
+        actions.push(Action::Definition {
+            synset: SynsetRef::Id(synset_id.clone()),
+            definition: draft_definition.to_string(),
+        });
+    }
+
+    if draft_ili != original_ili {
+        actions.push(Action::ChangeILI {
+            synset: SynsetRef::Id(synset_id.clone()),
+            ili: draft_ili.to_string(),
+        });
+    }
+
+    let wikidata: Vec<String> = draft_wikidata
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if wikidata != original_wikidata {
+        actions.push(Action::ChangeWikidata {
+            synset: SynsetRef::Id(synset_id.clone()),
+            wikidata,
+        });
+    }
+
+    for draft in drafts {
+        if draft.deleted {
+            continue;
+        }
+        let Some(number) = draft.original_number else {
+            continue;
+        };
+        let Some(original) = original_examples.get(number - 1) else {
+            continue;
+        };
+        let source = normalize_source(&draft.source);
+        if draft.text != original.text || source != original.source {
+            actions.push(Action::UpdateExample {
+                synset: SynsetRef::Id(synset_id.clone()),
+                number,
+                example: draft.text.clone(),
+                source,
+            });
+        }
+    }
+
+    let mut delete_numbers: Vec<usize> = drafts
+        .iter()
+        .filter(|d| d.deleted)
+        .filter_map(|d| d.original_number)
+        .collect();
+    delete_numbers.sort_unstable_by(|a, b| b.cmp(a));
+    for number in delete_numbers {
+        actions.push(Action::DeleteExample {
+            synset: SynsetRef::Id(synset_id.clone()),
+            number,
+        });
+    }
+
+    for draft in drafts {
+        if draft.original_number.is_none() && !draft.deleted && !draft.text.trim().is_empty() {
+            actions.push(Action::AddExample {
+                synset: SynsetRef::Id(synset_id.clone()),
+                example: draft.text.clone(),
+                source: normalize_source(&draft.source),
+            });
+        }
+    }
+
+    // `DeleteRelation` clears links between the pair in both directions regardless of type
+    // (see change_manager::delete_rel/delete_sense_rel), so deletes never need the
+    // forward/inverse swap that adds do.
+    for delete in relation_deletes {
+        actions.push(Action::DeleteRelation {
+            source: SynsetRef::Id(synset_id.clone()),
+            source_sense: None,
+            target: SynsetRef::Id(delete.target.clone()),
+            target_sense: None,
+            source_lemma: delete.source_lemma.clone(),
+            target_lemma: delete.target_lemma.clone(),
+        });
+    }
+
+    for add in relation_adds {
+        // About half of the relation types shown are computed by reverse lookup rather than
+        // stored directly (e.g. `hyponym` is derived from the target's `hypernym`) - adding
+        // one of those means inserting the inverse relation with source and target swapped.
+        // See `components::relation_types` for why.
+        let (source, source_lemma, target, target_lemma) = if add.info.swapped {
+            (
+                add.target.clone(),
+                add.target_lemma.clone(),
+                synset_id.clone(),
+                add.source_lemma.clone(),
+            )
+        } else {
+            (
+                synset_id.clone(),
+                add.source_lemma.clone(),
+                add.target.clone(),
+                add.target_lemma.clone(),
+            )
+        };
+        actions.push(Action::AddRelation {
+            source: SynsetRef::Id(source),
+            source_sense: None,
+            relation: add.info.store_as.to_string(),
+            target: SynsetRef::Id(target),
+            target_sense: None,
+            source_lemma,
+            target_lemma,
+        });
+    }
+
+    actions
+}
+
+/// An empty source is not a valid value - treat it the same as no source at all.
+fn normalize_source(source: &str) -> Option<String> {
+    if source.is_empty() {
+        None
+    } else {
+        Some(source.to_string())
+    }
+}
 
 static CSS: Asset = asset!("/assets/styling/synset.css");
 static WIKIDATA_ICON: Asset = asset!("/assets/wikidata.png");
@@ -96,7 +266,32 @@ pub fn Synset(props: SynsetProps) -> Element {
 
     let mut show_relations = use_signal(|| false);
 
-    if let Ok(ss_load) = synset {
+    // Synset-wide edit toggle (the pencil next to the Wikidata icon, becomes an accept/reject
+    // pair while on). Currently gates `EditableDefinition` and `EditableExamples`, but is
+    // shared so lemmas/relations editors can hook into the same batch once they exist. Every
+    // field's draft is committed (or discarded) together, in one call to
+    // `backend::edit::apply_edits`, rather than each field saving itself independently.
+    let mut editing = use_signal(|| false);
+    let mut lemma_drafts = use_signal(Vec::<String>::new);
+    let mut definition_draft = use_signal(String::new);
+    let mut example_drafts = use_signal(Vec::<ExampleDraft>::new);
+    let mut ili_draft = use_signal(String::new);
+    let mut wikidata_drafts = use_signal(Vec::<String>::new);
+    let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
+    let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
+    // Only mutated (`.set()`) inside the `edit` feature's accept handler below; harmless when
+    // it isn't.
+    #[allow(unused_mut)]
+    let mut saving = use_signal(|| false);
+    let mut edit_error = use_signal(|| None::<String>);
+    // Only mutated inside the `edit` feature's accept handler below; harmless when it isn't.
+    #[allow(unused_mut, unused_variables)]
+    let mut dirty = use_context::<Signal<bool>>();
+
+    // `ss_load` only needs `.write()` (hence `mut`) when the `edit` feature's accept handler
+    // below is reachable; harmless when it isn't.
+    #[allow(unused_mut)]
+    if let Ok(mut ss_load) = synset {
         if ss_load.loading() {
             rsx! {
                 div {
@@ -108,59 +303,64 @@ pub fn Synset(props: SynsetProps) -> Element {
                 rsx! {
                     document::Style { href: CSS },
                     div {
-                        class: "synset",
-                        if props.display_ids {
+                        class: if editing() { "synset editing" } else { "synset" },
+                        if props.display_ids || editing() {
                             div {
                                 class: "synset-id",
                                 // show: display.ids
-                                span {
-                                    class: "identifier",
-                                    "{synset.id}"
-                                }
-                                if synset.ili.is_some() || !synset.wikidata.is_empty() {
+                                if props.display_ids {
                                     span {
-                                        " ("
+                                        class: "identifier",
+                                        "{synset.id}"
                                     }
                                 }
-                                if let Some(ref ili) = synset.ili {
-                                    span {
-                                        b {
-                                            class: "synset-id-title",
-                                            "Interlingual Index: "
-                                        },
+                                if !editing() {
+                                    if synset.ili.is_some() || !synset.wikidata.is_empty() {
                                         span {
-                                            class: "identifier",
-                                            "{ili}"
+                                            " ("
                                         }
                                     }
-                                }
-                                if synset.ili.is_some() && !synset.wikidata.is_empty() {
-                                    span {
-                                        ", "
+                                    if let Some(ref ili) = synset.ili {
+                                        span {
+                                            b {
+                                                class: "synset-id-title",
+                                                "Interlingual Index: "
+                                            },
+                                            span {
+                                                class: "identifier",
+                                                "{ili}"
+                                            }
+                                        }
                                     }
-                                }
-                                for (idx, wikidata) in synset.wikidata.iter().enumerate() {
-                                    span {
-                                        b {
-                                            "Wikidata:"
-                                        },
-                                        a {
-                                            class: "identifier",
-                                            href: "https://www.wikidata.org/wiki/{wikidata}",
-                                            "{wikidata}"
-                                        },
-                                        if idx < synset.wikidata.len() - 1 {
+                                    if synset.ili.is_some() && !synset.wikidata.is_empty() {
+                                        span {
                                             ", "
                                         }
                                     }
-                                }
-                                if synset.ili.is_some() || !synset.wikidata.is_empty() {
-                                    span {
-                                        ")"
+                                    for (idx, wikidata) in synset.wikidata.iter().enumerate() {
+                                        span {
+                                            b {
+                                                class: "synset-id-title",
+                                                "Wikidata:"
+                                            },
+                                            a {
+                                                class: "identifier",
+                                                href: "https://www.wikidata.org/wiki/{wikidata}",
+                                                "{wikidata}"
+                                            },
+                                            if idx < synset.wikidata.len() - 1 {
+                                                ", "
+                                            }
+                                        }
+                                    }
+                                    if synset.ili.is_some() || !synset.wikidata.is_empty() {
+                                        span {
+                                            ")"
+                                        }
                                     }
                                 }
                                 hr {}
-                            },
+                            }
                         },
                         div {
                             class: "lemmas-container",
@@ -170,81 +370,116 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     class: "pos",
                                     "({synset.part_of_speech})"
                                 },
-                                for (index, member) in synset.members.iter().enumerate() {
-                                    span {
-                                        class: "lemma",
-                                        Link {
-                                            to: Route::ByLemma { lemma: member.lemma.clone() },
-                                            class: if member.lemma == props.focus {
-                                                "focus"
-                                            } else {
-                                                "unfocused"
-                                            },
-                                            "{member.lemma}"
-                                        },
-                                        if let Some(entry_no) = member.entry_no {
-                                            sup {
-                                                "{entry_no}"
-                                            }
-                                        }
-                                        if props.display_sensekeys {
-                                            span {
-                                                class: "sense_key",
-                                                "{member.sense.id}"
-                                            }
-                                        }
-                                        if props.display_pronunciations && member.pronunciation.len() > 0 {
-                                            span {
-                                                class: "pronunciations",
-                                                " (Pronunciation:",
-                                                for (i, pron) in member.pronunciation.iter().enumerate() {
-                                                    if let Some(variety) = &pron.variety {
-                                                        span {
-                                                            class: "pronunciation_variety",
-                                                                " ({variety})"
-                                                        }
-                                                    }
-                                                    " {pron.value}",
-                                                    if i < member.pronunciation.len() - 1 {
-                                                        ", "
-                                                    }
-                                                },
-                                                ")"
-                                            }
-                                        }
-                                        if index < synset.members.len() - 1 {
-                                            ", "
-                                        }
+                                if editing() {
+                                    EditableLemmas {
+                                        drafts: lemma_drafts(),
+                                        on_drafts_changed: move |drafts| lemma_drafts.set(drafts),
                                     }
-                                },
-                                span {
-                                    class: "definition",
-                                    "{synset.definition.get(0).unwrap_or(&String::from(\"\"))}"
-                                }
-                                for (index, example) in synset.example.iter().enumerate() {
-                                    if let Some(source) = &example.source {
-                                        if source.starts_with("http") {
-                                            a {
-                                                class: "example",
-                                                href: "{source}",
-                                                "“{example.text}”"
-                                            }
-                                        } else {
-                                            span {
-                                                class: "example",
-                                                "“{example.text}” ({source})"
-                                            }
-                                        }
-                                    } else {
+                                } else {
+                                    for (index, member) in synset.members.iter().enumerate() {
                                         span {
-                                            class: "example",
-                                            "“{example.text}”"
+                                            class: "lemma",
+                                            Link {
+                                                to: Route::ByLemma { lemma: member.lemma.clone() },
+                                                class: if member.lemma == props.focus {
+                                                    "focus"
+                                                } else {
+                                                    "unfocused"
+                                                },
+                                                "{member.lemma}"
+                                            },
+                                            if let Some(entry_no) = member.entry_no {
+                                                sup {
+                                                    "{entry_no}"
+                                                }
+                                            }
+                                            if props.display_sensekeys {
+                                                span {
+                                                    class: "sense_key",
+                                                    "{member.sense.id}"
+                                                }
+                                            }
+                                            if props.display_pronunciations && member.pronunciation.len() > 0 {
+                                                span {
+                                                    class: "pronunciations",
+                                                    " (Pronunciation:",
+                                                    for (i, pron) in member.pronunciation.iter().enumerate() {
+                                                        if let Some(variety) = &pron.variety {
+                                                            span {
+                                                                class: "pronunciation_variety",
+                                                                    " ({variety})"
+                                                            }
+                                                        }
+                                                        " {pron.value}",
+                                                        if i < member.pronunciation.len() - 1 {
+                                                            ", "
+                                                        }
+                                                    },
+                                                    ")"
+                                                }
+                                            }
+                                            if index < synset.members.len() - 1 {
+                                                ", "
+                                            }
                                         }
-                                    },
-                                    if index < synset.example.len() - 1 {
-                                        ", "
                                     }
                                 },
+                                // Editing the ILI/Wikidata identifiers doesn't depend on the
+                                // "Show Synset Identifier" display option above - only the
+                                // caller mounting this while the synset-wide edit toggle is on
+                                // does. Sits between the lemma list and Definition/Examples/
+                                // Relations, and (unlike `.side-icons`, a sibling of `.lemmas`
+                                // below) only exists at all while editing, since there's nothing
+                                // to show otherwise.
+                                if editing() {
+                                    div {
+                                        class: "synset-identifiers-editing",
+                                        EditableIli {
+                                            value: ili_draft(),
+                                            on_input: move |v| ili_draft.set(v),
+                                        }
+                                        EditableWikidata {
+                                            drafts: wikidata_drafts(),
+                                            on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
+                                        }
+                                    }
+                                }
+                                if editing() {
+                                    div {
+                                        class: "field-row",
+                                        b { class: "field-label", "Definition: " }
+                                        EditableDefinition {
+                                            editing: true,
+                                            value: definition_draft(),
+                                            on_input: move |v| definition_draft.set(v),
+                                        }
+                                    }
+                                } else {
+                                    EditableDefinition {
+                                        editing: false,
+                                        value: synset.definition.get(0).cloned().unwrap_or_default(),
+                                        on_input: move |v| definition_draft.set(v),
+                                    }
+                                }
+                                if editing() {
+                                    div {
+                                        class: "field-row",
+                                        b { class: "field-label", "Examples: " }
+                                        EditableExamples {
+                                            editing: true,
+                                            examples: synset.example.clone(),
+                                            drafts: example_drafts(),
+                                            on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                        }
+                                    }
+                                } else {
+                                    EditableExamples {
+                                        editing: false,
+                                        examples: synset.example.clone(),
+                                        drafts: example_drafts(),
+                                        on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                    }
+                                }
                                 if props.display_topics {
                                     div {
                                         class: "topics",
@@ -257,7 +492,15 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         subcats: subcats(synset)
                                     }
                                 },
-                                if show_relations() {
+                                if editing() {
+                                    EditableRelations {
+                                        synset: synset.clone(),
+                                        pending_deletes: relation_deletes(),
+                                        pending_adds: relation_adds(),
+                                        on_pending_deletes_changed: move |v| relation_deletes.set(v),
+                                        on_pending_adds_changed: move |v| relation_adds.set(v),
+                                    }
+                                } else if show_relations() {
                                     div {
                                         class: "relations",
                                         if !synset.hypernym.is_empty() {
@@ -634,13 +877,98 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     }
                                 }
                             }
-                            if let Some(wd) = synset.wikidata.first() {
-                                div {
-                                    class: "wikidata",
-                                    a {
-                                        href: "https://www.wikidata.org/entity/{wd}",
-                                        img {
-                                            src: WIKIDATA_ICON,
+                            div {
+                                class: "side-icons",
+                                EditToggle {
+                                    editing: editing(),
+                                    saving: saving(),
+                                    on_enter: {
+                                        let members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
+                                        let definition = synset.definition.get(0).cloned().unwrap_or_default();
+                                        let examples = synset.example.clone();
+                                        let ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                                        let wikidata = synset.wikidata.clone();
+                                        move |_| {
+                                            lemma_drafts.set(members.clone());
+                                            definition_draft.set(definition.clone());
+                                            example_drafts.set(ExampleDraft::from_examples(&examples));
+                                            ili_draft.set(ili.clone());
+                                            wikidata_drafts.set(wikidata.clone());
+                                            relation_deletes.set(Vec::new());
+                                            relation_adds.set(Vec::new());
+                                            edit_error.set(None);
+                                            editing.set(true);
+                                        }
+                                    },
+                                    on_accept: {
+                                        let synset_id = synset.id.clone();
+                                        let original_members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
+                                        let original_definition = synset.definition.get(0).cloned().unwrap_or_default();
+                                        let original_examples = synset.example.clone();
+                                        let original_ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                                        let original_wikidata = synset.wikidata.clone();
+                                        move |_| {
+                                            let actions = build_actions(
+                                                &synset_id,
+                                                &original_members,
+                                                &lemma_drafts(),
+                                                &original_definition,
+                                                &definition_draft(),
+                                                &original_examples,
+                                                &example_drafts(),
+                                                &relation_deletes(),
+                                                &relation_adds(),
+                                                &original_ili,
+                                                &ili_draft(),
+                                                &original_wikidata,
+                                                &wikidata_drafts(),
+                                            );
+                                            if actions.is_empty() {
+                                                editing.set(false);
+                                                return;
+                                            }
+                                            #[cfg(feature = "edit")]
+                                            {
+                                                let synset_id = synset_id.clone();
+                                                spawn(async move {
+                                                    saving.set(true);
+                                                    edit_error.set(None);
+                                                    match crate::backend::edit::apply_edits(synset_id, actions).await {
+                                                        Ok(updated) => {
+                                                            if let Some(s) = ss_load.write().as_mut() {
+                                                                *s = updated;
+                                                            }
+                                                            editing.set(false);
+                                                            dirty.set(true);
+                                                        }
+                                                        Err(e) => edit_error.set(Some(e.to_string())),
+                                                    }
+                                                    saving.set(false);
+                                                });
+                                            }
+                                        }
+                                    },
+                                    on_reject: move |_| {
+                                        editing.set(false);
+                                        edit_error.set(None);
+                                    },
+                                    if editing() {
+                                        DeleteSynsetButton { synset_id: synset.id.clone() }
+                                    }
+                                }
+                                if let Some(err) = edit_error() {
+                                    span { class: "edit-error", "{err}" }
+                                }
+                                if !editing() {
+                                    if let Some(wd) = synset.wikidata.first() {
+                                        div {
+                                            class: "wikidata",
+                                            a {
+                                                href: "https://www.wikidata.org/entity/{wd}",
+                                                img {
+                                                    src: WIKIDATA_ICON,
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -33,6 +33,17 @@ const SENSE_ID_TO_LEMMA_POS: TableDefinition<String, (String, String)> = TableDe
 /// DEPRECATION_KEY -> Vec<DeprecationRecord>
 const DEPRECATIONS: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("deprecations");
 const DEPRECATION_KEY:&'static str = "deprecations";
+/// FRAMES_KEY -> Vec<(frame key, human-readable description)>, loaded from `frames.yaml`
+const FRAMES: TableDefinition<&'static str, Vec<u8>> = TableDefinition::new("frames");
+const FRAMES_KEY:&'static str = "frames";
+/// (id, auto-incrementing) -> a YAML-serialized `automaton::ChangeLogEntry`. An append-only log
+/// of every batch of actions ever applied - values are stored as plain `String` (unlike the
+/// speedy-encoded tables above) since this table has no dependency on `automaton::Action`, it
+/// just stores whatever blob `Lexicon::changelog_append`'s caller already serialized.
+const CHANGE_LOG: TableDefinition<u64, String> = TableDefinition::new("change_log");
+/// SAVE_STATE_KEY -> the change log id as of the last successful save-to-YAML.
+const SAVE_STATE: TableDefinition<&'static str, u64> = TableDefinition::new("save_state");
+const LAST_SAVED_CHANGELOG_ID_KEY: &'static str = "last_saved_changelog_id";
 /// (ili) -> synset_id. Maintained incrementally wherever a synset is written,
 /// so `ili_by_prefix` can do a direct sorted-range scan instead of building
 /// an in-memory index by scanning (and fully deserializing) every synset.
@@ -42,7 +53,6 @@ pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
-    lexnames: Vec<String>,
 }
 
 impl ReDBLexicon {
@@ -70,8 +80,6 @@ impl ReDBLexicon {
         // Read all the lexnames from the DB
         //
         let mut synsets = HashMap::new();
-        // Assume lexnames is sorted
-        let mut lexnames = Vec::new();
         {
             // Any outstanding writes should be committed before we read.
             let mut manager = txn_manager.lock().unwrap();
@@ -79,14 +87,9 @@ impl ReDBLexicon {
             let table = txn.open_table(SYNSETS_TABLE)?;
             for kv in table.iter()? {
                 let (lexname, _) = kv?.0.value();
-                // Find using binary search
-                match lexnames.binary_search(&lexname) {
-                    Ok(_) => {}
-                    Err(idx) => {
-                        lexnames.insert(idx, lexname.clone());
-                        synsets.insert(lexname.clone(), ReDBSynsets::new(txn_manager.clone(), lexname.clone()));
-                    }
-                }
+                synsets.entry(lexname.clone()).or_insert_with(|| {
+                    ReDBSynsets::new(txn_manager.clone(), lexname.clone())
+                });
             }
         }
 
@@ -94,7 +97,6 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets,
-            lexnames,
         })
     }
 
@@ -128,6 +130,9 @@ impl ReDBLexicon {
             txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
             txn.open_table(DEPRECATIONS)?;
             txn.open_table(ILI_TO_SYNSET_ID)?;
+            txn.open_table(FRAMES)?;
+            txn.open_table(CHANGE_LOG)?;
+            txn.open_table(SAVE_STATE)?;
         }
 
 
@@ -136,7 +141,6 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets: HashMap::new(),
-            lexnames: Vec::new(),
         })
     }
 }
@@ -207,7 +211,13 @@ impl Lexicon for ReDBLexicon {
         Ok(())
     }
     fn synsets_contains_key(&self, lexname : &str) -> Result<bool> {
-        Ok(self.lexnames.binary_search(&lexname.to_string()).is_ok())
+        // `self.synsets` (unlike the old dedicated `lexnames` field this replaced) is kept
+        // live by `synsets_insert`/`synsets_insert_synset` as new lexfiles are added, not just
+        // populated once at `open()` time - a lexfile added during `Lexicon::load` in the
+        // current process (e.g. a fresh `create()` + `load()`, as opposed to `open()`-ing an
+        // already-built database) used to stay invisible to this check until the process
+        // restarted and re-opened the file from disk.
+        Ok(self.synsets.contains_key(lexname))
     }
     fn synsets_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(&'a String, Cow<'a, Self::S>)>>> {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
@@ -294,20 +304,32 @@ impl Lexicon for ReDBLexicon {
         }
     }
     fn sense_links_to_get_or(&mut self, sense_id : SenseId, f : impl FnOnce() -> Vec<(SenseRelType, SenseId)>) -> Result<Vec<(SenseRelType, SenseId)>> {
-        let mut manager = self.txn_manager.lock().unwrap();
-        let txn = manager.begin_write()?;
-        let table = txn.open_table(SENSE_LINKS)?;
         let mut new_links = None;
-        let result = if let Some(links_str) = table.get(sense_id.to_string())? {
-            let links = deserialize_sense_links(links_str.value())?;
-            Some(links)
-        } else {
-            let links = f();
-            // We want to do this:
-            //table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
-            // but we can't because we are in a read transaction, so we defer the insertion until later
-            new_links = Some(links);
-            None
+        // Scoped so `manager` (and the `txn`/`table` borrowed from it) drop before the `None`
+        // arm below takes the lock again - `std::sync::Mutex` isn't reentrant, and without this
+        // block the guard from this line is still alive when that second `lock()` runs,
+        // deadlocking the thread against itself. Mirrors `links_to_get_or`, which already gets
+        // this right.
+        let result = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(SENSE_LINKS)?;
+            // Bound to `x` rather than left as the block's tail expression: the temporary
+            // `AccessGuard` `table.get(...)` returns would otherwise be dropped at the end of
+            // this block too, after `table`/`txn`/`manager` - but it borrows from `table`, so
+            // it needs to go first. Mirrors `links_to_get_or`'s `let x = ...; x` pattern.
+            let x = if let Some(links_str) = table.get(sense_id.to_string())? {
+                let links = deserialize_sense_links(links_str.value())?;
+                Some(links)
+            } else {
+                let links = f();
+                // We want to do this:
+                //table.insert(sense_id.to_string(), serialize_sense_links(links.clone())?)?;
+                // but we can't because we are in a read transaction, so we defer the insertion until later
+                new_links = Some(links);
+                None
+            };
+            x
         };
         // Now we are outside the read transaction, so we can do the write if necessary
         match result {
@@ -457,6 +479,87 @@ impl Lexicon for ReDBLexicon {
         let mut table = txn.open_table(DEPRECATIONS)?;
         deprecations.push(record);
         table.insert(DEPRECATION_KEY, serialize_deprecations(deprecations)?)?;
+        Ok(())
+    }
+    fn frames_get<'a>(&'a self) -> Result<Cow<'a, Vec<(String, String)>>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        // A database written before `frames.yaml` loading existed won't have this table yet -
+        // treat that as "no frames" rather than erroring; a rebuild will populate it.
+        let table = match txn.open_table(FRAMES) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Cow::Owned(Vec::new())),
+            Err(e) => return Err(e.into()),
+        };
+        if let Some(frames_str) = table.get(FRAMES_KEY)? {
+            let frames = deserialize_frames(frames_str.value())?;
+            Ok(Cow::Owned(frames))
+        } else {
+            Ok(Cow::Owned(Vec::new()))
+        }
+    }
+    fn frames_set(&mut self, frames : Vec<(String, String)>) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(FRAMES)?;
+        table.insert(FRAMES_KEY, serialize_frames(frames)?)?;
+        Ok(())
+    }
+    fn changelog_append(&mut self, entry : String) -> Result<u64> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let id = {
+            // Write-txn `open_table` auto-creates the table, so a database written before this
+            // table existed needs no migration.
+            let mut table = txn.open_table(CHANGE_LOG)?;
+            let next_id = match table.iter()?.next_back() {
+                Some(kv) => kv?.0.value() + 1,
+                None => 0,
+            };
+            table.insert(next_id, entry)?;
+            next_id
+        };
+        Ok(id)
+    }
+    fn changelog_recent(&self, limit : usize, before : Option<u64>) -> Result<Vec<(u64, String)>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        // A database written before the change log existed won't have this table yet - treat
+        // that as "no history" rather than erroring; new entries will populate it from here on.
+        let table = match txn.open_table(CHANGE_LOG) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let range = match before {
+            Some(b) => table.range::<u64>(..b)?,
+            None => table.range::<u64>(..)?,
+        };
+        let mut out = Vec::with_capacity(limit.min(64));
+        for kv in range.rev() {
+            let (k, v) = kv?;
+            out.push((k.value(), v.value().to_string()));
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+    fn last_saved_changelog_id_get(&self) -> Result<Option<u64>> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_read()?;
+        let table = match txn.open_table(SAVE_STATE) {
+            Ok(table) => table,
+            Err(TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        Ok(table.get(LAST_SAVED_CHANGELOG_ID_KEY)?.map(|v| v.value()))
+    }
+    fn last_saved_changelog_id_set(&mut self, id : u64) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SAVE_STATE)?;
+        table.insert(LAST_SAVED_CHANGELOG_ID_KEY, id)?;
         Ok(())
     }
 
@@ -1032,4 +1135,12 @@ fn deserialize_deprecation(s : Vec<u8>) -> Result<Vec<DeprecationRecord>> {
 
 fn serialize_deprecations(deprecations : Vec<DeprecationRecord>) -> Result<Vec<u8>> {
     Ok(deprecations.write_to_vec()?)
+}
+
+fn deserialize_frames(s : Vec<u8>) -> Result<Vec<(String, String)>> {
+    Ok(Vec::read_from_buffer(&s)?)
+}
+
+fn serialize_frames(frames : Vec<(String, String)>) -> Result<Vec<u8>> {
+    Ok(frames.write_to_vec()?)
 }

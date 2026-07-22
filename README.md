@@ -88,6 +88,10 @@ An example of the usage of the automaton file is given below
     synset: 00001740-n
     example: This is an example
     source: This is a source
+- update_example:
+    synset: 00001740-n
+    number: 1
+    example: This is an updated example
 - delete_example:
     synset: 00001740-n
     number: 1
