@@ -17,6 +17,12 @@ pub use editable_examples::{EditableExamples, ExampleDraft};
 mod editable_lemmas;
 pub use editable_lemmas::EditableLemmas;
 
+mod editable_ili;
+pub use editable_ili::EditableIli;
+
+mod editable_wikidata;
+pub use editable_wikidata::EditableWikidata;
+
 pub mod relation_types;
 
 mod editable_relations;

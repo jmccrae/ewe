@@ -1,8 +1,9 @@
 use crate::backend::api::get_synset;
 use crate::backend::senses::get_sense_count;
 use crate::components::{
-    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableLemmas,
-    EditableRelations, ExampleDraft, PendingRelation, Relation, RelationKey, Subcat,
+    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableIli,
+    EditableLemmas, EditableRelations, EditableWikidata, ExampleDraft, PendingRelation, Relation,
+    RelationKey, Subcat,
 };
 use crate::Route;
 use dioxus::prelude::*;
@@ -29,6 +30,10 @@ fn build_actions(
     drafts: &[ExampleDraft],
     relation_deletes: &[RelationKey],
     relation_adds: &[PendingRelation],
+    original_ili: &str,
+    draft_ili: &str,
+    original_wikidata: &[String],
+    draft_wikidata: &[String],
 ) -> Vec<Action> {
     let mut actions = Vec::new();
 
@@ -48,6 +53,25 @@ fn build_actions(
         actions.push(Action::Definition {
             synset: SynsetRef::Id(synset_id.clone()),
             definition: draft_definition.to_string(),
+        });
+    }
+
+    if draft_ili != original_ili {
+        actions.push(Action::ChangeILI {
+            synset: SynsetRef::Id(synset_id.clone()),
+            ili: draft_ili.to_string(),
+        });
+    }
+
+    let wikidata: Vec<String> = draft_wikidata
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if wikidata != original_wikidata {
+        actions.push(Action::ChangeWikidata {
+            synset: SynsetRef::Id(synset_id.clone()),
+            wikidata,
         });
     }
 
@@ -251,6 +275,8 @@ pub fn Synset(props: SynsetProps) -> Element {
     let mut lemma_drafts = use_signal(Vec::<String>::new);
     let mut definition_draft = use_signal(String::new);
     let mut example_drafts = use_signal(Vec::<ExampleDraft>::new);
+    let mut ili_draft = use_signal(String::new);
+    let mut wikidata_drafts = use_signal(Vec::<String>::new);
     let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
     let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
     // Only mutated (`.set()`) inside the `edit` feature's accept handler below; harmless when
@@ -278,58 +304,80 @@ pub fn Synset(props: SynsetProps) -> Element {
                     document::Style { href: CSS },
                     div {
                         class: "synset",
-                        if props.display_ids {
+                        if props.display_ids || editing() {
                             div {
                                 class: "synset-id",
                                 // show: display.ids
-                                span {
-                                    class: "identifier",
-                                    "{synset.id}"
-                                }
-                                if synset.ili.is_some() || !synset.wikidata.is_empty() {
+                                if props.display_ids {
                                     span {
-                                        " ("
+                                        class: "identifier",
+                                        "{synset.id}"
                                     }
                                 }
-                                if let Some(ref ili) = synset.ili {
-                                    span {
-                                        b {
-                                            class: "synset-id-title",
-                                            "Interlingual Index: "
-                                        },
+                                if !editing() {
+                                    if synset.ili.is_some() || !synset.wikidata.is_empty() {
                                         span {
-                                            class: "identifier",
-                                            "{ili}"
+                                            " ("
                                         }
                                     }
-                                }
-                                if synset.ili.is_some() && !synset.wikidata.is_empty() {
-                                    span {
-                                        ", "
+                                    if let Some(ref ili) = synset.ili {
+                                        span {
+                                            b {
+                                                class: "synset-id-title",
+                                                "Interlingual Index: "
+                                            },
+                                            span {
+                                                class: "identifier",
+                                                "{ili}"
+                                            }
+                                        }
                                     }
-                                }
-                                for (idx, wikidata) in synset.wikidata.iter().enumerate() {
-                                    span {
-                                        b {
-                                            "Wikidata:"
-                                        },
-                                        a {
-                                            class: "identifier",
-                                            href: "https://www.wikidata.org/wiki/{wikidata}",
-                                            "{wikidata}"
-                                        },
-                                        if idx < synset.wikidata.len() - 1 {
+                                    if synset.ili.is_some() && !synset.wikidata.is_empty() {
+                                        span {
                                             ", "
                                         }
                                     }
-                                }
-                                if synset.ili.is_some() || !synset.wikidata.is_empty() {
-                                    span {
-                                        ")"
+                                    for (idx, wikidata) in synset.wikidata.iter().enumerate() {
+                                        span {
+                                            b {
+                                                "Wikidata:"
+                                            },
+                                            a {
+                                                class: "identifier",
+                                                href: "https://www.wikidata.org/wiki/{wikidata}",
+                                                "{wikidata}"
+                                            },
+                                            if idx < synset.wikidata.len() - 1 {
+                                                ", "
+                                            }
+                                        }
+                                    }
+                                    if synset.ili.is_some() || !synset.wikidata.is_empty() {
+                                        span {
+                                            ")"
+                                        }
                                     }
                                 }
                                 hr {}
                             },
+                            // Editing the ILI/Wikidata identifiers doesn't depend on the "Show
+                            // Synset Identifier" display option above - only the caller
+                            // mounting this while the synset-wide edit toggle is on does. Shown
+                            // as its own block below the divider rather than inline with the
+                            // id, since it's a list-like editor rather than a single value.
+                            if editing() {
+                                div {
+                                    class: "synset-identifiers-editing",
+                                    EditableIli {
+                                        value: ili_draft(),
+                                        on_input: move |v| ili_draft.set(v),
+                                    }
+                                    EditableWikidata {
+                                        drafts: wikidata_drafts(),
+                                        on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
+                                    }
+                                }
+                            }
                         },
                         div {
                             class: "lemmas-container",
@@ -814,10 +862,14 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
                                         let definition = synset.definition.get(0).cloned().unwrap_or_default();
                                         let examples = synset.example.clone();
+                                        let ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                                        let wikidata = synset.wikidata.clone();
                                         move |_| {
                                             lemma_drafts.set(members.clone());
                                             definition_draft.set(definition.clone());
                                             example_drafts.set(ExampleDraft::from_examples(&examples));
+                                            ili_draft.set(ili.clone());
+                                            wikidata_drafts.set(wikidata.clone());
                                             relation_deletes.set(Vec::new());
                                             relation_adds.set(Vec::new());
                                             edit_error.set(None);
@@ -829,6 +881,8 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let original_members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
                                         let original_definition = synset.definition.get(0).cloned().unwrap_or_default();
                                         let original_examples = synset.example.clone();
+                                        let original_ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                                        let original_wikidata = synset.wikidata.clone();
                                         move |_| {
                                             let actions = build_actions(
                                                 &synset_id,
@@ -840,6 +894,10 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 &example_drafts(),
                                                 &relation_deletes(),
                                                 &relation_adds(),
+                                                &original_ili,
+                                                &ili_draft(),
+                                                &original_wikidata,
+                                                &wikidata_drafts(),
                                             );
                                             if actions.is_empty() {
                                                 editing.set(false);

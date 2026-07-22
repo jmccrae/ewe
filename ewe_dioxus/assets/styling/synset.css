@@ -149,6 +149,46 @@
     font-family: var(--font-mono);
 }
 
+.synset-identifiers-editing {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    margin: 4px 0 8px;
+    font-size: 0.7em;
+}
+
+.synset-id-editing {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ili-input {
+    font-family: var(--font-mono);
+    font-size: 1em;
+    width: 10em;
+}
+
+.wikidata-editing {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.wikidata-editing-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.wikidata-input {
+    font-family: var(--font-mono);
+    font-size: 1em;
+    width: 8em;
+}
+
 .more {
     padding-top:5px;
     padding-left:20px;
