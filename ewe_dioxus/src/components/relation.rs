@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::Synset;
-use oewn_lib::wordnet::SynsetId;
+use ewe_lib::wordnet::SynsetId;
 
 #[derive(PartialEq, Clone, Props)]
 pub struct RelationProps {

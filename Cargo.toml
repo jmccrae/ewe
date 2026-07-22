@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "oewn_lib",
+    "ewe_lib",
     "ewe_cli",
     "ewe_dioxus"
     ]
 resolver = "2"
 
 [workspace.dependencies]
-oewn_lib = { path = "oewn_lib" }
+ewe_lib = { path = "ewe_lib" }

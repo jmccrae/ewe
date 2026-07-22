@@ -1,7 +1,7 @@
 #![cfg(not(feature = "desktop"))]
 use dioxus::prelude::*;
 use crate::backend::downloads::get_downloads;
-use crate::components::WordNet;
+use crate::components::{ProjectName, WordNet};
 
 /// "1.2 MB", "512 KB", "43 B" - whichever unit keeps the number readable.
 fn format_size(bytes: u64) -> String {
@@ -22,9 +22,13 @@ fn format_size(bytes: u64) -> String {
 #[component]
 pub fn Downloads() -> Element {
     let releases = use_loader(get_downloads);
+    let project_name = use_context::<Signal<ProjectName>>();
 
     rsx! {
         div {
+            if !project_name().0.is_empty() {
+                document::Title { "Downloads - {project_name().0}" }
+            }
             WordNet {},
             div {
                 class: "downloads",

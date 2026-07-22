@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use oewn_lib::wordnet::{MemberSynset, SenseRelation, SynsetId};
+use ewe_lib::wordnet::{MemberSynset, SenseRelation, SynsetId};
 
 #[allow(unused_imports)]
 use crate::components::relation_types::{RelationTypeInfo, SENSE_RELATION_TYPES, SYNSET_RELATION_TYPES};

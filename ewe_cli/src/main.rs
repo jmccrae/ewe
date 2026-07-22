@@ -8,13 +8,13 @@ mod indicatif_progress;
 use clap::{Parser, Subcommand};
 use indicatif_progress::IndicatifProgress;
 use lazy_static::lazy_static;
-use oewn_lib::automaton::ActionWrapper;
-use oewn_lib::change_manager;
-use oewn_lib::change_manager::ChangeList;
-use oewn_lib::progress::NullProgress;
-use oewn_lib::rels::{SenseRelType, SynsetRelType};
-use oewn_lib::validate::{fix, validate};
-use oewn_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, Synset, SynsetId};
+use ewe_lib::automaton::ActionWrapper;
+use ewe_lib::change_manager;
+use ewe_lib::change_manager::ChangeList;
+use ewe_lib::progress::NullProgress;
+use ewe_lib::rels::{SenseRelType, SynsetRelType};
+use ewe_lib::validate::{fix, validate};
+use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, Synset, SynsetId};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -527,7 +527,7 @@ fn change_relation<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
 fn save<L: Lexicon>(
     wn: &L,
     path: &str,
-) -> result::Result<bool, oewn_lib::wordnet::LexiconSaveError> {
+) -> result::Result<bool, ewe_lib::wordnet::LexiconSaveError> {
     let mut progress = IndicatifProgress::new();
     let errors = validate(wn, &mut progress)?;
     if !errors.is_empty() {
@@ -647,7 +647,7 @@ fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -
 #[command(
     name="ewe",
     version="0.2.0",
-    about="English Wordnet Editor",
+    about="EWE Wordnet Editor",
     long_about=None)]
 struct EweCli {
     #[command(subcommand)]
@@ -736,7 +736,7 @@ fn run_automaton(script: &str, wordnet: Option<PathBuf>) {
 
     let mut ewe_changed = ChangeList::new();
 
-    oewn_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
+    ewe_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
         eprintln!("Could not apply automaton: {}", e);
         exit(-1);
     });
@@ -879,7 +879,7 @@ fn run_tui() {
     println!("");
     println!("         ,ww                             ");
     println!("   wWWWWWWW_)  Welcome to EWE            ");
-    println!("   `WWWWWW'    - English WordNet Editor  ");
+    println!("   `WWWWWW'    - EWE Wordnet Editor       ");
     println!("    II  II                               ");
     println!("");
 

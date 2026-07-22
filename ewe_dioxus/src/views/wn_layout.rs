@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use crate::backend::api::get_branding;
 use crate::components::{
-    provide_display_options, provide_dirty_state, provide_panel_visibility, UnsavedChangesToast,
-    ValidateButton,
+    provide_display_options, provide_dirty_state, provide_panel_visibility, provide_project_name,
+    ProjectName, UnsavedChangesToast, ValidateButton,
 };
 use crate::Route;
 
@@ -30,6 +30,7 @@ pub fn WNLayout() -> Element {
     provide_display_options();
     provide_panel_visibility();
     provide_dirty_state();
+    let mut project_name_ctx = provide_project_name();
 
     // Branding is fetched through a server function rather than reading
     // `crate::SETTINGS` here directly, since this component also runs in the
@@ -42,6 +43,15 @@ pub fn WNLayout() -> Element {
         }
         _ => (String::new(), String::new()),
     };
+
+    // Shares `project_name` with route views via context so each can compose its own
+    // `document::Title` (e.g. "{lemma} - {project_name}") without fetching branding itself.
+    // Written directly here (not in a `use_effect`) so it's visible to `Outlet`'s children
+    // within the same render pass - an effect would only run after the initial SSR render
+    // completes, too late for those children's own `document::Title` to see it.
+    if project_name_ctx().0 != project_name {
+        project_name_ctx.set(ProjectName(project_name.clone()));
+    }
 
     // The logo/title is centered on the home page (OED-style hero treatment)
     // but stays left-aligned everywhere else, like a normal site header.

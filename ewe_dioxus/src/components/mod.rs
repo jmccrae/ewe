@@ -42,6 +42,9 @@ pub use display_options::{
     provide_display_options, provide_panel_visibility, DisplayOptions, DisplayOptionsButton,
 };
 
+mod branding;
+pub use branding::{provide_project_name, ProjectName};
+
 mod download_links;
 pub use download_links::DownloadLinks;
 

@@ -1,5 +1,5 @@
 use crate::backend::api::{get_home_info, get_random_synset};
-use crate::components::WordNet;
+use crate::components::{ProjectName, WordNet};
 use crate::Route;
 use dioxus::prelude::*;
 
@@ -23,8 +23,12 @@ fn format_count(n: usize) -> String {
 pub fn Home() -> Element {
     let info = use_loader(get_home_info);
     let navigator = use_navigator();
+    let project_name = use_context::<Signal<ProjectName>>();
 
     rsx! {
+        if !project_name().0.is_empty() {
+            document::Title { "{project_name().0}" }
+        }
         document::Style { href: CSS },
         div {
             class: "home",

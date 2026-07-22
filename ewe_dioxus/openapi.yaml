@@ -133,7 +133,7 @@ paths:
       operationId: getSenseConcordance
       summary: Corpus concordance for a synset
       description: >
-        One page of keyword-in-context (KWIC) rows from the Semcor corpus
+        One page of keyword-in-context (KWIC) rows from the corpus
         for every sense tagged with this synset id. `page` is 0-indexed and
         clamps to the last page rather than erroring if out of range.
       parameters:
@@ -184,7 +184,7 @@ paths:
       operationId: getSenseDocuments
       summary: Corpus document ids for a synset
       description: >
-        Sorted, deduplicated ids of every Semcor document containing at
+        Sorted, deduplicated ids of every corpus document containing at
         least one token tagged with this synset id. Documents where the
         only occurrence is packed into a `;`-joined multi-key token are not
         found by the underlying index, so this can under-count.

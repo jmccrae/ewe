@@ -1,13 +1,17 @@
 use dioxus::prelude::*;
-use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks};
-use oewn_lib::wordnet::SynsetId;
+use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks, ProjectName};
+use ewe_lib::wordnet::SynsetId;
 
 #[component]
 pub fn BySynset(synset: ReadSignal<String>) -> Element {
     let options = use_context::<Signal<DisplayOptions>>();
+    let project_name = use_context::<Signal<ProjectName>>();
 
     rsx! {
         div {
+            if !project_name().0.is_empty() {
+                document::Title { "{synset} - {project_name().0}" }
+            }
             WordNet {},
             Synset {
                 key: "{synset}",

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 #[allow(unused_imports)]
-use oewn_lib::wordnet::SynsetId;
+use ewe_lib::wordnet::SynsetId;
 #[allow(unused_imports)]
 use crate::Route;
 
