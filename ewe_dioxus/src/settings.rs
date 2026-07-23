@@ -61,7 +61,7 @@ fn default_lexicon_cache_mb() -> usize {
 }
 
 fn default_logo() -> String {
-    "assets/english.svg".to_string()
+    "assets/gwa.svg".to_string()
 }
 
 fn default_corpus_database() -> String {

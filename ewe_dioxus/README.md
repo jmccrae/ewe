@@ -85,7 +85,7 @@ footer = """
 | `id_prefix`         | string           | `"oewn"` | Prefix used for synset/entry ids in XML/RDF/Turtle export and in id lookups (e.g. `oewn-00001740-n`), and to derive the corpus's sense-key layer name (`{id_prefix}_key`). Set this to your own project's id prefix if you're not the Open English Wordnet. |
 | `contact_email`     | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon email="...">` attribute. |
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |
-| `logo`              | string           | `"assets/english.svg"` | Path to the logo image, read from disk on every request and served at `/logo`. |
+| `logo`              | string           | `"assets/gwa.svg"` | Path to the logo image, read from disk on every request and served at `/logo`. |
 | `theme`             | string           | `"assets/styling/theme.css"` | Path to the theme stylesheet (colours and fonts as CSS custom properties — see [Styling](#styling) below), read from disk on every request and served at `/theme.css`. |
 | `project_name`      | string           | `"EWE Wordnet Editor"` | Shown as the `<h1>` next to the logo, and as the exported XML's `<Lexicon label="...">`. |
 | `tagline`           | string           | a generic tagline | Short line shown centered on the home page, below the search box. |
