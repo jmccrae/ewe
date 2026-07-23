@@ -4,14 +4,8 @@ use ewe_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use std::collections::BTreeSet;
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-#[allow(dead_code)]
-enum EweAPIError {
-    #[error("Lexicon not available")]
-    LexiconUnavailable,
-}
+#[cfg(feature = "server")]
+use crate::db::read_lexicon;
 
 /// The branding fields configurable via `settings.toml` that need to reach
 /// client-rendered pages. Fetched through a server function (rather than
@@ -27,7 +21,7 @@ pub struct Branding {
 
 #[get("/api/branding")]
 pub async fn get_branding() -> Result<Branding> {
-    let settings = crate::SETTINGS.get();
+    let settings = crate::db::read_settings();
     Ok(Branding {
         project_name: settings.project_name.clone(),
         footer: settings.footer.clone(),
@@ -47,31 +41,23 @@ pub struct HomeInfo {
 
 #[get("/api/home")]
 pub async fn get_home_info() -> Result<HomeInfo> {
-    let settings = crate::SETTINGS.get();
+    let settings = crate::db::read_settings();
     let tagline = settings.tagline.clone();
     let intro = settings.intro.clone();
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        Ok(HomeInfo {
-            tagline,
-            intro,
-            n_synsets: lexicon.n_synsets()?,
-            n_entries: lexicon.n_entries()?,
-        })
-    } else {
-        Err(EweAPIError::LexiconUnavailable.into())
-    }
+    let lexicon = read_lexicon()?;
+    Ok(HomeInfo {
+        tagline,
+        intro,
+        n_synsets: lexicon.n_synsets()?,
+        n_entries: lexicon.n_entries()?,
+    })
 }
 
 /// A uniformly random synset id, for the home page's "Random synset" button.
 #[get("/api/random_synset")]
 pub async fn get_random_synset() -> Result<Option<SynsetId>> {
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        Ok(lexicon.random_synset_id()?)
-    } else {
-        Err(EweAPIError::LexiconUnavailable.into())
-    }
+    let lexicon = read_lexicon()?;
+    Ok(lexicon.random_synset_id()?)
 }
 
 /// What a [`SearchResult`] refers to, so the frontend knows which page to
@@ -106,101 +92,86 @@ fn strip_id_prefix<'a>(query: &'a str, id_prefix: &str) -> &'a str {
 
 #[get("/api/by_lemma/{lemma}")]
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        let lemmas = lexicon.entry_by_lemma(&lemma)?;
-        let synset_ids = lemmas
-            .iter()
-            .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
-            .collect();
-        Ok(synset_ids)
-    } else {
-        Err(EweAPIError::LexiconUnavailable.into())
-    }
+    let lexicon = read_lexicon()?;
+    let lemmas = lexicon.entry_by_lemma(&lemma)?;
+    let synset_ids = lemmas
+        .iter()
+        .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+        .collect();
+    Ok(synset_ids)
 }
 
 #[get("/api/lemma/{lemma}")]
 pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        let entries = lexicon.entry_by_lemma(&lemma)?;
-        let synset_ids: BTreeSet<SynsetId> = entries
-            .iter()
-            .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
-            .collect();
+    let lexicon = read_lexicon()?;
+    let entries = lexicon.entry_by_lemma(&lemma)?;
+    let synset_ids: BTreeSet<SynsetId> = entries
+        .iter()
+        .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
+        .collect();
 
-        let mut synsets = Vec::with_capacity(synset_ids.len());
-        for id in &synset_ids {
-            if let Some(synset) = lexicon.synset_by_id(id)? {
-                synsets.push(MemberSynset::from_synset(id, synset.into_owned(), &*lexicon)?);
-            }
+    let mut synsets = Vec::with_capacity(synset_ids.len());
+    for id in &synset_ids {
+        if let Some(synset) = lexicon.synset_by_id(id)? {
+            synsets.push(MemberSynset::from_synset(id, synset.into_owned(), &*lexicon)?);
         }
-        Ok(synsets)
-    } else {
-        Err(EweAPIError::LexiconUnavailable.into())
     }
+    Ok(synsets)
 }
 
 #[get("/api/autocomplete/{query}?max_results")]
 pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        let mut results = Vec::new();
+    let lexicon = read_lexicon()?;
+    let mut results = Vec::new();
 
-        for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
-            results.push(SearchResult {
-                display: lemma.clone(),
-                kind: SearchResultKind::Lemma,
-                value: lemma,
-            });
-        }
-
-        // Synset ids may be typed bare ("00001740-n") or with the configured
-        // id_prefix used in the RDF/XML/Turtle exports.
-        let id_prefix = &crate::SETTINGS.get().id_prefix;
-        for ssid in lexicon.ssid_by_prefix(strip_id_prefix(&query, id_prefix), Some(max_results))? {
-            results.push(SearchResult {
-                display: format!("{}-{}", id_prefix, ssid),
-                kind: SearchResultKind::Synset,
-                value: ssid,
-            });
-        }
-
-        for (ili, ssid) in lexicon.ili_by_prefix(&query, Some(max_results))? {
-            results.push(SearchResult {
-                display: format!("{} ({})", ili, ssid.as_str()),
-                kind: SearchResultKind::Synset,
-                value: ssid.as_str().to_string(),
-            });
-        }
-
-        let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
-        results.sort_by(|a, b| match a.display.to_lowercase().cmp(&b.display.to_lowercase()) {
-            std::cmp::Ordering::Equal => a.display.cmp(&b.display).reverse(),
-            x => x,
+    for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
+        results.push(SearchResult {
+            display: lemma.clone(),
+            kind: SearchResultKind::Lemma,
+            value: lemma,
         });
-        Ok(results)
-    } else {
-        Err(EweAPIError::LexiconUnavailable.into())
     }
+
+    // Synset ids may be typed bare ("00001740-n") or with the configured
+    // id_prefix used in the RDF/XML/Turtle exports.
+    let settings = crate::db::read_settings();
+    let id_prefix = &settings.id_prefix;
+    for ssid in lexicon.ssid_by_prefix(strip_id_prefix(&query, id_prefix), Some(max_results))? {
+        results.push(SearchResult {
+            display: format!("{}-{}", id_prefix, ssid),
+            kind: SearchResultKind::Synset,
+            value: ssid,
+        });
+    }
+
+    for (ili, ssid) in lexicon.ili_by_prefix(&query, Some(max_results))? {
+        results.push(SearchResult {
+            display: format!("{} ({})", ili, ssid.as_str()),
+            kind: SearchResultKind::Synset,
+            value: ssid.as_str().to_string(),
+        });
+    }
+
+    let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
+    results.sort_by(|a, b| match a.display.to_lowercase().cmp(&b.display.to_lowercase()) {
+        std::cmp::Ordering::Equal => a.display.cmp(&b.display).reverse(),
+        x => x,
+    });
+    Ok(results)
 }
 
 #[get("/api/synset/{id}")]
 pub async fn get_synset(id: SynsetId) -> Result<Option<MemberSynset>> {
-    if let Some(lexicon) = crate::LEXICON.get() {
-        let lexicon = lexicon.read().unwrap();
-        let synset = lexicon.synset_by_id(&id)?;
-        if let Some(synset) = synset {
-            Ok(Some(MemberSynset::from_synset(
-                &id,
-                synset.into_owned(),
-                &*lexicon,
-            )?))
-        } else {
-            Ok(None)
-        }
+    let lexicon = read_lexicon()?;
+    let synset = lexicon.synset_by_id(&id)?;
+    if let Some(synset) = synset {
+        Ok(Some(MemberSynset::from_synset(
+            &id,
+            synset.into_owned(),
+            &*lexicon,
+        )?))
     } else {
-        Err(EweAPIError::LexiconUnavailable.into())
+        Ok(None)
     }
 }

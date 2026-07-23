@@ -26,6 +26,10 @@ chrono = { version = "0.4", default-features = false, features = ["std"], option
 tokio = { version = "1", features = ["rt"], optional = true }
 percent-encoding = "2.3.2"
 teanga = { git = "https://github.com/TeangaNLP/teanga.rs", branch = "main", features = ["redb"] }
+# Native folder-picker dialog for the desktop setup screen (components::setup_needed). Version/
+# feature set matched to what dioxus-desktop itself already resolves (see Cargo.lock) so Cargo
+# unifies them instead of linking a second native dialog backend.
+rfd = { version = "0.17", optional = true, default-features = false, features = ["xdg-portal"] }
 
 [features]
 default = ["web"]
@@ -39,7 +43,7 @@ web = ["dioxus/web"]
 # without them and every edit-mode route (POST /api/edit/apply, GET
 # /api/edit/search_synsets/{query}, ...) 404s, even though the desktop app itself renders the
 # editor UI. Always run `dx serve --desktop --features edit` to test editing on desktop.
-desktop = ["dioxus/desktop", "edit"]
+desktop = ["dioxus/desktop", "edit", "dep:rfd"]
 # The feature that are only required for the mobile = ["dioxus/mobile"] build target should be optional and only enabled in the mobile = ["dioxus/mobile"] feature
 mobile = ["dioxus/mobile"]
 # Gates the Wordnet editor UI and any write-capable backend routes. Off by default (including

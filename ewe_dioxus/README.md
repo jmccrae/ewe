@@ -58,6 +58,8 @@ ewe_dioxus/
 
 The app looks for a `settings.toml` file in the current working directory when it starts. If the file is missing, it falls back to generic defaults described below. `settings.toml` is git-ignored, since it's environment-specific (absolute paths, per-deployment branding); [`english-wordnet-settings.toml`](./english-wordnet-settings.toml) is checked in as a copy-and-rename starting point for an Open English Wordnet deployment.
 
+Every path-valued key below (`database`, `wordnet_source`, `corpus_database`, `corpus_source`, `logo`, `theme`) is resolved relative to `settings.toml`'s own directory, not the process's working directory - so a project folder with its own `settings.toml` and relative paths (e.g. `wordnet_source = "src/yaml"`) works the same no matter where it's loaded from. This is what makes the desktop app's project-folder picker (below) work.
+
 ```toml
 database = "wordnet.db"
 wordnet_source = "/path/to/english-wordnet/src/yaml/"
@@ -109,6 +111,8 @@ The server opens the lexicon database lazily, on first request, via `src/db.rs`.
 - if `wordnet_source` is set and any file in it (or the sibling `deprecations.csv`) has a newer modification time than `database`,
 
 and if either is true, it rebuilds the database from `wordnet_source` before opening it. Otherwise it just opens the existing file. In practice this means you can edit the Wordnet YAML source and the next request after a restart will pick up the changes automatically — there's no separate load/reload step to run.
+
+If no working database can be opened at all (no `settings.toml`, or a `wordnet_source` that doesn't exist), every route shows a setup screen instead of the normal page content (`components::setup_needed`, wired into `views::wn_layout`) rather than a broken page. On `web`, this just explains what to add to `settings.toml`, since there's no interactive way to fix it from a browser. On `desktop` (with the `edit` feature, which desktop already turns on by default), it offers a native "Open Folder" button (via `rfd`) under an "Open Wordnet Folder" heading; the chosen folder must itself contain a `settings.toml` (see [Configuration](#configuration-settingstoml) above for the format - e.g. `~/p/globalwordnet/english-wordnet/settings.toml` for a real Open English Wordnet checkout). Picking a valid folder loads that `settings.toml`, rebuilds the lexicon (and corpus, if configured) from it in the background, and hot-swaps everything - branding included - into the running server once done, with a progress bar and no restart needed (`backend::setup::configure_wordnet_source`). This is session-only and deliberately not persisted anywhere (in particular, it never touches the app's own `settings.toml`) - relaunching the app starts unconfigured again and needs the folder picked once more.
 
 ## Corpus lookups
 

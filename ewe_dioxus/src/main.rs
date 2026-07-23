@@ -69,14 +69,18 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
+// Wrapped in a `RwLock` (like `LEXICON` below) so `backend::setup::configure_wordnet_source`
+// can hot-swap in a whole new settings file - project name, branding, id_prefix, and all -
+// picked up from a folder the desktop user chooses, without needing to restart the server.
+#[cfg(feature = "server")]
 #[allow(dead_code)]
-static SETTINGS: Lazy<settings::EweSettings> = Lazy::new(|| async move {
+static SETTINGS: Lazy<RwLock<settings::EweSettings>> = Lazy::new(|| async move {
     let settings = if std::path::Path::new("settings.toml").exists() {
         EweSettings::load("settings.toml").expect("Failed to load settings")
     } else {
         EweSettings::default()
     };
-    dioxus::Ok(settings)
+    dioxus::Ok(RwLock::new(settings))
 });
 
 /// Downloads are entirely optional: if `downloads.toml` doesn't exist, the
@@ -93,27 +97,50 @@ static DOWNLOADS: Lazy<DownloadsConfig> = Lazy::new(|| async move {
 
 // Wrapped in a `RwLock` (rather than the plain `ReDBLexicon` reads elsewhere use) so that
 // edit-mode server functions (see `backend::edit`) can take a write lock to apply automaton
-// actions, while ordinary lookups take a read lock and don't block each other.
+// actions, while ordinary lookups take a read lock and don't block each other. The lock wraps
+// an `Option` (rather than the whole thing being `Option<RwLock<...>>`) so a lexicon that failed
+// to open at startup isn't a permanent dead end: `backend::setup::configure_wordnet_source` can
+// hot-swap a freshly-opened lexicon into the `Some` slot later, without ever needing to
+// re-touch this `Lazy` itself (which only ever initializes once).
 #[cfg(feature = "server")]
-static LEXICON: Lazy<Option<RwLock<ReDBLexicon>>> = Lazy::new(|| async move {
-    match db::open_lexicon(SETTINGS.get()) {
-        Ok(lexicon) => dioxus::Ok(Some(RwLock::new(lexicon))),
-        Err(e) => {
-            eprintln!("Failed to open lexicon: {}", e);
-            dioxus::Ok(None)
+static LEXICON: Lazy<RwLock<Option<ReDBLexicon>>> = Lazy::new(|| async move {
+    let settings = SETTINGS.get().read().unwrap();
+    let lexicon = if db::is_unconfigured_lexicon(&settings) {
+        // Nothing set up yet (e.g. a desktop app launched fresh, with no persisted settings.toml
+        // - see `backend::setup`) - the normal starting state, not worth logging as a failure.
+        None
+    } else {
+        match db::open_lexicon(&settings) {
+            Ok(lexicon) => Some(lexicon),
+            Err(e) => {
+                eprintln!("Failed to open lexicon: {}", e);
+                None
+            }
         }
-    }
+    };
+    dioxus::Ok(RwLock::new(lexicon))
 });
 
+// Wrapped in a `RwLock<Option<...>>` for the same reason as `LEXICON` - the corpus (like the
+// lexicon) is reloaded from a freshly-picked project's `corpus_source`/`corpus_database` by
+// `backend::setup::configure_wordnet_source`. A missing/failed corpus is non-fatal either way
+// (it's only used to show usage examples), hence the `Option`.
 #[cfg(feature = "server")]
-static CORPUS: Lazy<Option<DiskCorpus<RedbDb>>> = Lazy::new(|| async move {
-    match db::open_corpus(SETTINGS.get()) {
-        Ok(corpus) => dioxus::Ok(Some(corpus)),
-        Err(e) => {
-            eprintln!("Failed to open corpus: {}", e);
-            dioxus::Ok(None)
+static CORPUS: Lazy<RwLock<Option<DiskCorpus<RedbDb>>>> = Lazy::new(|| async move {
+    let settings = SETTINGS.get().read().unwrap();
+    let corpus = if db::is_unconfigured_corpus(&settings) {
+        // See `LEXICON`'s equivalent check just above - nothing set up yet, not a failure.
+        None
+    } else {
+        match db::open_corpus(&settings) {
+            Ok(corpus) => Some(corpus),
+            Err(e) => {
+                eprintln!("Failed to open corpus: {}", e);
+                None
+            }
         }
-    }
+    };
+    dioxus::Ok(RwLock::new(corpus))
 });
 
 fn main() {
@@ -193,17 +220,7 @@ fn App() -> Element {
     // Eagerly load the corpus alongside the lexicon. It's supplementary
     // (used for showing usages), so a failure is logged but doesn't block the app.
     CORPUS.get();
-    match LEXICON.get() {
-        Some(_) => App2(),
-        None => {
-            rsx! {
-                div { class: "error",
-                    h1 { "Error loading lexicon" }
-                    p { "The lexicon failed to load. Please check the console for more details." }
-                }
-            }
-        }
-    }
+    App2()
 }
 
 #[cfg(not(feature = "server"))]

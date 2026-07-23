@@ -69,3 +69,6 @@ pub use edit_progress_bar::EditProgressBar;
 mod synset_picker;
 #[cfg(feature = "edit")]
 pub use synset_picker::SynsetPicker;
+
+mod setup_needed;
+pub use setup_needed::SetupNeeded;

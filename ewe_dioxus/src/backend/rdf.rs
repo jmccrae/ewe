@@ -29,14 +29,16 @@ fn strip_synset_id_prefix<'a>(id: &'a str, id_prefix: &str) -> Option<&'a str> {
 /// which then does the normal content negotiation.
 #[get("/id/{id}")]
 pub async fn synset_id_alias(id: String) -> Result<Response<Body>> {
-    let id_prefix = &crate::SETTINGS.get().id_prefix;
+    let settings = crate::db::read_settings();
+    let id_prefix = &settings.id_prefix;
     let bare_id = strip_synset_id_prefix(&id, id_prefix).unwrap_or(&id);
     Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response())
 }
 
 #[get("/synset/{id}", headers : HeaderMap)]
 pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
-    let id_prefix = &crate::SETTINGS.get().id_prefix;
+    let settings = crate::db::read_settings();
+    let id_prefix = &settings.id_prefix;
     if let Some(bare_id) = strip_synset_id_prefix(&id, id_prefix) {
         return Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response());
     }
@@ -155,10 +157,9 @@ fn lemma_rdf_bytes(lemma: &str, format: RdfFormat) -> Result<Option<Vec<u8>>> {
 /// Turtle, XML, and JSON exports. Returns `Ok(None)` if the lexicon isn't
 /// loaded or the id doesn't exist.
 pub(crate) fn resolve_synset(id: &SynsetId) -> Result<Option<MemberSynset>> {
-    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+    let Ok(lexicon) = crate::db::read_lexicon() else {
         return Ok(None);
     };
-    let lexicon = lexicon.read().unwrap();
     let Some(synset) = lexicon.synset_by_id(id)? else {
         return Ok(None);
     };
@@ -173,10 +174,9 @@ pub(crate) fn resolve_synset(id: &SynsetId) -> Result<Option<MemberSynset>> {
 /// empty vec (not an error) if the lexicon isn't loaded or the lemma is
 /// unknown.
 pub(crate) fn resolve_lemma_synsets(lemma: &str) -> Result<Vec<MemberSynset>> {
-    let Some(lexicon) = crate::LEXICON.get().as_ref() else {
+    let Ok(lexicon) = crate::db::read_lexicon() else {
         return Ok(Vec::new());
     };
-    let lexicon = lexicon.read().unwrap();
 
     let entries = lexicon.entry_by_lemma(lemma)?;
     let synset_ids: BTreeSet<SynsetId> = entries
