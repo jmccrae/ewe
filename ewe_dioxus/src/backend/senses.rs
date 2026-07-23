@@ -89,8 +89,10 @@ pub struct ConcordancePage {
 #[cfg(feature = "server")]
 #[allow(dead_code)]
 async fn all_concordance_lines(id: SynsetId) -> Result<Vec<ConcordanceLine>> {
-    if let Some(corpus) = crate::CORPUS.get() {
-        let id_prefix = &crate::SETTINGS.get().id_prefix;
+    let corpus_guard = crate::db::read_corpus();
+    if let Some(corpus) = corpus_guard.as_ref() {
+        let settings = crate::db::read_settings();
+        let id_prefix = &settings.id_prefix;
         let layer = key_layer_name(id_prefix);
         let target = prefixed_key(id_prefix, &id);
         let meta = corpus.get_meta();
@@ -160,8 +162,10 @@ pub async fn get_sense_concordance(id: SynsetId, page: usize) -> Result<Concorda
 #[allow(dead_code)]
 #[get("/api/senses/{id}/count")]
 pub async fn get_sense_count(id: SynsetId) -> Result<usize> {
-    if let Some(corpus) = crate::CORPUS.get() {
-        let id_prefix = &crate::SETTINGS.get().id_prefix;
+    let corpus_guard = crate::db::read_corpus();
+    if let Some(corpus) = corpus_guard.as_ref() {
+        let settings = crate::db::read_settings();
+        let id_prefix = &settings.id_prefix;
         let query = QueryBuilder::new()
             .value(&key_layer_name(id_prefix), prefixed_key(id_prefix, &id))
             .build();

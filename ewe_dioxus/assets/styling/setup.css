@@ -1,0 +1,31 @@
+.setup-needed {
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+}
+
+.setup-card {
+    background: var(--color-white);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 24px 28px;
+    max-width: 40em;
+}
+
+.setup-card h2 {
+    margin-top: 0;
+    font-family: var(--font-heading);
+}
+
+.setup-card code {
+    font-family: var(--font-mono);
+    background: var(--color-surface-light);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
+.setup-card .setup-error {
+    color: var(--color-accent);
+}

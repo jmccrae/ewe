@@ -28,7 +28,7 @@ const DOCTYPE: &str =
 pub async fn synset_xml(id: String) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
     match resolve_synset(&id) {
-        Ok(Some(ms)) => match gen_lexicon_xml(std::slice::from_ref(&ms), crate::SETTINGS.get()) {
+        Ok(Some(ms)) => match gen_lexicon_xml(std::slice::from_ref(&ms), &crate::db::read_settings()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },
@@ -41,7 +41,7 @@ pub async fn synset_xml(id: String) -> Result<Response<Body>> {
 pub async fn lemma_xml(lemma: String) -> Result<Response<Body>> {
     match resolve_lemma_synsets(&lemma) {
         Ok(synsets) if synsets.is_empty() => Ok(not_found("Lemma not found")),
-        Ok(synsets) => match gen_lexicon_xml(&synsets, crate::SETTINGS.get()) {
+        Ok(synsets) => match gen_lexicon_xml(&synsets, &crate::db::read_settings()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },

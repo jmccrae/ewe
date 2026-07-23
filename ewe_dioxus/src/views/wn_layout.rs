@@ -1,8 +1,9 @@
 use dioxus::prelude::*;
 use crate::backend::api::get_branding;
+use crate::backend::setup::get_setup_status;
 use crate::components::{
     provide_display_options, provide_dirty_state, provide_panel_visibility, provide_project_name,
-    ProjectName, UnsavedChangesToast, ValidateButton,
+    ProjectName, SetupNeeded, UnsavedChangesToast, ValidateButton,
 };
 use crate::Route;
 
@@ -43,6 +44,15 @@ pub fn WNLayout() -> Element {
         }
         _ => (String::new(), String::new()),
     };
+    // `branding` is fetched here at the layout level - once, before it's known whether the app
+    // is even configured - so it's already stuck showing stale (pre-configure) project_name/
+    // footer by the time the desktop setup screen finishes. Unlike route content (which only
+    // starts loading *after* `configured` flips true, so it's never stale), this needs its own
+    // explicit restart alongside `setup_status`'s - see `SetupNeeded`'s doc comment.
+    let branding_loader = match &branding {
+        Ok(loaded) => Some(*loaded),
+        Err(_) => None,
+    };
 
     // Shares `project_name` with route views via context so each can compose its own
     // `document::Title` (e.g. "{lemma} - {project_name}") without fetching branding itself.
@@ -56,6 +66,26 @@ pub fn WNLayout() -> Element {
     // The logo/title is centered on the home page (OED-style hero treatment)
     // but stays left-aligned everywhere else, like a normal site header.
     let is_home = matches!(use_route::<Route>(), Route::Home {});
+
+    // Runs on every route (unlike the old SSR-only "Error loading lexicon" gate this replaced
+    // in `main.rs`'s `App()`), so it's a consistent, isomorphic screen no matter which page the
+    // user navigates to first. While `status` is still loading, optimistically render the
+    // normal routed content rather than flash the setup screen - on this app's fullstack setup,
+    // server functions like this are awaited during the initial render (same as `branding`
+    // above), so "still loading" is not expected to be user-visible in practice.
+    let setup_status = use_loader(get_setup_status);
+    let not_configured = match &setup_status {
+        Ok(loaded) if !loaded.loading() => Some(loaded.read().clone()).filter(|s| !s.configured),
+        _ => None,
+    };
+    // Passed down to `SetupNeeded` so the desktop configure flow can call `.restart()` on this
+    // exact loader once done - re-running `get_setup_status` and reactively re-rendering this
+    // component with the fresh result, without needing a real page reload (which isn't guaranteed
+    // to behave the same way in a desktop webview as it does in a browser).
+    let setup_status_loader = match &setup_status {
+        Ok(loaded) => Some(*loaded),
+        Err(_) => None,
+    };
 
     rsx! {
         div {
@@ -77,7 +107,13 @@ pub fn WNLayout() -> Element {
                     }
                 }
             }
-            Outlet::<Route> {}
+            if let (Some(status), Some(loader), Some(branding_loader)) =
+                (not_configured.clone(), setup_status_loader, branding_loader)
+            {
+                SetupNeeded { status, setup_status: loader, branding: branding_loader }
+            } else {
+                Outlet::<Route> {}
+            }
             footer {
                 class: "footer",
                 div {

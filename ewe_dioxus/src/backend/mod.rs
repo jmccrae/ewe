@@ -20,5 +20,7 @@ pub mod downloads;
 
 pub mod senses;
 
+pub mod setup;
+
 #[cfg(feature = "edit")]
 pub mod edit;

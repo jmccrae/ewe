@@ -7,12 +7,12 @@ use dioxus::prelude::*;
 
 #[get("/logo", headers : HeaderMap)]
 pub async fn logo() -> Result<Response<Body>> {
-    serve_settings_file(&crate::SETTINGS.get().logo, headers)
+    serve_settings_file(&crate::db::read_settings().logo, headers)
 }
 
 #[get("/theme.css", headers : HeaderMap)]
 pub async fn theme_css() -> Result<Response<Body>> {
-    serve_settings_file(&crate::SETTINGS.get().theme, headers)
+    serve_settings_file(&crate::db::read_settings().theme, headers)
 }
 
 /// Neither route was sending any caching headers, so the browser re-fetched

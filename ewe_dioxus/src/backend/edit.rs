@@ -20,38 +20,20 @@ use ewe_lib::validate::validate;
 use ewe_lib::progress::{NullProgress, Progress};
 #[cfg(feature = "server")]
 use chrono::{DateTime, Utc};
+#[cfg(feature = "server")]
+use crate::db::{read_lexicon, write_lexicon};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[allow(dead_code)]
 enum EweEditError {
-    #[error("Lexicon not available")]
-    LexiconUnavailable,
     #[error("{0}")]
     Automaton(String),
     #[error("Synset {0} not found after edit")]
     SynsetNotFoundAfterEdit(String),
     #[error("{0}")]
     Save(String),
-}
-
-/// Takes a write lock on the shared lexicon, or an error if it failed to load at startup.
-#[cfg(feature = "server")]
-fn write_lexicon() -> Result<std::sync::RwLockWriteGuard<'static, ReDBLexicon>> {
-    match crate::LEXICON.get() {
-        Some(lock) => Ok(lock.write().unwrap()),
-        None => Err(EweEditError::LexiconUnavailable.into()),
-    }
-}
-
-/// Takes a read lock on the shared lexicon, or an error if it failed to load at startup.
-#[cfg(feature = "server")]
-fn read_lexicon() -> Result<std::sync::RwLockReadGuard<'static, ReDBLexicon>> {
-    match crate::LEXICON.get() {
-        Some(lock) => Ok(lock.read().unwrap()),
-        None => Err(EweEditError::LexiconUnavailable.into()),
-    }
 }
 
 /// Runs every pending edit to `synset` (a definition change, example add/update/delete, and
@@ -360,7 +342,7 @@ pub struct SaveResult {
 /// them and let the user retry with `force: true` ("save anyway") if they still want to.
 #[post("/api/edit/save")]
 pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
-    let settings = crate::SETTINGS.get();
+    let settings = crate::db::read_settings();
     let source = settings.wordnet_source.clone().ok_or_else(|| {
         EweEditError::Save("No wordnet_source is configured - nowhere to save to".to_string())
     })?;
@@ -419,7 +401,7 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
 /// therefore closes, the old one), and only then renamed over the real path.
 #[post("/api/edit/revert")]
 pub async fn revert_lexicon() -> Result<()> {
-    let settings = crate::SETTINGS.get();
+    let settings = crate::db::read_settings();
     let source = settings.wordnet_source.clone().ok_or_else(|| {
         EweEditError::Save("No wordnet_source is configured - nothing to revert to".to_string())
     })?;
