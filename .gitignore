@@ -15,3 +15,6 @@ ewe_dioxus/semcor.db
 ewe_dioxus/settings.toml
 ewe_dioxus/downloads.toml
 ewe_dioxus/downloads/
+ewe_dioxus/corpus.db
+ewe_dioxus/settings.toml.tmp
+semcor.db
