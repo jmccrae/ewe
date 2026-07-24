@@ -2,7 +2,7 @@
 //! (see `../../openapi.yaml`), plus a Swagger UI page to browse it.
 //!
 //! The spec is embedded at compile time with `include_str!` rather than
-//! read from a configurable path like the logo/theme in `static_files.rs`:
+//! read from a configurable path like the logo/theme in `backend::api::get_branding`:
 //! it's a source artifact that describes this binary's own routes, not a
 //! deployment-time asset.
 

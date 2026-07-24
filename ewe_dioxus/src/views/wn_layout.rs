@@ -1,11 +1,11 @@
-use dioxus::prelude::*;
 use crate::backend::api::get_branding;
 use crate::backend::setup::get_setup_status;
 use crate::components::{
-    provide_display_options, provide_dirty_state, provide_panel_visibility, provide_project_name,
+    provide_dirty_state, provide_display_options, provide_panel_visibility, provide_project_name,
     ProjectName, SetupNeeded, UnsavedChangesToast, ValidateButton,
 };
 use crate::Route;
+use dioxus::prelude::*;
 
 /// The Downloads page and JSON API docs are web-facing features that don't apply to the
 /// single-user desktop app (which already has direct local access to its own data).
@@ -26,6 +26,53 @@ fn WebOnlyFooterLinks() -> Element {
     rsx! {}
 }
 
+/// HACK: reaches past `document::Style`'s public API to mutate a head element it created, using
+/// undocumented internals (a hardcoded DOM id, and `document::eval` running raw JS against
+/// `document.getElementById`) rather than anything Dioxus actually supports for this. It exists
+/// because `document::Style` (see `WNLayout` below) only ever inserts its content once - "Any
+/// updates to the props after the first render will not be reflected in the head", per its own
+/// doc comment - which is a real problem here: on desktop, there's no SSR pass to resolve
+/// `branding` before the first render, so that first render's `theme_css` is still `""`
+/// (loading), and without this workaround the tag would be permanently stuck empty. Every fix
+/// attempted that stayed within Dioxus's supported API (freezing the prop via `use_hook`, moving
+/// `document::Style` up into `main.rs`'s `App2` with its own loader) either failed to actually
+/// update the tag on desktop or otherwise didn't work - see git history on this file/`main.rs`
+/// around this comment for what was tried.
+///
+/// Consequences of the hack, worth knowing before touching this again:
+/// - Trips `document::Style`'s own "Changing the props of `Style {}` is not supported" console
+///   warning every time `theme_css` actually changes (the initial load-resolves transition, or a
+///   later desktop reconfigure) - harmless, but expected noise, not a sign something's broken.
+/// - Depends on `document::Style` continuing to render a real `<style id="...">` element with
+///   exactly the id we pass it, and on `document::eval` continuing to support arbitrary JS - both
+///   currently true (dioxus 0.7.9) but neither is a documented contract, so a Dioxus upgrade could
+///   silently break this (the id stops appearing, `textContent` writes go missing, etc.) without
+///   any compile error to flag it. If the theme ever stops updating after a dioxus bump, look here
+///   first.
+#[component]
+fn ThemeStyleUpdater(css: String) -> Element {
+    let last_css = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(css.clone())));
+    let mut last_css = last_css.borrow_mut();
+    if css != *last_css {
+        document::eval(&format!(
+            "var el = document.getElementById('ewe-theme-style'); if (el) el.textContent = \"{}\";",
+            escape_js_string(&css)
+        ));
+        *last_css = css;
+    }
+    rsx! {}
+}
+
+/// A minimal JS string-literal escaper, matching the one `dioxus_document` uses internally for
+/// its own `document::eval` calls (it isn't exposed publicly, so this is a small copy rather than
+/// pulling in `serde_json` as a dependency just for this one call site).
+fn escape_js_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('"', "\\\"")
+}
+
 #[component]
 pub fn WNLayout() -> Element {
     provide_display_options();
@@ -37,12 +84,17 @@ pub fn WNLayout() -> Element {
     // `crate::SETTINGS` here directly, since this component also runs in the
     // WASM client and `SETTINGS` is a server-only `Lazy`.
     let branding = use_loader(get_branding);
-    let (project_name, footer) = match &branding {
+    let (project_name, footer, logo_svg, theme_css) = match &branding {
         Ok(loaded) if !loaded.loading() => {
             let branding = loaded.read();
-            (branding.project_name.clone(), branding.footer.clone())
+            (
+                branding.project_name.clone(),
+                branding.footer.clone(),
+                branding.logo_svg.clone(),
+                branding.theme_css.clone(),
+            )
         }
-        _ => (String::new(), String::new()),
+        _ => (String::new(), String::new(), String::new(), String::new()),
     };
     // `branding` is fetched here at the layout level - once, before it's known whether the app
     // is even configured - so it's already stuck showing stale (pre-configure) project_name/
@@ -88,6 +140,8 @@ pub fn WNLayout() -> Element {
     };
 
     rsx! {
+        document::Style { id: "ewe-theme-style", "{theme_css}" }
+        ThemeStyleUpdater { css: theme_css.clone() }
         div {
             class: "container",
             div {
@@ -95,9 +149,7 @@ pub fn WNLayout() -> Element {
                 class: if is_home { "home-logo" },
                 span {
                     id: "logo-img",
-                    img {
-                        src: "/logo"
-                    }
+                    dangerous_inner_html: "{logo_svg}"
                 }
                 span {
                     id: "logo-title",

@@ -167,9 +167,9 @@ pub async fn configure_wordnet_source(path: String) -> Result<()> {
     // Force `LEXICON`/`CORPUS`/`SETTINGS` (all `Lazy`s) to have already run their initializer, if
     // they haven't already, *before* `run_configure` reaches its final swap. On desktop, the
     // webview loads its own shell from the `dioxus://` origin rather than asking the separate
-    // server process to render `App()` (see `main.rs::register_desktop_settings_assets`'s doc
-    // comment) - so `App()`'s own eager `CORPUS.get()` touch, which is what normally forces this
-    // on a web deployment's first page load, never runs there at all. Without this, the *first*
+    // server process to render `App()` - so `App()`'s own eager `CORPUS.get()` touch, which is
+    // what normally forces this on a web deployment's first page load, never runs there at all.
+    // Without this, the *first*
     // ever call to `CORPUS.get()` could end up being `run_configure`'s own
     // `*crate::CORPUS.get().write().unwrap() = corpus;` line - which would trigger `CORPUS`'s
     // initializer right then, rebuilding a corpus from whatever *old* settings were current at

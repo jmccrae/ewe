@@ -48,8 +48,7 @@ ewe_dioxus/
    │  ├─ rdf.rs              # Content negotiation, plus RDF/XML and Turtle export
    │  ├─ xml.rs               # WN-LMF XML export
    │  ├─ senses.rs            # Corpus lookups (where a sense occurs, KWIC concordance)
-   │  ├─ edit.rs               # `edit`-feature-only: apply/save/revert/validate endpoints
-   │  └─ static_files.rs       # Serves `/logo` and `/theme.css` from the paths in settings.toml
+   │  └─ edit.rs               # `edit`-feature-only: apply/save/revert/validate endpoints
    ├─ components/          # Shared UI components (synsets, relations, subcat frames, search, ...)
    └─ views/                # Route-level views (Home, ByLemma, BySynset, History) and the shared layout
 ```
@@ -85,8 +84,8 @@ footer = """
 | `id_prefix`         | string           | `"oewn"` | Prefix used for synset/entry ids in XML/RDF/Turtle export and in id lookups (e.g. `oewn-00001740-n`), and to derive the corpus's sense-key layer name (`{id_prefix}_key`). Set this to your own project's id prefix if you're not the Open English Wordnet. |
 | `contact_email`     | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon email="...">` attribute. |
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |
-| `logo`              | string           | `"assets/gwa.svg"` | Path to the logo image, read from disk on every request and served at `/logo`. |
-| `theme`             | string           | `"assets/styling/theme.css"` | Path to the theme stylesheet (colours and fonts as CSS custom properties — see [Styling](#styling) below), read from disk on every request and served at `/theme.css`. |
+| `logo`              | string           | `"assets/gwa.svg"` | Path to an SVG logo file, read from disk and inlined directly into the page. |
+| `theme`             | string           | `"assets/styling/theme.css"` | Path to the theme stylesheet (colours and fonts as CSS custom properties — see [Styling](#styling) below), read from disk and inlined into a `<style>` tag in the page. |
 | `project_name`      | string           | `"EWE Wordnet Editor"` | Shown as the `<h1>` next to the logo, and as the exported XML's `<Lexicon label="...">`. |
 | `tagline`           | string           | a generic tagline | Short line shown centered on the home page, below the search box. |
 | `intro`             | string           | generic intro HTML | Introduction HTML shown centered on the home page, below the tagline. |
@@ -94,7 +93,7 @@ footer = """
 | `disable_auto_reload` | bool           | `false` | If true, never rebuild `database`/`corpus_database` just because a source file is newer — they're still built if missing. Useful to skip a slow source scan on startup with very large sources. |
 | `lexicon_cache_mb`  | integer          | `128` | Bounds the lexicon database's in-memory page cache (redb otherwise defaults to 1GiB regardless of file size). |
 
-Because `logo` and `theme` are read from disk per-request rather than bundled at build time via Dioxus's `asset!` macro, you can rebrand a running deployment (swap the logo file, edit the theme file, or repoint either path in `settings.toml`) without rebuilding or restarting the app.
+Because `logo` and `theme` are read from disk (and inlined into the page) via the same server function that carries `project_name`/`footer` (`backend::api::get_branding`) rather than bundled at build time via Dioxus's `asset!` macro, you can rebrand a running deployment (swap the logo file, edit the theme file, or repoint either path in `settings.toml`) without rebuilding or restarting the app.
 
 `wordnet.db` and `corpus.db` are git-ignored — every developer builds their own copy locally.
 
@@ -154,7 +153,7 @@ dx build --platform web --release
 
 ## Styling
 
-Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`, `display_options.css`, `download_links.css`), linked via `document::Link` in `src/main.rs` and per-component `document::Style` includes. None of it hardcodes colours or fonts directly — every rule references a CSS custom property (`var(--color-...)`, `var(--font-...)`) defined in `assets/styling/theme.css`, which is served at the configurable `/theme.css` path described above. To restyle the site, either edit `theme.css` in place or point `theme` in `settings.toml` at a different file with the same custom properties defined. This project does not use Tailwind.
+Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`, `display_options.css`, `download_links.css`), bundled at build time and linked via `document::Link` in `src/main.rs`. None of it hardcodes colours or fonts directly — every rule references a CSS custom property (`var(--color-...)`, `var(--font-...)`) defined in the configurable `theme` stylesheet, which `src/views/wn_layout.rs` reads per-request and inlines into a `<style>` tag on every page (see [Configuration](#configuration-settingstoml) above). To restyle the site, either edit `theme.css` in place or point `theme` in `settings.toml` at a different file with the same custom properties defined. This project does not use Tailwind.
 
 ## Routes
 
@@ -196,7 +195,6 @@ These are also linked from the "Download As" links shown on the synset/lemma pag
 
 ### Assets
 
-- `/logo`, `/theme.css` — see [Configuration](#configuration-settingstoml) above.
 - `/downloads/{filename}` — serves a whitelisted release file from `downloads.toml` (see [Configuration](#configuration-settingstoml)); not available on `desktop`.
 
 ## Editing (the `edit` feature)

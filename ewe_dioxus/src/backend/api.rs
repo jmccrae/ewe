@@ -17,6 +17,20 @@ use crate::db::read_lexicon;
 pub struct Branding {
     pub project_name: String,
     pub footer: String,
+    /// The theme stylesheet's own contents, inlined into a `<style>` tag by
+    /// `views::wn_layout::WNLayout` rather than linked via `<link href="/theme.css">`. A `<link>`
+    /// is a plain static-resource URL the browser/webview caches on its own with no reactive
+    /// dependency on server state, so after `backend::setup::configure_wordnet_source`
+    /// hot-swaps `SETTINGS` to point `theme` at a different file, it kept showing whatever was
+    /// cached from before. Bundling the CSS text into this struct instead means it rides along
+    /// with `project_name`/`footer` through the same `Loader<Branding>`, which already correctly
+    /// refetches on `.restart()`.
+    pub theme_css: String,
+    /// The logo's own raw SVG markup, inlined directly into the page (via `dangerous_inner_html`)
+    /// instead of linked via `<img src="/logo">`, for the same reason as `theme_css` above.
+    /// Assumes `settings.toml`'s `logo` points at an SVG file, which is true of every logo
+    /// shipped with this app (`assets/gwa.svg`, `assets/english.svg`).
+    pub logo_svg: String,
 }
 
 #[get("/api/branding")]
@@ -25,6 +39,8 @@ pub async fn get_branding() -> Result<Branding> {
     Ok(Branding {
         project_name: settings.project_name.clone(),
         footer: settings.footer.clone(),
+        theme_css: std::fs::read_to_string(&settings.theme).unwrap_or_default(),
+        logo_svg: std::fs::read_to_string(&settings.logo).unwrap_or_default(),
     })
 }
 
