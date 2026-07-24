@@ -31,10 +31,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # dioxus-desktop's webview backend (wry/tao) links against these at build time.
+      # dioxus-desktop's webview backend (wry/tao) links against these at build time. libxdo-dev
+      # is needed for global keyboard shortcut support (global_hotkey) - happened to already be
+      # present on the machine this was first tested on, so its absence here wasn't caught until
+      # the very first real CI run: "rust-lld: error: unable to find library -lxdo".
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf
       - run: cargo install dioxus-cli --version 0.7.9 --locked
       - run: dx bundle --package ewe-dioxus --desktop --no-default-features --features "desktop edit" --release --package-types deb --package-types appimage
       - run: |
