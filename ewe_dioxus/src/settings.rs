@@ -60,6 +60,70 @@ fn default_lexicon_cache_mb() -> usize {
     128
 }
 
+/// Locates a file under the bundled `assets/assets/` folder (see `ASSETS_FOLDER`'s doc comment in
+/// `main.rs`) in a real installed desktop app, where it isn't necessarily anywhere near a bare
+/// relative path or even the running executable's own directory.
+///
+/// `Asset::resolve()` (manganis's own API for this) turned out not to be enough on its own -
+/// confirmed live via `strace` on a real `.deb` install: it resolves to an absolute `/assets/...`
+/// path (`dioxus_cli_config::base_path()`'s `DIOXUS_ASSET_ROOT` env var isn't set for a plain
+/// installed binary, so it falls back to treating `/` as the bundle root), which doesn't exist at
+/// all on a real filesystem - Linux's `.deb`/`.rpm` packaging splits the executable
+/// (`<prefix>/bin/ewe`) from its resources (`<prefix>/lib/<AppName>/assets/`), two directories
+/// that aren't siblings and don't share a fixed, predictable name for `<AppName>` we can hardcode.
+/// So this tries `Asset::resolve()` first (in case a future dx release fixes it, or it's simply
+/// correct on a platform this couldn't be tested on), then falls back to searching a few
+/// directories up from the running executable's own location for a `lib/*/assets/assets/`
+/// (Linux), `Resources/assets/assets/` (macOS `.app`), or sibling `assets/assets/` (Windows
+/// `.msi`, AppImage, and a raw `dx bundle`/`dx serve` build output, which all keep the executable
+/// and its resources together) - covering every `dx bundle --package-types` this project ships
+/// without needing to know any bundler's internal naming choices in advance.
+#[cfg(feature = "desktop")]
+fn resolve_bundled_asset(relative_path: &str) -> Option<std::path::PathBuf> {
+    let via_asset_resolve = crate::ASSETS_FOLDER.resolve().join(relative_path);
+    if via_asset_resolve.is_file() {
+        return Some(via_asset_resolve);
+    }
+
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?.to_path_buf();
+    for _ in 0..4 {
+        for candidate in [
+            dir.join("assets").join("assets").join(relative_path),
+            dir.join("Resources")
+                .join("assets")
+                .join("assets")
+                .join(relative_path),
+        ] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir(dir.join("lib")) {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join("assets").join("assets").join(relative_path);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => break,
+        }
+    }
+    None
+}
+
+/// See `resolve_bundled_asset`'s doc comment.
+#[cfg(feature = "desktop")]
+fn default_logo() -> String {
+    resolve_bundled_asset("gwa.svg")
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "assets/assets/gwa.svg".to_string())
+}
+
+#[cfg(not(feature = "desktop"))]
 fn default_logo() -> String {
     "assets/gwa.svg".to_string()
 }
@@ -68,6 +132,15 @@ fn default_corpus_database() -> String {
     "corpus.db".to_string()
 }
 
+/// See `resolve_bundled_asset`'s doc comment.
+#[cfg(feature = "desktop")]
+fn default_theme() -> String {
+    resolve_bundled_asset("styling/theme.css")
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "assets/assets/styling/theme.css".to_string())
+}
+
+#[cfg(not(feature = "desktop"))]
 fn default_theme() -> String {
     "assets/styling/theme.css".to_string()
 }

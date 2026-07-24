@@ -4,7 +4,7 @@ use ewe_lib::wordnet::{Lexicon, MemberSynset, SynsetId};
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use std::collections::BTreeSet;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use crate::db::read_lexicon;
 
 /// The branding fields configurable via `settings.toml` that need to reach
@@ -33,7 +33,14 @@ pub struct Branding {
     pub logo_svg: String,
 }
 
-#[get("/api/branding")]
+// A desktop build embeds the lexicon/settings state directly in-process (see this crate's
+// `main.rs`), so it doesn't need - and can't use - a real HTTP round-trip for any of these:
+// `#[cfg_attr]` skips the `#[get]`/`#[post]` macro there entirely, leaving a plain async fn that
+// view/component code (already only ever calling these isomorphically, e.g. via `use_loader`)
+// invokes directly. `web`/`server` still go through the macro as normal - Dioxus's own internal
+// `#[cfg(feature = "server")]` split inside its expansion already distinguishes the WASM
+// client's RPC stub from the real server-side handler, so this crate never needs to.
+#[cfg_attr(not(feature = "desktop"), get("/api/branding"))]
 pub async fn get_branding() -> Result<Branding> {
     let settings = crate::db::read_settings();
     Ok(Branding {
@@ -55,7 +62,7 @@ pub struct HomeInfo {
     pub n_entries: usize,
 }
 
-#[get("/api/home")]
+#[cfg_attr(not(feature = "desktop"), get("/api/home"))]
 pub async fn get_home_info() -> Result<HomeInfo> {
     let settings = crate::db::read_settings();
     let tagline = settings.tagline.clone();
@@ -70,7 +77,7 @@ pub async fn get_home_info() -> Result<HomeInfo> {
 }
 
 /// A uniformly random synset id, for the home page's "Random synset" button.
-#[get("/api/random_synset")]
+#[cfg_attr(not(feature = "desktop"), get("/api/random_synset"))]
 pub async fn get_random_synset() -> Result<Option<SynsetId>> {
     let lexicon = read_lexicon()?;
     Ok(lexicon.random_synset_id()?)
@@ -106,7 +113,7 @@ fn strip_id_prefix<'a>(query: &'a str, id_prefix: &str) -> &'a str {
     }
 }
 
-#[get("/api/by_lemma/{lemma}")]
+#[cfg_attr(not(feature = "desktop"), get("/api/by_lemma/{lemma}"))]
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     let lexicon = read_lexicon()?;
     let lemmas = lexicon.entry_by_lemma(&lemma)?;
@@ -117,7 +124,7 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     Ok(synset_ids)
 }
 
-#[get("/api/lemma/{lemma}")]
+#[cfg_attr(not(feature = "desktop"), get("/api/lemma/{lemma}"))]
 pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     let lexicon = read_lexicon()?;
     let entries = lexicon.entry_by_lemma(&lemma)?;
@@ -135,7 +142,7 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     Ok(synsets)
 }
 
-#[get("/api/autocomplete/{query}?max_results")]
+#[cfg_attr(not(feature = "desktop"), get("/api/autocomplete/{query}?max_results"))]
 pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
     let lexicon = read_lexicon()?;
@@ -177,7 +184,7 @@ pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<V
     Ok(results)
 }
 
-#[get("/api/synset/{id}")]
+#[cfg_attr(not(feature = "desktop"), get("/api/synset/{id}"))]
 pub async fn get_synset(id: SynsetId) -> Result<Option<MemberSynset>> {
     let lexicon = read_lexicon()?;
     let synset = lexicon.synset_by_id(&id)?;

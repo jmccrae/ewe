@@ -4,6 +4,9 @@
 //! automaton scripts.
 //!
 //! Only compiled when the `edit` feature is enabled (see `ewe_dioxus/Cargo.toml`).
+//!
+//! Every function here is `#[cfg_attr(not(feature = "desktop"), get(...)/post(...))]` rather than
+//! a plain `#[get]`/`#[post]` - see `backend::setup`'s module doc comment for why.
 
 use dioxus::prelude::*;
 #[allow(unused_imports)]
@@ -12,15 +15,15 @@ use ewe_lib::automaton::{apply_automaton, changelog_recent, has_unsaved_changes,
 use ewe_lib::change_manager::ChangeList;
 #[allow(unused_imports)]
 use ewe_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::wordnet::ReDBLexicon;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::validate::validate;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::progress::{NullProgress, Progress};
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use chrono::{DateTime, Utc};
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use crate::db::{read_lexicon, write_lexicon};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -45,7 +48,7 @@ enum EweEditError {
 /// from - notably, `UpdateExample`/`DeleteExample` reference an example's original 1-indexed
 /// position, and deletes must run in descending-number order so an earlier delete doesn't shift
 /// the position a later action expects.
-#[post("/api/edit/apply")]
+#[cfg_attr(not(feature = "desktop"), post("/api/edit/apply"))]
 pub async fn apply_edits(synset: SynsetId, actions: Vec<Action>) -> Result<MemberSynset> {
     let mut lexicon = write_lexicon()?;
 
@@ -75,7 +78,7 @@ pub struct SynsetCandidate {
 
 /// Looks up synsets by lemma prefix (expanded to every synset each matching lemma belongs to)
 /// or by synset/ILI id prefix, for the relation editor's target picker.
-#[get("/api/edit/search_synsets/{query}?max_results")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/search_synsets/{query}?max_results"))]
 pub async fn search_synsets(
     query: String,
     max_results: Option<usize>,
@@ -129,7 +132,7 @@ pub struct AddSynsetMetadata {
     pub frames: Vec<(String, String)>,
 }
 
-#[get("/api/edit/add_synset_metadata")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/add_synset_metadata"))]
 pub async fn add_synset_metadata() -> Result<AddSynsetMetadata> {
     let lexicon = read_lexicon()?;
     let mut lexfiles: Vec<String> = lexicon
@@ -144,7 +147,7 @@ pub async fn add_synset_metadata() -> Result<AddSynsetMetadata> {
 /// Creates a new synset (and an entry for each lemma) and returns it, so the client can
 /// navigate straight to its page. `subcats`, if given, must be the same length as `lemmas`
 /// (each lemma's applicable frame keys) - only meaningful for verb lemmas.
-#[post("/api/edit/add_synset")]
+#[cfg_attr(not(feature = "desktop"), post("/api/edit/add_synset"))]
 pub async fn add_synset(
     definition: String,
     lexfile: String,
@@ -178,7 +181,7 @@ pub async fn add_synset(
 /// path) or, if `superseded_by` is omitted, removing it outright with no trail - appropriate for
 /// a synset a user just created through this same UI and immediately decided against. Returns
 /// the id of the synset the client should navigate to next (`superseded_by`, if given).
-#[post("/api/edit/delete_synset")]
+#[cfg_attr(not(feature = "desktop"), post("/api/edit/delete_synset"))]
 pub async fn delete_synset(
     synset: SynsetId,
     reason: String,
@@ -196,7 +199,7 @@ pub async fn delete_synset(
     Ok(navigate_to)
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 fn format_timestamp(timestamp_ms: u64) -> String {
     DateTime::<Utc>::from_timestamp_millis(timestamp_ms as i64)
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
@@ -215,7 +218,7 @@ pub struct ChangeLogEntryView {
 
 /// The `limit` most recent change log entries, newest first. `before` (exclusive), if given,
 /// paginates further back than a previous page's oldest id - see `History`'s "Load more".
-#[get("/api/edit/changelog?limit&before")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/changelog?limit&before"))]
 pub async fn get_changelog(
     limit: Option<usize>,
     before: Option<u64>,
@@ -235,7 +238,7 @@ pub async fn get_changelog(
 
 /// Whether there are edits not yet reflected in `settings.wordnet_source` - see
 /// `automaton::has_unsaved_changes`. Used to drive the "unsaved changes" toast.
-#[get("/api/edit/dirty")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/dirty"))]
 pub async fn get_dirty() -> Result<bool> {
     let lexicon = read_lexicon()?;
     has_unsaved_changes(&*lexicon).map_err(|e| EweEditError::Automaton(e).into())
@@ -245,7 +248,7 @@ pub async fn get_dirty() -> Result<bool> {
 /// polled by `EditProgressBar` via `get_progress`. A single slot is enough since this is a
 /// single-user editor and save/validate both hold the lexicon lock anyway, so two can't
 /// meaningfully run at once.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 static PROGRESS: std::sync::RwLock<Option<ProgressStatus>> = std::sync::RwLock::new(None);
 
 /// A snapshot of a long-running save/validate operation's progress.
@@ -260,20 +263,20 @@ pub struct ProgressStatus {
 /// poll can show a live bar. `validate` and `Lexicon::save` already call `start`/`inc`/`finish` at
 /// the right points - this just gives those calls somewhere to go, instead of nowhere
 /// (`NullProgress`) or stderr (`LoggingProgress`).
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 struct SharedProgress {
     operation: &'static str,
     current: u64,
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl SharedProgress {
     fn new(operation: &'static str) -> Self {
         Self { operation, current: 0 }
     }
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl Progress for SharedProgress {
     fn start(&mut self, total: u64) {
         self.current = 0;
@@ -296,7 +299,7 @@ impl Progress for SharedProgress {
 }
 
 /// The current save/validate progress, if either is running.
-#[get("/api/edit/progress")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/progress"))]
 pub async fn get_progress() -> Result<Option<ProgressStatus>> {
     Ok(PROGRESS.read().unwrap().clone())
 }
@@ -308,7 +311,7 @@ pub async fn get_progress() -> Result<Option<ProgressStatus>> {
 /// on a blocking thread (`spawn_blocking`) rather than inline - otherwise it would occupy the
 /// async runtime's worker thread for that whole time, and a concurrent `GET /api/edit/progress`
 /// poll (which needs no lock this call holds) could end up waiting behind it for no reason.
-#[get("/api/edit/validate")]
+#[cfg_attr(not(feature = "desktop"), get("/api/edit/validate"))]
 pub async fn validate_lexicon() -> Result<Vec<String>> {
     let outcome = tokio::task::spawn_blocking(|| -> Result<Vec<String>> {
         let lexicon = read_lexicon()?;
@@ -340,7 +343,7 @@ pub struct SaveResult {
 /// `english-wordnet` source tree in a normal deployment). Validates first: if there are errors
 /// and `force` is false, returns them without writing anything - the client is expected to show
 /// them and let the user retry with `force: true` ("save anyway") if they still want to.
-#[post("/api/edit/save")]
+#[cfg_attr(not(feature = "desktop"), post("/api/edit/save"))]
 pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
     let settings = crate::db::read_settings();
     let source = settings.wordnet_source.clone().ok_or_else(|| {
@@ -399,7 +402,7 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
 /// handle would risk corrupting it. So the fresh database is built at a temp path first (while
 /// the old one keeps serving other requests), swapped into the shared lock (which drops, and
 /// therefore closes, the old one), and only then renamed over the real path.
-#[post("/api/edit/revert")]
+#[cfg_attr(not(feature = "desktop"), post("/api/edit/revert"))]
 pub async fn revert_lexicon() -> Result<()> {
     let settings = crate::db::read_settings();
     let source = settings.wordnet_source.clone().ok_or_else(|| {

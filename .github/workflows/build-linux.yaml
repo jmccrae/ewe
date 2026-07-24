@@ -22,3 +22,29 @@ jobs:
           files: ewe-cli-linux
           prerelease: false
           generate_release_notes: true
+
+  # Builds the desktop app as a single self-contained binary (see ewe_dioxus/src/backend/setup.rs
+  # for why `desktop` doesn't need a separate server process) and packages it as a .deb and an
+  # AppImage (the latter runs on any distro, no install step needed).
+  build_desktop_installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # dioxus-desktop's webview backend (wry/tao) links against these at build time.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: cargo install dioxus-cli --version 0.7.9 --locked
+      - run: dx bundle --package ewe-dioxus --desktop --no-default-features --features "desktop edit" --release --package-types deb --package-types appimage
+      - run: |
+          cp target/dx/ewe/bundle/linux/deb/*.deb ewe-linux.deb
+          cp target/dx/ewe/bundle/linux/appimage/*.AppImage ewe-linux.AppImage
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ewe-linux.deb
+            ewe-linux.AppImage
+          prerelease: false
+          generate_release_notes: true

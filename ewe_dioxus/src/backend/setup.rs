@@ -1,8 +1,18 @@
 //! Detects whether the app has a working Wordnet database, and (on desktop) lets the user
 //! configure one interactively instead of hand-editing `settings.toml`.
+//!
+//! Every `#[get]`/`#[post]` function in this file (and the rest of `backend/`) is written as
+//! `#[cfg_attr(not(feature = "desktop"), get("..."))]` rather than a plain `#[get("...")]`. A
+//! `desktop` build is a single self-contained binary with no separate server process at all -
+//! `cfg_attr` skips the macro there entirely, leaving a plain `async fn` that view/component code
+//! (already only ever calling these isomorphically) invokes directly, in-process. `web`/`server`
+//! keep going through the macro as normal, and Dioxus's own internal `#[cfg(feature = "server")]`
+//! split inside its expansion still correctly tells the WASM client's RPC stub apart from the
+//! real server-side handler between those two - `desktop` is the only case this crate has to
+//! handle itself.
 
 use dioxus::prelude::*;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::wordnet::ReDBLexicon;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
@@ -17,7 +27,7 @@ pub struct SetupStatus {
     pub wordnet_source: Option<String>,
 }
 
-#[get("/api/setup_status")]
+#[cfg_attr(not(feature = "desktop"), get("/api/setup_status"))]
 pub async fn get_setup_status() -> Result<SetupStatus> {
     let settings = crate::db::read_settings();
     Ok(SetupStatus {
@@ -54,28 +64,28 @@ pub struct SetupProgress {
 /// The currently running load's progress, or `None` if nothing is running - either because
 /// nothing has been configured yet, or because the last configure attempt has already finished
 /// (check `get_setup_error` to tell success from failure).
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 static SETUP_PROGRESS: std::sync::RwLock<Option<SetupProgress>> = std::sync::RwLock::new(None);
 
 /// The error from the most recently *finished* configure attempt, if it failed. Cleared at the
 /// start of every new `configure_wordnet_source` call, so it only ever reflects the latest
 /// attempt.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 static SETUP_ERROR: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 struct SharedSetupProgress {
     current: u64,
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl SharedSetupProgress {
     fn new() -> Self {
         Self { current: 0 }
     }
 }
 
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl ewe_lib::progress::Progress for SharedSetupProgress {
     fn start(&mut self, total: u64) {
         self.current = 0;
@@ -104,7 +114,7 @@ impl ewe_lib::progress::Progress for SharedSetupProgress {
 /// Polled by the desktop setup screen while a `configure_wordnet_source` load is running.
 /// `None` means nothing is currently running.
 #[cfg(feature = "edit")]
-#[get("/api/setup/progress")]
+#[cfg_attr(not(feature = "desktop"), get("/api/setup/progress"))]
 pub async fn get_setup_progress() -> Result<Option<SetupProgress>> {
     Ok(SETUP_PROGRESS.read().unwrap().clone())
 }
@@ -114,7 +124,7 @@ pub async fn get_setup_progress() -> Result<Option<SetupProgress>> {
 /// tell success from failure, since that request itself returns almost immediately - see
 /// `configure_wordnet_source`'s doc comment for why.
 #[cfg(feature = "edit")]
-#[get("/api/setup/error")]
+#[cfg_attr(not(feature = "desktop"), get("/api/setup/error"))]
 pub async fn get_setup_error() -> Result<Option<String>> {
     Ok(SETUP_ERROR.read().unwrap().clone())
 }
@@ -152,32 +162,33 @@ pub async fn get_setup_error() -> Result<Option<String>> {
 /// configuration, not the app's - overwriting the app's local copy with it on every pick isn't
 /// something this flow should be doing on the user's behalf.
 ///
-/// Gated on `edit` (not `desktop`): the desktop *client* binary never has `server` itself (see
-/// `main.rs`'s `LEXICON`/`fn main` doc comments) - it calls this over HTTP against a
-/// separately-built server binary, and the established workflow for testing desktop already
-/// requires passing `--features edit` explicitly to that server binary (there's no equivalent
-/// requirement to pass `--features desktop` to it). Gating on `desktop` here would risk this
-/// route silently not existing on that server binary. `edit` still satisfies the actual
-/// security requirement - letting arbitrary HTTP clients repoint the server at any local
-/// filesystem path would be a real vulnerability on a public deployment, and the public,
-/// read-only en-word.net web build already never compiles with `edit` on.
+/// Gated on `edit` (not `desktop`): letting arbitrary HTTP clients repoint the server at any
+/// local filesystem path would be a real vulnerability on a public deployment - `edit` is what
+/// actually captures "trusted, single-user" here (`desktop` already implies it, and the public,
+/// read-only en-word.net web build never compiles with `edit` on).
+///
+/// A `desktop` build never actually sends this over HTTP at all: `#[cfg_attr]` below skips the
+/// `#[post(...)]` macro there entirely, so `components::setup_needed`'s desktop button calls this
+/// as a plain in-process async fn, same as every other endpoint in `backend/` - see this file's
+/// module doc comment.
 #[cfg(feature = "edit")]
-#[post("/api/setup/configure_wordnet_source")]
+#[cfg_attr(not(feature = "desktop"), post("/api/setup/configure_wordnet_source"))]
 pub async fn configure_wordnet_source(path: String) -> Result<()> {
-    // Force `LEXICON`/`CORPUS`/`SETTINGS` (all `Lazy`s) to have already run their initializer, if
-    // they haven't already, *before* `run_configure` reaches its final swap. On desktop, the
-    // webview loads its own shell from the `dioxus://` origin rather than asking the separate
-    // server process to render `App()` - so `App()`'s own eager `CORPUS.get()` touch, which is
-    // what normally forces this on a web deployment's first page load, never runs there at all.
-    // Without this, the *first*
-    // ever call to `CORPUS.get()` could end up being `run_configure`'s own
+    // Belt-and-braces: force `LEXICON`/`CORPUS`/`SETTINGS` (all `Lazy`s) to have already run
+    // their initializer, if they haven't already, *before* `run_configure` reaches its final
+    // swap. `main.rs`'s `App()` already does this eagerly at startup on both `server` and
+    // `desktop` builds, so in practice this is always a no-op by the time a user can reach this
+    // button - but if it somehow weren't, the alternative is bad: the *first* ever call to
+    // `CORPUS.get()` could end up being `run_configure`'s own
     // `*crate::CORPUS.get().write().unwrap() = corpus;` line - which would trigger `CORPUS`'s
     // initializer right then, rebuilding a corpus from whatever *old* settings were current at
     // that moment (not the ones just configured, since `SETTINGS` itself is swapped after
     // `CORPUS`), immediately followed by the assignment silently discarding that wasted result.
-    // Confirmed live: this produced a spurious "Failed to open corpus: Layer ... does not exist"
-    // from a completely unrelated, empty corpus - identical wording to a real corpus failure,
-    // just from a different, throwaway `open_corpus` call a moment after the real one succeeded.
+    // Confirmed live (before `desktop` embedded this state in-process, back when the desktop
+    // webview's shell never triggered a real `App()` render at all): this produced a spurious
+    // "Failed to open corpus: Layer ... does not exist" from a completely unrelated, empty
+    // corpus - identical wording to a real corpus failure, just from a different, throwaway
+    // `open_corpus` call a moment after the real one succeeded.
     let _ = crate::LEXICON.get();
     let _ = crate::CORPUS.get();
     let _ = crate::SETTINGS.get();
@@ -228,7 +239,7 @@ pub async fn configure_wordnet_source(path: String) -> Result<()> {
 /// lexicon, best-effort rebuild the corpus, then hot-swap all three into the running server -
 /// see `configure_wordnet_source`'s doc comment for why this deliberately doesn't persist
 /// anything to disk itself.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 async fn run_configure(new_settings: crate::settings::EweSettings) -> Result<(), String> {
     let lexicon = {
         let settings_for_load = new_settings.clone();

@@ -1,4 +1,23 @@
 [application]
+name = "EWE Wordnet Editor"
+
+[bundle]
+identifier = "ie.universityofgalway.ewe-dioxus"
+publisher = "University of Galway"
+icon = [
+    "assets/icons/32x32.png",
+    "assets/icons/128x128.png",
+    "assets/icons/128x128@2x.png",
+    "assets/icons/256x256.png",
+    "assets/icons/512x512.png",
+]
+short_description = "A free, open lexical database browser and editor"
+long_description = """
+EWE is a browser and editor for Wordnet-style lexical databases (definitions, examples, \
+lemmas, and semantic relations), including the Open English Wordnet.
+"""
+category = "Education"
+copyright = "Copyright © University of Galway"
 
 [web.app]
 

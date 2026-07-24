@@ -2,14 +2,17 @@
 // need dioxus
 use dioxus::prelude::*;
 
-use dioxus_fullstack::Lazy;
-#[cfg(feature = "server")]
+// `server` needs these to run the real fullstack HTTP server; `desktop` needs them too, since a
+// desktop build embeds the exact same lexicon/corpus/settings state in-process (see the
+// `cfg_attr(not(feature = "desktop"), get(...)/post(...))` pattern throughout `backend/`) rather
+// than talking to a separately-running server binary over HTTP.
+#[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::wordnet::ReDBLexicon;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use std::sync::RwLock;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use teanga::disk_corpus::RedbDb;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use teanga::DiskCorpus;
 #[cfg(not(feature = "desktop"))]
 use views::Downloads;
@@ -20,18 +23,18 @@ mod backend;
 /// Define a components module that contains all shared components for our app.
 mod components;
 /// Opening (and automatically rebuilding, if stale) the lexicon database.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 mod db;
 /// Downloads page configuration (`downloads.toml`)
 mod downloads_config;
 /// The settings file
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 mod settings;
 /// Define a views module that contains the UI for all Layouts and Routes for our app.
 mod views;
 
 use downloads_config::DownloadsConfig;
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 use settings::EweSettings;
 
 /// The Route enum is used to define the structure of internal routes in our app. All route enums need to derive
@@ -71,30 +74,72 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 
+// The app's own default `logo`/`theme` (`settings::default_logo`/`default_theme`) live under
+// `assets/`, not named individually via their own `asset!()` call like `FAVICON`/`MAIN_CSS` above -
+// `dx bundle` otherwise only ships whatever's explicitly named in an `asset!()` call, so they'd
+// silently be missing from an installed app even though they work fine in a `dx serve` checkout
+// (which just reads straight off the source tree). Bundling the whole folder as one asset (rather
+// than listing files individually, which `[bundle] resources` in `Dioxus.toml` doesn't do
+// recursively anyway) keeps every file's original name and relative layout intact
+// (`with_hash_suffix(false)`) - `settings::default_logo`/`default_theme` resolve their path
+// against `ASSETS_FOLDER.resolve()` (see their doc comments) rather than a bare relative string,
+// since the bundled copy doesn't land at the same path a relative `"assets/..."` string would
+// mean on a plain checkout (`Asset::resolve()` knows how to find it either way). Desktop-only:
+// `web`/`server` read `assets/` directly off disk from wherever the process is running, so
+// bundling it into the binary doesn't apply there.
+#[cfg(feature = "desktop")]
+#[used]
+pub(crate) static ASSETS_FOLDER: Asset =
+    asset!("/assets", AssetOptions::folder().with_hash_suffix(false));
+
+/// A minimal, always-synchronous stand-in for `dioxus_fullstack::Lazy`, used below for state that
+/// needs to initialize on `desktop` too (not just `server`). `dioxus_fullstack::Lazy`'s own
+/// blocking-initialization path hard-`unimplemented!()`s unless dioxus's own "server" Cargo
+/// feature is active (see its `lazy.rs` source) - true for this crate's `server` feature, never
+/// true for `desktop` alone, so touching a `dioxus_fullstack::Lazy` on a desktop-only build panics
+/// with "Lazy initialization is only supported with tokio and threads enabled." at first access.
+/// None of `SETTINGS`/`LEXICON`/`CORPUS`/`DOWNLOADS` below actually do anything asynchronous
+/// (they're synchronous disk I/O wrapped in `async move` purely to match `Lazy::new`'s signature),
+/// so a plain `OnceLock` with a genuinely synchronous initializer sidesteps the problem entirely
+/// instead of needing dioxus's own runtime machinery at all.
+struct SyncLazy<T: 'static> {
+    cell: std::sync::OnceLock<T>,
+    init: fn() -> T,
+}
+
+impl<T: 'static> SyncLazy<T> {
+    const fn new(init: fn() -> T) -> Self {
+        Self { cell: std::sync::OnceLock::new(), init }
+    }
+
+    fn get(&self) -> &T {
+        self.cell.get_or_init(self.init)
+    }
+}
+
 // Wrapped in a `RwLock` (like `LEXICON` below) so `backend::setup::configure_wordnet_source`
 // can hot-swap in a whole new settings file - project name, branding, id_prefix, and all -
 // picked up from a folder the desktop user chooses, without needing to restart the server.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 #[allow(dead_code)]
-static SETTINGS: Lazy<RwLock<settings::EweSettings>> = Lazy::new(|| async move {
+static SETTINGS: SyncLazy<RwLock<settings::EweSettings>> = SyncLazy::new(|| {
     let settings = if std::path::Path::new("settings.toml").exists() {
         EweSettings::load("settings.toml").expect("Failed to load settings")
     } else {
         EweSettings::default()
     };
-    dioxus::Ok(RwLock::new(settings))
+    RwLock::new(settings)
 });
 
 /// Downloads are entirely optional: if `downloads.toml` doesn't exist, the
 /// Downloads page just has nothing to list rather than erroring.
 #[allow(dead_code)]
-static DOWNLOADS: Lazy<DownloadsConfig> = Lazy::new(|| async move {
-    let downloads = if std::path::Path::new("downloads.toml").exists() {
+static DOWNLOADS: SyncLazy<DownloadsConfig> = SyncLazy::new(|| {
+    if std::path::Path::new("downloads.toml").exists() {
         DownloadsConfig::load("downloads.toml").expect("Failed to load downloads.toml")
     } else {
         DownloadsConfig::default()
-    };
-    dioxus::Ok(downloads)
+    }
 });
 
 // Wrapped in a `RwLock` (rather than the plain `ReDBLexicon` reads elsewhere use) so that
@@ -104,8 +149,8 @@ static DOWNLOADS: Lazy<DownloadsConfig> = Lazy::new(|| async move {
 // to open at startup isn't a permanent dead end: `backend::setup::configure_wordnet_source` can
 // hot-swap a freshly-opened lexicon into the `Some` slot later, without ever needing to
 // re-touch this `Lazy` itself (which only ever initializes once).
-#[cfg(feature = "server")]
-static LEXICON: Lazy<RwLock<Option<ReDBLexicon>>> = Lazy::new(|| async move {
+#[cfg(any(feature = "server", feature = "desktop"))]
+static LEXICON: SyncLazy<RwLock<Option<ReDBLexicon>>> = SyncLazy::new(|| {
     let settings = SETTINGS.get().read().unwrap();
     let lexicon = if db::is_unconfigured_lexicon(&settings) {
         // Nothing set up yet (e.g. a desktop app launched fresh, with no persisted settings.toml
@@ -120,15 +165,15 @@ static LEXICON: Lazy<RwLock<Option<ReDBLexicon>>> = Lazy::new(|| async move {
             }
         }
     };
-    dioxus::Ok(RwLock::new(lexicon))
+    RwLock::new(lexicon)
 });
 
 // Wrapped in a `RwLock<Option<...>>` for the same reason as `LEXICON` - the corpus (like the
 // lexicon) is reloaded from a freshly-picked project's `corpus_source`/`corpus_database` by
 // `backend::setup::configure_wordnet_source`. A missing/failed corpus is non-fatal either way
 // (it's only used to show usage examples), hence the `Option`.
-#[cfg(feature = "server")]
-static CORPUS: Lazy<RwLock<Option<DiskCorpus<RedbDb>>>> = Lazy::new(|| async move {
+#[cfg(any(feature = "server", feature = "desktop"))]
+static CORPUS: SyncLazy<RwLock<Option<DiskCorpus<RedbDb>>>> = SyncLazy::new(|| {
     let settings = SETTINGS.get().read().unwrap();
     let corpus = if db::is_unconfigured_corpus(&settings) {
         // See `LEXICON`'s equivalent check just above - nothing set up yet, not a failure.
@@ -142,7 +187,7 @@ static CORPUS: Lazy<RwLock<Option<DiskCorpus<RedbDb>>>> = Lazy::new(|| async mov
             }
         }
     };
-    dioxus::Ok(RwLock::new(corpus))
+    RwLock::new(corpus)
 });
 
 fn main() {
@@ -216,16 +261,20 @@ async fn strip_referer_from_export_links(
 /// that takes some props and returns an Element. In this case, App takes no props because it is the root of our app.
 ///
 /// Components should be annotated with `#[component]` to support props, better error messages, and autocomplete
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 #[component]
 fn App() -> Element {
     // Eagerly load the corpus alongside the lexicon. It's supplementary
-    // (used for showing usages), so a failure is logged but doesn't block the app.
+    // (used for showing usages), so a failure is logged but doesn't block the app. Also runs on
+    // desktop now - a desktop build embeds this same state in-process (see `backend::setup`'s
+    // `cfg_attr` doc comment) rather than talking to a separately-running server, so this is the
+    // first point at which anything actually forces `LEXICON`/`CORPUS`/`SETTINGS`'s `Lazy`
+    // initializers to run there too.
     CORPUS.get();
     App2()
 }
 
-#[cfg(not(feature = "server"))]
+#[cfg(not(any(feature = "server", feature = "desktop")))]
 #[component]
 fn App() -> Element {
     App2()

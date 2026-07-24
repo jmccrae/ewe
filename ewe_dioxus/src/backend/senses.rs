@@ -86,7 +86,7 @@ pub struct ConcordancePage {
 /// won't be found here even though the sense is technically present. Once a
 /// document *is* found this way, every occurrence within it - combined keys
 /// included - is still picked up correctly by the per-document scan below.
-#[cfg(feature = "server")]
+#[cfg(any(feature = "server", feature = "desktop"))]
 #[allow(dead_code)]
 async fn all_concordance_lines(id: SynsetId) -> Result<Vec<ConcordanceLine>> {
     let corpus_guard = crate::db::read_corpus();
@@ -137,7 +137,7 @@ async fn all_concordance_lines(id: SynsetId) -> Result<Vec<ConcordanceLine>> {
 /// `page` is 0-indexed; out-of-range pages clamp to the last page rather
 /// than erroring.
 #[allow(dead_code)]
-#[get("/api/senses/{id}/concordance?page")]
+#[cfg_attr(not(feature = "desktop"), get("/api/senses/{id}/concordance?page"))]
 pub async fn get_sense_concordance(id: SynsetId, page: usize) -> Result<ConcordancePage> {
     let all = all_concordance_lines(id).await?;
     let total = all.len();
@@ -160,7 +160,7 @@ pub async fn get_sense_concordance(id: SynsetId, page: usize) -> Result<Concorda
 /// so it can under-count, but a positive result always means real
 /// annotations exist.
 #[allow(dead_code)]
-#[get("/api/senses/{id}/count")]
+#[cfg_attr(not(feature = "desktop"), get("/api/senses/{id}/count"))]
 pub async fn get_sense_count(id: SynsetId) -> Result<usize> {
     let corpus_guard = crate::db::read_corpus();
     if let Some(corpus) = corpus_guard.as_ref() {
@@ -177,7 +177,7 @@ pub async fn get_sense_count(id: SynsetId) -> Result<usize> {
 
 /// The ids of the documents that contain at least one token tagged with the
 /// given synset id.
-#[get("/api/senses/{id}")]
+#[cfg_attr(not(feature = "desktop"), get("/api/senses/{id}"))]
 pub async fn get_sense_documents(id: SynsetId) -> Result<Vec<String>> {
     let mut doc_ids: Vec<String> = all_concordance_lines(id)
         .await?

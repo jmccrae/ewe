@@ -6,6 +6,13 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# The compiled binary/app is named "ewe" (not the crate's own "ewe-dioxus") - the user-facing name
+# people actually see (installed app, Start Menu entry, `ewe` on a Linux $PATH, etc.) shouldn't
+# carry an internal implementation detail like "-dioxus" in it.
+[[bin]]
+name = "ewe"
+path = "src/main.rs"
+
 [dependencies]
 dioxus = { version = "0.7.3", features = ["router", "fullstack"] }
 phf = { version = "0.13.1", features = ["macros"] }
@@ -16,13 +23,15 @@ thiserror = "2.0.18"
 oxrdf = { version = "0.3.3", optional = true }
 oxrdfio = { version = "0.2.4", optional = true }
 quick-xml = { version = "0.37.5", optional = true }
-# Only used to format change-log timestamps server-side (`backend::edit::get_changelog`) - no
-# "clock" feature, since that needs current-time access that doesn't build cleanly on wasm32;
-# formatting an already-known `u64` millis value doesn't need it.
+# Only used to format change-log timestamps (`backend::edit::get_changelog`), on `server` and
+# `desktop` - no "clock" feature, since that needs current-time access that doesn't build cleanly
+# on wasm32; formatting an already-known `u64` millis value doesn't need it.
 chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
-# Only used server-side, to run save/validate on a blocking thread pool (see
+# Only used on `server` and `desktop`, to run save/validate on a blocking thread pool (see
 # `backend::edit::save_lexicon`/`validate_lexicon`) so a concurrent progress-poll request isn't
-# starved by their long synchronous scans. Already pulled in transitively via `dioxus/server`.
+# starved by their long synchronous scans. Already pulled in transitively via `dioxus/server` and
+# (with its own default `tokio_runtime` feature) `dioxus/desktop`, but `spawn_blocking` still needs
+# to be nameable as a direct dependency of this crate to be called from our own code.
 tokio = { version = "1", features = ["rt"], optional = true }
 percent-encoding = "2.3.2"
 teanga = { git = "https://github.com/TeangaNLP/teanga.rs", branch = "main", features = ["redb"] }
@@ -37,19 +46,21 @@ default = ["web"]
 web = ["dioxus/web"]
 # The feature that are only required for the desktop = ["dioxus/desktop"] build target should be optional and only enabled in the desktop = ["dioxus/desktop"] feature
 # Desktop is a trusted, single-user deployment (unlike the public en-word.net web target), so it
-# pulls in `edit` by default for the desktop *client* binary. `dx serve --desktop` does NOT thread
-# this through to the separately-built *server* binary that hosts `edit`'s backend routes though -
-# without an explicit `--features edit` on the `dx serve` command, that server binary is built
-# without them and every edit-mode route (POST /api/edit/apply, GET
-# /api/edit/search_synsets/{query}, ...) 404s, even though the desktop app itself renders the
-# editor UI. Always run `dx serve --desktop --features edit` to test editing on desktop.
-desktop = ["dioxus/desktop", "edit", "dep:rfd"]
+# pulls in `edit` by default. Unlike `web`/`server` (which are always two separately-built
+# binaries - a WASM client plus a server - talking over HTTP), `desktop` is one single
+# self-contained binary with no server process at all: every `#[get]`/`#[post]` function in
+# `backend/` is `#[cfg_attr(not(feature = "desktop"), get(...)/post(...))]`, so on a desktop build
+# the macro is skipped entirely and they're just plain async fns called directly in-process (see
+# `backend::setup`'s module doc comment). `dep:chrono`/`dep:tokio` are needed here for the same
+# reason `server` needs them below - `backend::edit`'s real bodies (changelog timestamp
+# formatting, save/validate's blocking thread pool) now run for desktop too, not just server.
+desktop = ["dioxus/desktop", "edit", "dep:rfd", "dep:chrono", "dep:tokio"]
 # The feature that are only required for the mobile = ["dioxus/mobile"] build target should be optional and only enabled in the mobile = ["dioxus/mobile"] feature
 mobile = ["dioxus/mobile"]
 # Gates the Wordnet editor UI and any write-capable backend routes. Off by default (including
 # for `web` and `mobile`) since the web build powers the public, read-only en-word.net; `desktop`
-# turns it on above (for the client binary only - see the note there). Enable explicitly with
-# `--features edit` to test editing on web/mobile, and desktop always needs it passed explicitly too.
+# turns it on above. Enable explicitly with `--features edit` to test editing on web/mobile
+# (needs both the client and server binary built with it, since those remain separate there).
 edit = []
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
 server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml", "dep:chrono", "dep:tokio"]
