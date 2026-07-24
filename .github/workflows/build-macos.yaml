@@ -32,7 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install dioxus-cli --version 0.7.9 --locked
       - run: dx bundle --package ewe-dioxus --desktop --no-default-features --features "desktop edit" --release --package-types dmg
-      - run: cp target/dx/ewe/bundle/macos/dmg/*.dmg ewe-macos.dmg
+      - run: cp target/dx/ewe/bundle/macos/macos/*.dmg ewe-macos.dmg
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
