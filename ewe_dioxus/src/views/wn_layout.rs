@@ -144,9 +144,10 @@ pub fn WNLayout() -> Element {
         ThemeStyleUpdater { css: theme_css.clone() }
         div {
             class: "container",
-            div {
+            Link {
                 id: "logo",
                 class: if is_home { "home-logo" },
+                to: Route::Home {},
                 span {
                     id: "logo-img",
                     dangerous_inner_html: "{logo_svg}"
