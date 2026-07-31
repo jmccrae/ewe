@@ -51,6 +51,16 @@ h1.en-title {
     margin-bottom: 10px;
 }
 
+/* The logo SVG is inlined via dangerous_inner_html (see WNLayout), so it's a bare <svg> with
+   no size control of its own. If its root element declares pixel width/height attributes
+   (rather than relying purely on viewBox), it renders at that literal size, ignoring
+   #logo-img's flex box - constrain it here instead so any aspect ratio scales down to fit. */
+#logo-img svg {
+    width: 100%;
+    height: auto;
+    max-width: 125px;
+}
+
 #logo-title {
     width: 600px;
     height: 135px;
