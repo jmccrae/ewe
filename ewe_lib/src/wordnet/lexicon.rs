@@ -86,6 +86,12 @@ fn flush_synset_batch<L: Lexicon>(
     buffer: &mut String,
 ) -> result::Result<(), WordNetYAMLIOError> {
     if buffer.is_empty() {
+        // Register the lexname even for a 0-byte file, so `pos_for_lexfile` (which gates on
+        // `synsets_contains_key`) still recognizes it as a known lexfile - otherwise an empty
+        // file loads silently but any later `add_synset` into it fails with "Wrong POS for
+        // lexicographer file". `synsets_insert` merges rather than replacing, so this is a
+        // no-op on backends where a batch happened to already fill this lexname.
+        lexicon.synsets_insert(lexname.to_string(), BTSynsets::new())?;
         return Ok(());
     }
     let synsets: BTSynsets = serde_yaml::from_str(buffer).map_err(|e| {
@@ -1190,5 +1196,41 @@ pub(crate) fn entry_key(lemma: &str) -> char {
         '0'
     } else {
         key
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flush_synset_batch_empty_buffer_registers_lexname() {
+        // A literal 0-byte lexfile ends up here with an empty buffer (see
+        // `load_synsets_streaming`). It must still register the lexname, or
+        // `pos_for_lexfile` treats the file as unknown and `add_synset` into it
+        // fails with "Wrong POS for lexicographer file" even though the file exists.
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut buffer = String::new();
+        flush_synset_batch(&mut lexicon, "noun.animal", "noun.animal.yaml", &mut buffer).unwrap();
+
+        assert!(lexicon.synsets_contains_key("noun.animal").unwrap());
+        assert_eq!(
+            lexicon.pos_for_lexfile("noun.animal").unwrap(),
+            vec![PartOfSpeech::n]
+        );
+    }
+
+    #[test]
+    fn test_flush_synset_batch_nonempty_buffer_still_parses() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut buffer = "00001740-n:\n  definition:\n  - test\n  members:\n  - test\n  partOfSpeech: n\n".to_string();
+        flush_synset_batch(&mut lexicon, "noun.animal", "noun.animal.yaml", &mut buffer).unwrap();
+
+        assert!(buffer.is_empty());
+        assert!(lexicon
+            .synsets_get("noun.animal")
+            .unwrap()
+            .map(|s| s.len().unwrap() == 1)
+            .unwrap_or(false));
     }
 }
