@@ -41,6 +41,7 @@
     /* Fonts */
     --font-body: "Dosis", sans-serif;
     --font-heading: "Arvo", serif;
+    --font-heading-weight: 700;
     --font-mono: "Scope One", monospace;
 }
 

@@ -33,7 +33,7 @@ h1.en-title {
     padding-left: 20px;
     font-size: 42pt;
     font-family: var(--font-heading);
-    font-weight: 700;
+    font-weight: var(--font-heading-weight);
     color: var(--color-primary);
     margin-top: 10px;
     margin-bottom: 0;
