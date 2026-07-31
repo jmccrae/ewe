@@ -197,7 +197,8 @@ pub fn get_sense_key<L: Lexicon>(
         Some(sense_key) => extract_lex_id(sense_key),
         None => gen_lex_id(wn, &lemma)?,
     };
-    let lemma = lemma.replace(" ", "_").replace("&apos", "'").to_lowercase();
+    // Escape literal underscores first so they can't collide with the "_" used below for spaces.
+    let lemma = lemma.replace("_", "-lowbar-").replace(" ", "_").replace("&apos", "'").to_lowercase();
     let (head_word, head_id) = if synset.part_of_speech == PartOfSpeech::s {
         get_head_word(wn, synset)?
     } else {
@@ -340,6 +341,47 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn test_sense_key_underscore_space_no_collision() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let synset1 = Synset::new(PartOfSpeech::n);
+        let synset2 = Synset::new(PartOfSpeech::n);
+        let ssid1 = SynsetId::new("00000001-n");
+        let ssid2 = SynsetId::new("00000002-n");
+        lexicon
+            .insert_synset("noun.object".to_string(), ssid1.clone(), synset1.clone())
+            .unwrap();
+        lexicon
+            .insert_synset("noun.object".to_string(), ssid2.clone(), synset2.clone())
+            .unwrap();
+
+        let mut change_list = ChangeList::new();
+        let id1 = add_entry(
+            &mut lexicon,
+            ssid1,
+            "multi word".to_string(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+        let id2 = add_entry(
+            &mut lexicon,
+            ssid2,
+            "multi_word".to_string(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+
+        assert_eq!(id1, Some(SenseId::new("multi_word%1:17:00::".to_owned())));
+        assert_eq!(id2, Some(SenseId::new("multi-lowbar-word%1:17:00::".to_owned())));
+        assert_ne!(id1, id2);
     }
 
     #[test]
