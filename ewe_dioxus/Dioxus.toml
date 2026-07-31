@@ -19,6 +19,19 @@ lemmas, and semantic relations), including the Open English Wordnet.
 category = "Education"
 copyright = "Copyright © University of Galway"
 
+[bundle.deb]
+# dx's deb bundler doesn't run dpkg-shlibdeps, so none of the app's runtime library
+# dependencies are declared by default - apt won't pull any of them in. These are the shared
+# libs the desktop binary actually links against (checked with `ldd`). libgtk-3-0 lists both
+# the pre- and post- 64-bit-time_t package names ("|" = apt alternative) since Ubuntu renamed
+# it to libgtk-3-0t64 in 24.04+ while older releases still ship libgtk-3-0.
+depends = [
+    "libxdo3",
+    "libwebkit2gtk-4.1-0",
+    "libjavascriptcoregtk-4.1-0",
+    "libgtk-3-0 | libgtk-3-0t64",
+]
+
 [web.app]
 
 # HTML title tag content
