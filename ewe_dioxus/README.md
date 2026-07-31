@@ -70,6 +70,7 @@ project_name = "My Wordnet"
 id_prefix = "oewn"
 contact_email = "me@example.org"
 source_url = "https://github.com/globalwordnet/english-wordnet"
+base_url = "https://example.org/"
 footer = """
 <p>...</p>
 """
@@ -84,6 +85,7 @@ footer = """
 | `id_prefix`         | string           | `"oewn"` | Prefix used for synset/entry ids in XML/RDF/Turtle export and in id lookups (e.g. `oewn-00001740-n`), and to derive the corpus's sense-key layer name (`{id_prefix}_key`). Set this to your own project's id prefix if you're not the Open English Wordnet. |
 | `contact_email`     | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon email="...">` attribute. |
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |
+| `base_url`          | string, optional | unset | This deployment's own public base URL (e.g. `https://en-word.net`), used to build absolute URLs in `/sitemap.xml` and the `Sitemap:` line in `/robots.txt`. Neither is served with real content while this is unset. |
 | `logo`              | string           | `"assets/gwa.svg"` | Path to an SVG logo file, read from disk and inlined directly into the page. |
 | `theme`             | string           | `"assets/styling/theme.css"` | Path to the theme stylesheet (colours and fonts as CSS custom properties — see [Styling](#styling) below), read from disk and inlined into a `<style>` tag in the page. |
 | `project_name`      | string           | `"EWE Wordnet Editor"` | Shown as the `<h1>` next to the logo, and as the exported XML's `<Lexicon label="...">`. |

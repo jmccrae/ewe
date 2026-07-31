@@ -40,6 +40,7 @@ pub fn Home() -> Element {
                 Ok(loaded) if !loaded.loading() => {
                     let info = loaded.read();
                     rsx! {
+                        document::Meta { name: "description", content: "{info.tagline}" }
                         h2 { class: "home-tagline", "{info.tagline}" }
                         div {
                             class: "home-intro",

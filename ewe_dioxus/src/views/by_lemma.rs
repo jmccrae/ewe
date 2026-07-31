@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks, ProjectName};
-use crate::backend::api::get_lemma;
+use crate::backend::api::{get_lemma, get_lemma_description};
 
 #[component]
 pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
@@ -10,6 +10,10 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
             get_lemma(value).await
         }
     })?;
+    let description = use_server_future(move || {
+        let value = lemma.cloned();
+        async move { get_lemma_description(value).await }
+    })?;
     let options = use_context::<Signal<DisplayOptions>>();
     let project_name = use_context::<Signal<ProjectName>>();
 
@@ -18,6 +22,9 @@ pub fn ByLemma(lemma: ReadSignal<String>) -> Element {
             div {
                 if !project_name().0.is_empty() {
                     document::Title { "{lemma} - {project_name().0}" }
+                }
+                if let Some(Ok(Some(desc))) = &*description.read() {
+                    document::Meta { name: "description", content: "{desc}" }
                 }
                 WordNet {},
                 {

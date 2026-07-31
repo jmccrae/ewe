@@ -54,6 +54,12 @@ pub struct EweSettings {
     /// Source/homepage URL recorded in exported WN-LMF XML's `<Lexicon>` element
     #[serde(default)]
     pub source_url: Option<String>,
+    /// This deployment's own public base URL (e.g. `https://en-word.net`), used to build
+    /// absolute `<loc>` URLs in `/sitemap.xml` and the `Sitemap:` line in `/robots.txt`.
+    /// Neither is served with real content while this is unset, since a sitemap with
+    /// relative or missing URLs is invalid per the sitemap protocol.
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_lexicon_cache_mb() -> usize {
@@ -197,6 +203,7 @@ impl EweSettings {
             id_prefix: default_id_prefix(),
             contact_email: None,
             source_url: None,
+            base_url: None,
         }
     }
 

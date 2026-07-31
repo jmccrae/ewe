@@ -13,6 +13,9 @@ pub mod xml;
 #[cfg(feature="server")]
 pub mod openapi;
 
+#[cfg(feature="server")]
+pub mod seo;
+
 pub mod downloads;
 
 pub mod senses;

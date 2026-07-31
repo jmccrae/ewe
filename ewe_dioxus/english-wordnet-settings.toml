@@ -9,6 +9,7 @@ tagline = "The free, open lexical database of English"
 id_prefix = "oewn"
 contact_email = "english-wordnet@googlegroups.com"
 source_url = "https://github.com/globalwordnet/english-wordnet"
+base_url = "https://en-word.net/"
 intro = """
 <p>
     The Open English Wordnet is a free, open-source lexical database of English,

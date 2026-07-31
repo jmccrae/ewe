@@ -142,6 +142,25 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     Ok(synsets)
 }
 
+/// A single short definition, for a page's `<meta name="description">` - deliberately far
+/// cheaper than `get_lemma_synsets` since it skips `MemberSynset::from_synset`'s reverse-
+/// relation expansion entirely, needed only for one sentence of text.
+#[cfg_attr(not(feature = "desktop"), get("/api/lemma_description/{lemma}"))]
+pub async fn get_lemma_description(lemma: String) -> Result<Option<String>> {
+    let lexicon = read_lexicon()?;
+    let entries = lexicon.entry_by_lemma(&lemma)?;
+    let Some(synset_id) = entries
+        .iter()
+        .find_map(|entry| entry.sense.first().map(|sense| sense.synset.clone()))
+    else {
+        return Ok(None);
+    };
+    let Some(synset) = lexicon.synset_by_id(&synset_id)? else {
+        return Ok(None);
+    };
+    Ok(synset.definition.first().cloned())
+}
+
 #[cfg_attr(not(feature = "desktop"), get("/api/autocomplete/{query}?max_results"))]
 pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<Vec<SearchResult>> {
     let max_results = max_results.unwrap_or(100);
