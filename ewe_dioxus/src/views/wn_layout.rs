@@ -26,6 +26,25 @@ fn WebOnlyFooterLinks() -> Element {
     rsx! {}
 }
 
+/// The change-history page (`views::history::History`) has nothing to show without the `edit`
+/// feature (its own `#[cfg(not(feature = "edit"))]` variant renders a "not available" message
+/// for anyone who navigates straight to `/history`) - so the footer link to it shouldn't be
+/// offered as a nav option on a build without `edit` either.
+#[cfg(feature = "edit")]
+#[component]
+fn HistoryLink() -> Element {
+    rsx! {
+        Link { to: Route::History {}, "History" }
+        " | "
+    }
+}
+
+#[cfg(not(feature = "edit"))]
+#[component]
+fn HistoryLink() -> Element {
+    rsx! {}
+}
+
 /// HACK: reaches past `document::Style`'s public API to mutate a head element it created, using
 /// undocumented internals (a hardcoded DOM id, and `document::eval` running raw JS against
 /// `document.getElementById`) rather than anything Dioxus actually supports for this. It exists
@@ -175,8 +194,7 @@ pub fn WNLayout() -> Element {
                 p {
                     class: "api-docs-link",
                     WebOnlyFooterLinks {}
-                    Link { to: Route::History {}, "History" }
-                    " | "
+                    HistoryLink {}
                     ValidateButton {}
                 }
             }
