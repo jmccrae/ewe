@@ -114,19 +114,19 @@ pub fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> S
 }
 
 
-pub fn write_prop_sense<W : Write>(w : &mut W, senses : &Vec<SenseId>, name : &str, first : bool) -> std::io::Result<bool> {
+pub fn write_prop_sense<W : Write, T : AsRef<str>>(w : &mut W, senses : &Vec<T>, name : &str, first : bool) -> std::io::Result<bool> {
     if senses.is_empty() {
         Ok(first)
     } else if !first {
-        write!(w, "\n      {}:", name)?; 
+        write!(w, "\n      {}:", name)?;
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_ref(), 8, 8))?;
         }
         Ok(false)
     } else {
-        write!(w, "{}:", name)?; 
+        write!(w, "{}:", name)?;
         for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_str(), 8, 8))?;
+            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_ref(), 8, 8))?;
         }
         Ok(false)
     }
@@ -151,6 +151,10 @@ pub enum LexiconError {
     SynsetIdNotFound(SynsetId),
     #[error("No such entry: ({0}, {1})")]
     EntryNotFound(String, PosKey),
+    #[error("Identifier is neither a sense nor a synset: {0}")]
+    SenseOrSynsetIdNotFound(String),
+    #[error("Cannot reverse relation from sense {0} to synset {1}: no defined inverse exists for a sense-synset relation")]
+    CannotReverseSenseSynsetRelation(SenseId, SynsetId),
     #[cfg(feature="redb")]
     #[error("Generic error: {0}")]
     GenericError(String),
