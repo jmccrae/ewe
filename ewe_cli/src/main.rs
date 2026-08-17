@@ -14,7 +14,7 @@ use ewe_lib::change_manager::ChangeList;
 use ewe_lib::progress::NullProgress;
 use ewe_lib::rels::{SenseRelType, SynsetRelType};
 use ewe_lib::validate::{fix, validate};
-use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, Synset, SynsetId};
+use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -136,14 +136,18 @@ fn enter_sense_synset<L: Lexicon>(
     (synset_id, sense_id)
 }
 
-fn enter_sense<L: Lexicon>(wordnet: &L, spec_string: &str, allow_none: bool) -> SenseId {
+/// Prompts for a sense within a synset. If `allow_none`, picking "0" targets
+/// the synset itself rather than a specific sense within it - only offer
+/// this for relation types where that's meaningful (see
+/// `SenseRelType::allows_synset_target`).
+fn enter_sense<L: Lexicon>(wordnet: &L, spec_string: &str, allow_none: bool) -> SenseOrSynsetId {
     let synset_id = enter_synset(wordnet, spec_string).0;
     let mems = wordnet
         .members_by_id(&synset_id)
         .expect("Cannot read wordnet");
     loop {
         if allow_none {
-            println!("0. None");
+            println!("0. Synset (no sense)");
         }
         for (i, m) in mems.iter().enumerate() {
             println!("{}. {}", i + 1, m);
@@ -161,12 +165,12 @@ fn enter_sense<L: Lexicon>(wordnet: &L, spec_string: &str, allow_none: bool) -> 
                         .nth(0)
                     {
                         Some(ssid) => {
-                            return ssid;
+                            return SenseOrSynsetId::Sense(ssid);
                         }
                         None => {}
                     }
-                } else if i == 0 {
-                    return SenseId::new(synset_id.as_str().to_string());
+                } else if i == 0 && allow_none {
+                    return SenseOrSynsetId::Synset(synset_id);
                 }
             }
             Err(_) => {}
@@ -466,7 +470,7 @@ fn add_relation<L: Lexicon>(wn: &mut L, source_id: Option<SynsetId>, change_list
                 relation = input("Enter new relation: ");
             }
             let rel = SenseRelType::from(&relation).unwrap();
-            let target_sense_id = enter_sense(wn, "target ", true);
+            let target_sense_id = enter_sense(wn, "target ", rel.allows_synset_target());
             println!(
                 "Insert {} ={}=> {}",
                 source_sense_id.as_str(),
@@ -506,7 +510,10 @@ fn delete_relation<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
     let (source_id, source_sense_id) = enter_sense_synset(wn, "source ", None);
     match source_sense_id {
         Some(source_sense_id) => {
-            let target_sense_id = enter_sense(wn, "target ", false);
+            // `delete_sense_rel` removes whatever relation exists between the
+            // pair regardless of type, so a synset target is always offered
+            // here (it's simply a no-op if nothing was ever stored there).
+            let target_sense_id = enter_sense(wn, "target ", true);
             println!(
                 "Delete {} =*=> {}",
                 source_sense_id.as_str(),

@@ -584,6 +584,18 @@ impl SenseRelType {
             *self == SenseRelType::Derivation
     }
 
+    /// Whether this relation is marked "sense-synset" in the GWA spec - i.e.
+    /// its target may be a bare synset rather than a specific sense.
+    pub fn allows_synset_target(&self) -> bool {
+        matches!(
+            self,
+            SenseRelType::DomainTopic
+                | SenseRelType::DomainRegion
+                | SenseRelType::Exemplifies
+                | SenseRelType::Other
+        )
+    }
+
     pub fn pos(&self) -> Vec<&'static PartOfSpeech> {
         match self {
             SenseRelType::Antonym => vec![&PartOfSpeech::n, &PartOfSpeech::v, &PartOfSpeech::a, &PartOfSpeech::r, &PartOfSpeech::s],

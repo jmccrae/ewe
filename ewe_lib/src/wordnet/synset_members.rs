@@ -246,7 +246,10 @@ pub struct MemberSynset {
     pub vehicle: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_vehicle_of: Vec<SenseRelation>
+    pub is_vehicle_of: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub other_sense: Vec<SenseRelation>
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
@@ -279,8 +282,11 @@ pub struct MemberSense {
 pub struct SenseRelation {
     pub target_synset: SynsetId,
     pub source_lemma: String,
-    pub target_lemma: String,
-    pub target_poskey: PosKey
+    /// `None` when the target is a bare synset rather than a specific sense
+    /// (only possible for the sense-synset relations: domain_topic,
+    /// domain_region, exemplifies, other).
+    pub target_lemma: Option<String>,
+    pub target_poskey: Option<PosKey>
 }
 
 impl MemberSynset {
@@ -315,9 +321,44 @@ impl MemberSynset {
                                         .push(SenseRelation {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
-                                            target_lemma: target_lemma.clone(),
-                                            target_poskey: target_poskey.clone()
+                                            target_lemma: Some(target_lemma.clone()),
+                                            target_poskey: Some(target_poskey.clone())
                                         });
+                                }
+                            }
+                        }
+                    }
+                    // domain_topic/domain_region/exemplifies/other can target either a
+                    // sense or a bare synset - resolve each entry against the lexicon
+                    // and branch; an entry that fails to resolve (a dangling reference)
+                    // is skipped here, since validate() is what reports it.
+                    macro_rules! extract_sense_or_synset_rel {
+                        ($rel:ident,$name:ident) => {
+                            for target in sense.$rel.iter() {
+                                match target.resolve(lexicon) {
+                                    Ok(SenseOrSynsetId::Sense(target_sense_id)) => {
+                                        if let Some((target_lemma, target_poskey, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
+                                            sense_links.entry(SenseRelType::$name)
+                                                .or_insert_with(|| Vec::new())
+                                                .push(SenseRelation {
+                                                    target_synset: target_sense.synset.clone(),
+                                                    source_lemma: m.clone(),
+                                                    target_lemma: Some(target_lemma.clone()),
+                                                    target_poskey: Some(target_poskey.clone())
+                                                });
+                                        }
+                                    }
+                                    Ok(SenseOrSynsetId::Synset(target_synset_id)) => {
+                                        sense_links.entry(SenseRelType::$name)
+                                            .or_insert_with(|| Vec::new())
+                                            .push(SenseRelation {
+                                                target_synset: target_synset_id.clone(),
+                                                source_lemma: m.clone(),
+                                                target_lemma: None,
+                                                target_poskey: None
+                                            });
+                                    }
+                                    Err(_) => {}
                                 }
                             }
                         }
@@ -326,10 +367,11 @@ impl MemberSynset {
                     extract_sense_rel!(participle,Participle);
                     extract_sense_rel!(pertainym,Pertainym);
                     extract_sense_rel!(derivation,Derivation);
-                    extract_sense_rel!(domain_topic,DomainTopic);
-                    extract_sense_rel!(domain_region,DomainRegion);
+                    extract_sense_or_synset_rel!(domain_topic,DomainTopic);
+                    extract_sense_or_synset_rel!(domain_region,DomainRegion);
                     extract_sense_rel!(agent,Agent);
-                    extract_sense_rel!(exemplifies,Exemplifies);
+                    extract_sense_or_synset_rel!(exemplifies,Exemplifies);
+                    extract_sense_or_synset_rel!(other,Other);
                     extract_sense_rel!(material,Material);
                     extract_sense_rel!(event,Event);
                     extract_sense_rel!(instrument,Instrument);
@@ -353,8 +395,8 @@ impl MemberSynset {
                                         push(SenseRelation {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
-                                            target_lemma: target_lemma.clone(),
-                                            target_poskey: target_poskey.clone()
+                                            target_lemma: Some(target_lemma.clone()),
+                                            target_poskey: Some(target_poskey.clone())
                                         });
                                 }
                             }
@@ -453,7 +495,8 @@ impl MemberSynset {
             body_part: sense_links.remove(&SenseRelType::BodyPart).unwrap_or_else(|| Vec::new()),
             is_body_part_of: inv_sense_links.remove(&SenseRelType::BodyPart).unwrap_or_else(|| Vec::new()),
             vehicle: sense_links.remove(&SenseRelType::Vehicle).unwrap_or_else(|| Vec::new()),
-            is_vehicle_of: inv_sense_links.remove(&SenseRelType::Vehicle).unwrap_or_else(|| Vec::new())
+            is_vehicle_of: inv_sense_links.remove(&SenseRelType::Vehicle).unwrap_or_else(|| Vec::new()),
+            other_sense: sense_links.remove(&SenseRelType::Other).unwrap_or_else(|| Vec::new())
         })
     }
 

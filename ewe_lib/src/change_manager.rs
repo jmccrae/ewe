@@ -34,12 +34,16 @@ pub fn delete_rel<L : Lexicon>(wn : &mut L, source : &SynsetId,
     change_list.mark();
 }
 
-/// Remove a relation between senses
+/// Remove a relation between senses. `target` is the resolved type - a
+/// synset-targeted relation has no defined inverse, so the reverse removal
+/// only happens when `target` is itself a sense.
 pub fn delete_sense_rel<L : Lexicon>(wn : &mut L,
-                        source : &SenseId, target : &SenseId,
+                        source : &SenseId, target : &SenseOrSynsetId,
                         change_list : &mut ChangeList) -> Result<()> {
     wn.remove_sense_rel(source, target)?;
-    wn.remove_sense_rel(target, source)?;
+    if let SenseOrSynsetId::Sense(target_sense) = target {
+        wn.remove_sense_rel(target_sense, &SenseOrSynsetId::Sense(source.clone()))?;
+    }
     change_list.mark();
     Ok(())
 }
@@ -83,7 +87,7 @@ pub fn insert_rel<L : Lexicon>(wn : &mut L,
 
 pub enum RelationUpdate {
     Synset(SynsetId, SynsetRelType, SynsetId),
-    Sense(SenseId, SenseRelType, SenseId)
+    Sense(SenseId, SenseRelType, SenseOrSynsetId)
 }
 
 pub fn update_rels<L : Lexicon>(wn : &mut L,
@@ -98,7 +102,10 @@ pub fn update_rels<L : Lexicon>(wn : &mut L,
         delete_rel(wn, &source_id, source, change_list);
     }
     for (source_id, _, target_id) in wn.all_sense_links(source)? {
-        delete_sense_rel(wn, &source_id, &target_id, change_list)?;
+        // A dangling/unresolved target has nothing valid to delete.
+        if let Ok(target_id) = target_id.resolve(wn) {
+            delete_sense_rel(wn, &source_id, &target_id, change_list)?;
+        }
     }
     
     // Now add the relations
@@ -191,7 +198,7 @@ pub fn delete_entry<L : Lexicon>(wn : &mut L,
     let links = wn.sense_links_to(lemma, pos, synset_id)?;
     for sense_id in  wn.remove_sense(lemma, pos, synset_id)? {
         for (_, source) in links.iter() {
-            wn.remove_sense_rel(&source, &sense_id)?;
+            wn.remove_sense_rel(&source, &SenseOrSynsetId::Sense(sense_id.clone()))?;
         }
     }
     change_list.mark();
@@ -276,10 +283,11 @@ pub fn move_entry<L : Lexicon>(wn : &mut L,
                     old_sense_id.as_ref(), change_list)? {
         Some(sense_id) => {
             for (rel, target) in links_from {
+                let target = target.resolve(wn)?;
                 wn.add_sense_rel(&sense_id, rel, &target)?;
             }
             for (rel, source) in links_to {
-                wn.add_sense_rel(&source, rel, &sense_id)?;
+                wn.add_sense_rel(&source, rel, &SenseOrSynsetId::Sense(sense_id.clone()))?;
             }
         },
         None => {
@@ -455,12 +463,17 @@ pub fn reverse_rel<L : Lexicon>(wn : &mut L,
     Ok(())
 }
 
-/// Add a relation between senses
+/// Add a relation between senses. `target` is the resolved type.
 pub fn insert_sense_relation<L : Lexicon>(wn : &mut L,
                       source : SenseId, rel : SenseRelType,
-                      target : SenseId, change_list : &mut ChangeList) -> Result<()> {
+                      target : SenseOrSynsetId, change_list : &mut ChangeList) -> Result<()> {
+    // `is_symmetric` relations are never sense-synset (see rels.rs), so the
+    // reverse insert only applies - and is only ever reached - when target
+    // is itself a sense.
     if rel.is_symmetric() {
-        wn.add_sense_rel(&target, rel.clone(), &source)?;
+        if let SenseOrSynsetId::Sense(target_sense) = &target {
+            wn.add_sense_rel(target_sense, rel.clone(), &SenseOrSynsetId::Sense(source.clone()))?;
+        }
     }
     wn.add_sense_rel(&source, rel, &target)?;
     change_list.mark();
@@ -468,21 +481,37 @@ pub fn insert_sense_relation<L : Lexicon>(wn : &mut L,
 }
 
 fn find_sense_rel_type<L : Lexicon>(wn : &L,
-    source : &SenseId, target : &SenseId) 
+    source : &SenseId, target : &SenseOrSynsetId)
     -> Result<Vec<SenseRelType>> {
-        Ok(wn.sense_links_from_id(source)?.into_iter()
-            .filter(|x| x.1 == *target).map(|x| x.0).chain(
-            wn.sense_links_from_id(target)?.into_iter()
-            .filter(|x| x.1 == *source).map(|x| x.0)).collect())
+        let target_unresolved = UnresolvedSenseOrSynsetId::from(target.clone());
+        let mut rels : Vec<SenseRelType> = wn.sense_links_from_id(source)?.into_iter()
+            .filter(|x| x.1 == target_unresolved).map(|x| x.0).collect();
+        if let SenseOrSynsetId::Sense(target_sense) = target {
+            let source_unresolved = UnresolvedSenseOrSynsetId::Sense(source.clone());
+            rels.extend(wn.sense_links_from_id(target_sense)?.into_iter()
+                .filter(|x| x.1 == source_unresolved).map(|x| x.0));
+        }
+        Ok(rels)
 }
 
-/// Reverse the direction of a sense relation
+/// Reverse the direction of a sense relation. `target` is the resolved type;
+/// a synset-targeted relation has no defined inverse (see rels.rs), so
+/// reversing one is an error rather than a silent no-op.
 pub fn reverse_sense_rel<L : Lexicon>(wn : &mut L,
                       source : &SenseId,
-                      target : &SenseId, change_list : &mut ChangeList) -> Result<()> {
+                      target : &SenseOrSynsetId, change_list : &mut ChangeList) -> Result<()> {
+    let target_sense = match target {
+        SenseOrSynsetId::Sense(target_sense) => target_sense.clone(),
+        SenseOrSynsetId::Synset(target_synset) => {
+            return Err(LexiconError::CannotReverseSenseSynsetRelation(
+                source.clone(),
+                target_synset.clone(),
+            ));
+        }
+    };
     for rel_type in find_sense_rel_type(wn, source, target)? {
         delete_sense_rel(wn, source, target, change_list)?;
-        insert_sense_relation(wn, target.clone(), rel_type, source.clone(), change_list)?;
+        insert_sense_relation(wn, target_sense.clone(), rel_type, SenseOrSynsetId::Sense(source.clone()), change_list)?;
     }
     Ok(())
 }

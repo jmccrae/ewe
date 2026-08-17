@@ -211,7 +211,7 @@ fn render_sense_relation_group(
                 d.key == info.key
                     && d.target == r.target_synset
                     && d.source_lemma.as_deref() == Some(r.source_lemma.as_str())
-                    && d.target_lemma.as_deref() == Some(r.target_lemma.as_str())
+                    && d.target_lemma.as_deref() == r.target_lemma.as_deref()
             })
         })
         .cloned()
@@ -231,9 +231,12 @@ fn render_sense_relation_group(
             span { class: "relation-edit-label", "{info.label}:" }
             for r in visible_existing {
                 span {
-                    key: "{r.source_lemma}-{r.target_lemma}-{r.target_synset}",
+                    key: "{r.source_lemma}-{r.target_lemma:?}-{r.target_synset}",
                     class: "relation-edit-item",
-                    "{r.source_lemma} → {r.target_lemma} "
+                    "{r.source_lemma} → "
+                    if let Some(tl) = &r.target_lemma {
+                        "{tl} "
+                    }
                     Link {
                         to: Route::BySynset { synset: r.target_synset.as_str().to_string() },
                         "({r.target_synset.as_str()})"
@@ -248,7 +251,7 @@ fn render_sense_relation_group(
                                 key: info.key,
                                 target: r.target_synset.clone(),
                                 source_lemma: Some(r.source_lemma.clone()),
-                                target_lemma: Some(r.target_lemma.clone()),
+                                target_lemma: r.target_lemma.clone(),
                             });
                             move |_| on_pending_deletes_changed.call(updated.clone())
                         },

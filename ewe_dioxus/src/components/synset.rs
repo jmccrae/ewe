@@ -243,7 +243,7 @@ fn map_se_rels(rels: Vec<SenseRelation>) -> Vec<(SynsetId, Option<String>, Optio
             (
                 se_rel.target_synset,
                 Some(se_rel.source_lemma),
-                Some(se_rel.target_lemma),
+                se_rel.target_lemma,
             )
         })
         .collect()

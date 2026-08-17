@@ -8,7 +8,7 @@ pub mod pronunciation;
 pub use pronunciation::Pronunciation;
 
 pub mod sense;
-pub use sense::{Sense,SenseId};
+pub use sense::{Sense,SenseId,SenseOrSynsetId,UnresolvedSenseOrSynsetId};
 
 pub mod synset;
 pub use synset::{Synset,Synsets,SynsetId, ILIID,BTSynsets};
@@ -81,7 +81,36 @@ mod tests {
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
- 
+
+    #[test]
+    fn test_save_entry_with_synset_targeted_domain_topic() {
+        // A sense-synset relation (domain_topic here) targeting a bare
+        // synset round-trips through save() as just the plain synset id
+        // string - same on-disk shape as a sense-targeted one.
+        use crate::rels::SenseRelType;
+
+        let entry_str = "    sense:
+    - domain_topic:
+      - 00001740-n
+      id: 'foo%1:01:00::'
+      synset: 00001741-n
+";
+        let mut gen_str : Vec<u8> = Vec::new();
+
+        let mut sense = Sense::new(
+            SenseId::new("foo%1:01:00::".to_string()),
+            SynsetId::new("00001741-n")
+        );
+        sense.add_rel(SenseRelType::DomainTopic, SenseOrSynsetId::Synset(SynsetId::new("00001740-n")));
+
+        Entry {
+            sense: vec![sense],
+            form: Vec::new(),
+            pronunciation: Vec::new()
+        }.save(&mut gen_str).unwrap();
+        assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
+    }
+
 
     #[test]
     fn test_entries() {

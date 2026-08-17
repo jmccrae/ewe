@@ -55,14 +55,18 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                }
            }
            let mut sr_items = HashSet::new();
-           for (rel, target) in sense.sense_links_from() {
-               if !wn.has_sense(&target)? && wn.synset_by_id(&SynsetId::new(target.as_str()))?.is_none() {
-                   errors.push(ValidationError::SenseRelTargetMissing {
-                       id: sense.id.clone(),
-                       rel: rel.clone(),
-                       target: target.clone()
-                   });
-               }
+           for (rel, raw_target) in sense.sense_links_from() {
+               let target = match raw_target.resolve(wn) {
+                   Ok(target) => target,
+                   Err(_) => {
+                       errors.push(ValidationError::SenseRelTargetMissing {
+                           id: sense.id.clone(),
+                           rel: rel.clone(),
+                           target: raw_target.clone()
+                       });
+                       continue;
+                   }
+               };
 
                match poskey.to_part_of_speech() {
                    Some(pos) => {
@@ -76,21 +80,28 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                    },
                    None => {}
                }
+               // No relation type marked `is_symmetric` is sense-synset, so a
+               // `Synset` target here would mean the data is already broken
+               // in a way `SenseRelationPOS` above will have caught.
                if rel.is_symmetric() {
-                   if !wn.sense_links_from_id(&target)?.iter().any(|(r2, t2)| {
-                       *r2 == rel && *t2 == sense.id }) {
-                       errors.push(ValidationError::SenseRelationSymmetry {
-                           source: sense.id.clone(),
-                           rel: rel.clone(),
-                           target: target.clone()
-                       });
+                   if let SenseOrSynsetId::Sense(target_sense) = &target {
+                       if !wn.sense_links_from_id(target_sense)?.iter().any(|(r2, t2)| {
+                           *r2 == rel && *t2 == UnresolvedSenseOrSynsetId::Sense(sense.id.clone()) }) {
+                           errors.push(ValidationError::SenseRelationSymmetry {
+                               source: sense.id.clone(),
+                               rel: rel.clone(),
+                               target: target.clone()
+                           });
+                       }
                    }
                }
-               if sense.id == target {
-                   errors.push(ValidationError::SelfReferencingSenseRelation {
-                       source: sense.id.clone(),
-                       rel: rel.clone(), 
-                       target: target.clone() });
+               if let SenseOrSynsetId::Sense(target_sense) = &target {
+                   if sense.id == *target_sense {
+                       errors.push(ValidationError::SelfReferencingSenseRelation {
+                           source: sense.id.clone(),
+                           rel: rel.clone(),
+                           target: target.clone() });
+                   }
                }
                if sr_items.contains(&(rel.clone(), target.clone())) {
                    errors.push(ValidationError::DuplicateSenseRelation {
@@ -417,8 +428,8 @@ pub enum ValidationError {
     EntryPartOfSpeech { id : SenseId, pos : PosKey, synset_pos : PartOfSpeech },
     SenseRelationPOS { id : SenseId, pos : PartOfSpeech, rel : SenseRelType },
     SynsetRelationPOS { id : SynsetId, pos : PartOfSpeech, rel : SynsetRelType },
-    DuplicateSenseRelation { source : SenseId, rel : SenseRelType, target : SenseId },
-    SelfReferencingSenseRelation { source : SenseId, rel : SenseRelType, target : SenseId },
+    DuplicateSenseRelation { source : SenseId, rel : SenseRelType, target : SenseOrSynsetId },
+    SelfReferencingSenseRelation { source : SenseId, rel : SenseRelType, target : SenseOrSynsetId },
     SelfReferencingSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSynsetRelation { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     DuplicateSenseKey { id : SenseId },
@@ -430,13 +441,13 @@ pub enum ValidationError {
     InvalidILIId { id : SynsetId, ili: ILIID },
     NoSenses { lemma : String, poskey : PosKey },
     CrossPOSHyper { source : SynsetId, target : SynsetId },
-    SenseRelTargetMissing { id : SenseId, rel : SenseRelType, target : SenseId },
+    SenseRelTargetMissing { id : SenseId, rel : SenseRelType, target : UnresolvedSenseOrSynsetId },
     SynsetRelTargetMissing { id : SynsetId, rel : SynsetRelType, target : SynsetId },
     SatelliteSimilar { id: SynsetId, n: usize },
     NoHypernym { id: SynsetId },
     Definition { id: SynsetId },
     Lexfile { id: SynsetId, lexfile : String },
-    SenseRelationSymmetry { source : SenseId, rel : SenseRelType, target : SenseId },
+    SenseRelationSymmetry { source : SenseId, rel : SenseRelType, target : SenseOrSynsetId },
     SynsetRelationSymmetry { source : SynsetId, rel : SynsetRelType, target : SynsetId },
     Transitivity { id1 : SynsetId, id2 : SynsetId, id3 : SynsetId },
     Loop { id: SynsetId },
