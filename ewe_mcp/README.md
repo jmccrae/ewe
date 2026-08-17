@@ -74,3 +74,12 @@ a JSON Schema derived directly from `ewe_lib`'s `Action` type, so a malformed or
 semantically invalid edit is rejected by the client or by `apply_automaton` itself
 before it can reach the wordnet - the schema is always in sync with what the automaton
 engine actually accepts.
+
+Companion skill
+----------------
+
+The schema covers *what* each tool accepts; it doesn't cover *when* to use one action
+over another - lexfile selection, the genus/differentia definition convention, when
+`delete_synset` is appropriate vs. `move_entry`/merging, and similar judgment calls.
+That's what the companion `wordnet-editing` Claude Code Skill is for. See the root
+[`README.md`](../README.md#the-wordnet-editing-skill) for installation.
