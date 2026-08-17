@@ -1,0 +1,10 @@
+{
+  "name": "ewe-wordnet-editing",
+  "version": "0.1.0",
+  "description": "Procedural guidance for editing Global Wordnet Association wordnets through the ewe_mcp MCP server: lexfile selection, definition conventions, relation/entry conventions, and safe synset deletion.",
+  "author": {
+    "name": "John P. McCrae"
+  },
+  "homepage": "https://github.com/jmccrae/ewe",
+  "repository": "https://github.com/jmccrae/ewe"
+}
