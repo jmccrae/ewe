@@ -13,6 +13,9 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
     bar.start((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
     bar.set_percent_mode(true);
     let mut sense_keys = HashSet::new();
+    let mut definition_index : HashMap<String, SynsetId> = HashMap::new();
+    let mut ili_index : HashMap<String, SynsetId> = HashMap::new();
+    let mut wikidata_index : HashMap<String, SynsetId> = HashMap::new();
     for entry in wn.entries()? {
         let (lemma, poskey, entry) = entry?;
         bar.inc(1);
@@ -173,8 +176,60 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                         ili: ili.clone()
                     });
                 }
+                if ili.as_str() != "in" {
+                    match ili_index.get(ili.as_str()) {
+                        Some(prev) => {
+                            errors.push(ValidationError::DuplicateILI {
+                                id1: prev.clone(),
+                                id2: synset_id.clone(),
+                                ili: ili.clone()
+                            });
+                        },
+                        None => {
+                            ili_index.insert(ili.as_str().to_string(), synset_id.clone());
+                        }
+                    }
+                }
             },
             None => {}
+        }
+
+        for qid in synset.wikidata.iter() {
+            if !is_valid_wikidata_id(qid) {
+                errors.push(ValidationError::InvalidWikidataId {
+                    id: synset_id.clone(),
+                    qid: qid.clone()
+                });
+            } else {
+                match wikidata_index.get(qid) {
+                    Some(prev) => {
+                        errors.push(ValidationError::DuplicateWikidataId {
+                            id1: prev.clone(),
+                            id2: synset_id.clone(),
+                            qid: qid.clone()
+                        });
+                    },
+                    None => {
+                        wikidata_index.insert(qid.clone(), synset_id.clone());
+                    }
+                }
+            }
+        }
+
+        for defn in synset.definition.iter() {
+            if !defn.is_empty() {
+                match definition_index.get(defn) {
+                    Some(prev) => {
+                        errors.push(ValidationError::DuplicateDefinition {
+                            id1: prev.clone(),
+                            id2: synset_id.clone()
+                        });
+                    },
+                    None => {
+                        definition_index.insert(defn.clone(), synset_id.clone());
+                    }
+                }
+            }
         }
 
         let mut sr_items = HashSet::new();
@@ -186,12 +241,19 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                     rel: rel.clone()
                 });
             }
-            if rel == SynsetRelType::Hypernym || 
+            if rel == SynsetRelType::Hypernym ||
                 rel == SynsetRelType::InstanceHypernym {
                 match wn.synset_by_id(&target)? {
                     Some(target_synset) => {
                         if synset.part_of_speech != target_synset.part_of_speech {
                             errors.push(ValidationError::CrossPOSHyper {
+                                source: synset_id.clone(),
+                                target: target.clone()
+                            });
+                        }
+                        if rel == SynsetRelType::Hypernym &&
+                            !target_synset.instance_hypernym.is_empty() {
+                            errors.push(ValidationError::HypernymTargetIsInstance {
                                 source: synset_id.clone(),
                                 target: target.clone()
                             });
@@ -203,6 +265,23 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                             rel: rel.clone(),
                             target: target.clone()
                         });
+                    }
+                }
+            }
+            if rel == SynsetRelType::Similar {
+                if let Some(target_synset) = wn.synset_by_id(&target)? {
+                    let expected = match synset.part_of_speech {
+                        PartOfSpeech::a => Some(PartOfSpeech::s),
+                        PartOfSpeech::s => Some(PartOfSpeech::a),
+                        _ => None
+                    };
+                    if let Some(expected) = expected {
+                        if target_synset.part_of_speech != expected {
+                            errors.push(ValidationError::SimilarTargetPOS {
+                                id: synset_id.clone(),
+                                target: target.clone()
+                            });
+                        }
                     }
                 }
             }
@@ -245,6 +324,12 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
             synset.hypernym.is_empty() &&
             synset.instance_hypernym.is_empty() {
             errors.push(ValidationError::NoHypernym {
+                id: synset_id.clone()
+            });
+        }
+
+        if !synset.hypernym.is_empty() && !synset.instance_hypernym.is_empty() {
+            errors.push(ValidationError::HypernymInstanceConflict {
                 id: synset_id.clone()
             });
         }
@@ -412,6 +497,7 @@ fn check_no_loops<L : Lexicon, ProgressBar : Progress>(wn : &L,
 lazy_static! {
    static ref VALID_SYNSET_ID : Regex = Regex::new("^[0-9]{8}-[nvars]$").unwrap();
    static ref VALID_ILI : Regex = Regex::new("^i\\d+$").unwrap();
+   static ref VALID_WIKIDATA_ID : Regex = Regex::new("^Q[1-9][0-9]*$").unwrap();
 }
 
 fn is_valid_synset_id(synset_id : &SynsetId) -> bool {
@@ -420,6 +506,10 @@ fn is_valid_synset_id(synset_id : &SynsetId) -> bool {
 
 fn is_valid_ili(iliid : &ILIID) -> bool {
     VALID_ILI.is_match(iliid.as_str())
+}
+
+fn is_valid_wikidata_id(qid : &str) -> bool {
+    VALID_WIKIDATA_ID.is_match(qid)
 }
 
 pub enum ValidationError {
@@ -454,7 +544,14 @@ pub enum ValidationError {
     DomainLoop { id: SynsetId },
     SynsetMemberNotInEntries { id: SynsetId, member: String },
     DuplicateMember { id: SynsetId, member : String },
-    SenseNotInSynsetMembers { id: SynsetId, member: String }
+    SenseNotInSynsetMembers { id: SynsetId, member: String },
+    SimilarTargetPOS { id: SynsetId, target: SynsetId },
+    HypernymInstanceConflict { id: SynsetId },
+    HypernymTargetIsInstance { source: SynsetId, target: SynsetId },
+    DuplicateDefinition { id1: SynsetId, id2: SynsetId },
+    DuplicateILI { id1: SynsetId, id2: SynsetId, ili: ILIID },
+    InvalidWikidataId { id: SynsetId, qid: String },
+    DuplicateWikidataId { id1: SynsetId, id2: SynsetId, qid: String }
 }
 
 impl fmt::Display for ValidationError {
@@ -543,9 +640,23 @@ impl fmt::Display for ValidationError {
             ValidationError::DuplicateMember { id, member } =>
                 write!(f, "{} has duplicate member {}", id.as_str(), member),
             ValidationError::SenseNotInSynsetMembers { id, member } =>
-                write!(f, "{} does not contain {} in member list", id.as_str(), member)
-
-
+                write!(f, "{} does not contain {} in member list", id.as_str(), member),
+            ValidationError::SimilarTargetPOS { id, target } =>
+                write!(f, "Similar relation from {} to {} does not link an adjective to its satellite",
+                       id.as_str(), target.as_str()),
+            ValidationError::HypernymInstanceConflict { id } =>
+                write!(f, "{} has both a hypernym and an instance_hypernym relation", id.as_str()),
+            ValidationError::HypernymTargetIsInstance { source, target } =>
+                write!(f, "Hypernym from {} targets {}, which is itself an instance",
+                       source.as_str(), target.as_str()),
+            ValidationError::DuplicateDefinition { id1, id2 } =>
+                write!(f, "{} and {} have the same definition text", id1.as_str(), id2.as_str()),
+            ValidationError::DuplicateILI { id1, id2, ili } =>
+                write!(f, "{} and {} both use ILI {}", id1.as_str(), id2.as_str(), ili.as_str()),
+            ValidationError::InvalidWikidataId { id, qid } =>
+                write!(f, "{} has an invalid Wikidata id {}", id.as_str(), qid),
+            ValidationError::DuplicateWikidataId { id1, id2, qid } =>
+                write!(f, "{} and {} both use Wikidata id {}", id1.as_str(), id2.as_str(), qid)
         }
     }
 }
@@ -580,13 +691,15 @@ pub fn fix<L : Lexicon>(wn : &mut L,
             change_manager::delete_rel(wn, source, target, change_list);
             true
         },
-        ValidationError::DuplicateSenseRelation { source:_, rel:_, target:_ } => {
-            // TODO
-            false
+        ValidationError::DuplicateSenseRelation { source, rel, target } => {
+            change_manager::delete_sense_rel(wn, source, target, change_list)?;
+            change_manager::insert_sense_relation(wn, source.clone(), rel.clone(), target.clone(), change_list)?;
+            true
         },
-        ValidationError::DuplicateSynsetRelation { source:_, rel:_, target:_ } => {
-            // TODO
-            false
+        ValidationError::DuplicateSynsetRelation { source, rel, target } => {
+            change_manager::delete_rel(wn, source, target, change_list);
+            change_manager::insert_rel(wn, source, rel, target, change_list)?;
+            true
         },
         ValidationError::DuplicateSenseKey { .. } => false,
         ValidationError::DuplicateSyntacticBehaviour { .. } => false,
@@ -620,10 +733,220 @@ pub fn fix<L : Lexicon>(wn : &mut L,
         ValidationError::Loop { .. } =>  false,
         ValidationError::DomainLoop { .. } =>  false,
         ValidationError::SynsetMemberNotInEntries { .. } => false,
-        ValidationError::DuplicateMember { .. } => {
-            // TODO
-            false
+        ValidationError::DuplicateMember { id, .. } => {
+            match wn.synset_by_id(id)? {
+                Some(synset) => {
+                    let mut seen = HashSet::new();
+                    let deduped : Vec<String> = synset.members.iter()
+                        .filter(|m| seen.insert((*m).clone()))
+                        .cloned().collect();
+                    change_manager::change_members(wn, id, deduped, change_list)?;
+                    true
+                },
+                None => false
+            }
         },
         ValidationError::SenseNotInSynsetMembers { .. } => false,
+        ValidationError::SimilarTargetPOS { .. } => false,
+        ValidationError::HypernymInstanceConflict { .. } => false,
+        ValidationError::HypernymTargetIsInstance { .. } => false,
+        ValidationError::DuplicateDefinition { .. } => false,
+        ValidationError::DuplicateILI { .. } => false,
+        ValidationError::InvalidWikidataId { .. } => false,
+        ValidationError::DuplicateWikidataId { .. } => false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wordnet::LexiconHashMapBackend;
+    use crate::progress::NullProgress;
+
+    fn add_noun<L : Lexicon>(wn : &mut L, ssid : &str, definition : &str,
+                pos : char, change_list : &mut change_manager::ChangeList) -> SynsetId {
+        let lexfile = match pos {
+            'n' => "noun.object",
+            'v' => "verb.change",
+            'a' | 's' => "adj.all",
+            _ => "adv.all"
+        };
+        change_manager::add_synset(wn, definition.to_owned(), lexfile.to_owned(),
+            PosKey::new(pos.to_string()), Some(SynsetId::new(ssid)), change_list).unwrap()
+    }
+
+    fn validate_errors<L : Lexicon>(wn : &L) -> Vec<ValidationError> {
+        let mut bar = NullProgress;
+        validate(wn, &mut bar).unwrap()
+    }
+
+    #[test]
+    fn test_similar_target_pos() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000001-a", "adjective a", 'a', &mut change_list);
+        let b = add_noun(&mut wn, "00000002-a", "adjective b (should be satellite)", 'a', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.similar.push(b.clone()); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::SimilarTargetPOS { id, target } if *id == a && *target == b)));
+    }
+
+    #[test]
+    fn test_hypernym_instance_conflict() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let main = add_noun(&mut wn, "00000010-n", "main synset", 'n', &mut change_list);
+        let hyper_target = add_noun(&mut wn, "00000011-n", "hypernym target", 'n', &mut change_list);
+        let instance_target = add_noun(&mut wn, "00000012-n", "instance target", 'n', &mut change_list);
+        wn.update_synset(&main, |ss| {
+            ss.hypernym.push(hyper_target.clone());
+            ss.instance_hypernym.push(instance_target.clone());
+        }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::HypernymInstanceConflict { id } if *id == main)));
+    }
+
+    #[test]
+    fn test_hypernym_target_is_instance() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let root = add_noun(&mut wn, "00000020-n", "root", 'n', &mut change_list);
+        let d = add_noun(&mut wn, "00000021-n", "instance synset", 'n', &mut change_list);
+        let e = add_noun(&mut wn, "00000022-n", "hypernym-of-instance synset", 'n', &mut change_list);
+        wn.update_synset(&d, |ss| { ss.instance_hypernym.push(root.clone()); }).unwrap();
+        wn.update_synset(&e, |ss| { ss.hypernym.push(d.clone()); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e2| matches!(e2,
+            ValidationError::HypernymTargetIsInstance { source, target } if *source == e && *target == d)));
+    }
+
+    #[test]
+    fn test_duplicate_definition() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000030-n", "shared definition", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000031-n", "shared definition", 'n', &mut change_list);
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::DuplicateDefinition { id1, id2 } if
+                (*id1 == a && *id2 == b) || (*id1 == b && *id2 == a))));
+    }
+
+    #[test]
+    fn test_duplicate_ili() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000040-n", "ili synset a", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000041-n", "ili synset b", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.ili = Some(ILIID::new("i12345")); }).unwrap();
+        wn.update_synset(&b, |ss| { ss.ili = Some(ILIID::new("i12345")); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::DuplicateILI { id1, id2, ili } if
+                ili.as_str() == "i12345" &&
+                ((*id1 == a && *id2 == b) || (*id1 == b && *id2 == a)))));
+    }
+
+    #[test]
+    fn test_invalid_wikidata_id() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000050-n", "wikidata synset", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.wikidata.push("not-a-qid".to_owned()); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::InvalidWikidataId { id, qid } if *id == a && qid == "not-a-qid")));
+    }
+
+    #[test]
+    fn test_duplicate_wikidata_id() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000060-n", "wikidata synset a", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000061-n", "wikidata synset b", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.wikidata.push("Q123".to_owned()); }).unwrap();
+        wn.update_synset(&b, |ss| { ss.wikidata.push("Q123".to_owned()); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(errors.iter().any(|e| matches!(e,
+            ValidationError::DuplicateWikidataId { id1, id2, qid } if
+                qid == "Q123" &&
+                ((*id1 == a && *id2 == b) || (*id1 == b && *id2 == a)))));
+    }
+
+    #[test]
+    fn test_fix_duplicate_synset_relation() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000070-n", "source synset", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000071-n", "target synset", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| {
+            ss.hypernym.push(b.clone());
+            ss.hypernym.push(b.clone());
+        }).unwrap();
+
+        let errors = validate_errors(&wn);
+        let dup = errors.iter().find(|e| matches!(e,
+            ValidationError::DuplicateSynsetRelation { source, target, .. } if *source == a && *target == b))
+            .expect("expected a DuplicateSynsetRelation error");
+
+        assert!(fix(&mut wn, dup, &mut change_list).unwrap());
+
+        let synset = wn.synset_by_id(&a).unwrap().unwrap();
+        assert_eq!(synset.hypernym.iter().filter(|t| **t == b).count(), 1);
+    }
+
+    #[test]
+    fn test_fix_duplicate_member() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000080-n", "member synset", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| {
+            ss.members.push("duplicated".to_owned());
+            ss.members.push("duplicated".to_owned());
+        }).unwrap();
+
+        let errors = validate_errors(&wn);
+        let dup = errors.iter().find(|e| matches!(e,
+            ValidationError::DuplicateMember { id, member } if *id == a && member == "duplicated"))
+            .expect("expected a DuplicateMember error");
+
+        assert!(fix(&mut wn, dup, &mut change_list).unwrap());
+
+        let synset = wn.synset_by_id(&a).unwrap().unwrap();
+        assert_eq!(synset.members.iter().filter(|m| **m == "duplicated").count(), 1);
+    }
+
+    #[test]
+    fn test_fix_duplicate_sense_relation() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let ss1 = add_noun(&mut wn, "00000090-n", "first sense synset", 'n', &mut change_list);
+        let ss2 = add_noun(&mut wn, "00000091-n", "second sense synset", 'n', &mut change_list);
+        let sense1 = change_manager::add_entry(&mut wn, ss1.clone(), "firstword".to_owned(),
+            PosKey::new("n".to_owned()), Vec::new(), None, &mut change_list).unwrap().unwrap();
+        let sense2 = change_manager::add_entry(&mut wn, ss2.clone(), "secondword".to_owned(),
+            PosKey::new("n".to_owned()), Vec::new(), None, &mut change_list).unwrap().unwrap();
+
+        change_manager::insert_sense_relation(&mut wn, sense1.clone(), SenseRelType::Antonym,
+            SenseOrSynsetId::Sense(sense2.clone()), &mut change_list).unwrap();
+
+        let dup = ValidationError::DuplicateSenseRelation {
+            source: sense1.clone(), rel: SenseRelType::Antonym,
+            target: SenseOrSynsetId::Sense(sense2.clone())
+        };
+        assert!(fix(&mut wn, &dup, &mut change_list).unwrap());
+
+        let links = wn.sense_links_from_id(&sense1).unwrap();
+        assert_eq!(links.iter().filter(|(r, t)|
+            *r == SenseRelType::Antonym && *t == UnresolvedSenseOrSynsetId::Sense(sense2.clone())).count(), 1);
+    }
 }
