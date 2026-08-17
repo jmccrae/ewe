@@ -1,0 +1,13 @@
+{
+  "name": "ewe",
+  "owner": {
+    "name": "John P. McCrae"
+  },
+  "plugins": [
+    {
+      "name": "ewe-wordnet-editing",
+      "source": "./",
+      "description": "Procedural guidance for editing Global Wordnet Association wordnets through the ewe_mcp MCP server: lexfile selection, definition conventions, relation/entry conventions, and safe synset deletion."
+    }
+  ]
+}

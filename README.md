@@ -69,3 +69,27 @@ ewe-mcp --wordnet /path/to/wn
 
 See [`ewe_mcp/README.md`](ewe_mcp/README.md) for the full tool list and client
 configuration.
+
+The wordnet-editing skill
+--------------------------
+
+A companion Claude Code plugin packages the judgment side of editing a wordnet —
+lexfile selection, the genus/differentia definition convention, when a synset needs a
+hypernym, when deletion vs. merging vs. moving an entry is appropriate — as a Skill
+that works alongside `ewe_mcp`'s tools. Unlike the crates above, it's meant to be
+installed in *other* GWA wordnet projects' repos, not just this one:
+
+```
+/plugin marketplace add jmccrae/ewe
+/plugin install ewe-wordnet-editing@ewe
+```
+
+To try it without a persistent install, point Claude Code at a local checkout for the
+session instead:
+
+```bash
+claude --plugin-dir /path/to/ewe
+```
+
+See [`skills/wordnet-editing/SKILL.md`](skills/wordnet-editing/SKILL.md) for what it
+covers.
