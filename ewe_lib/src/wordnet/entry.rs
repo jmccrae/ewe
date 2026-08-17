@@ -61,8 +61,8 @@ pub trait Entries : Sized {
         Ok(removed_ids)
     }
 
-    fn sense_links_from(&self, lemma : &str, pos : &PosKey, 
-                            synset_id : &SynsetId) -> Result<Vec<(SenseRelType, SenseId)>> {
+    fn sense_links_from(&self, lemma : &str, pos : &PosKey,
+                            synset_id : &SynsetId) -> Result<Vec<(SenseRelType, UnresolvedSenseOrSynsetId)>> {
         if let Some(e) = self.entry(lemma, pos)? {
             Ok(e.sense.iter().filter(|sense| sense.synset == *synset_id)
                 .flat_map(|sense| sense.sense_links_from()).collect())
@@ -71,8 +71,8 @@ pub trait Entries : Sized {
         }
     }
 
-    fn sense_links_from_id(&self, lemma : &str, pos : &PosKey, 
-                               sense_id : &SenseId) -> Result<Vec<(SenseRelType, SenseId)>> {
+    fn sense_links_from_id(&self, lemma : &str, pos : &PosKey,
+                               sense_id : &SenseId) -> Result<Vec<(SenseRelType, UnresolvedSenseOrSynsetId)>> {
         if let Some(e) = self.entry(lemma, pos)? {
             Ok(e.sense.iter().filter(|sense| sense.id == *sense_id)
                 .flat_map(|sense| sense.sense_links_from()).collect())
@@ -103,7 +103,7 @@ pub trait Entries : Sized {
 
     fn add_rel(&mut self, lemma : &str, pos : &PosKey,
                source : &SenseId, rel : SenseRelType,
-               target : &SenseId) -> Result<()> {
+               target : &SenseOrSynsetId) -> Result<()> {
         self.update_entry(lemma, pos, |e| {
             for sense in e.sense.iter_mut() {
                 if sense.id == *source {
@@ -114,8 +114,8 @@ pub trait Entries : Sized {
     }
 
     fn remove_rel(&mut self, lemma : &str, pos : &PosKey,
-               source : &SenseId, 
-               target : &SenseId) -> Result<()> {
+               source : &SenseId,
+               target : &SenseOrSynsetId) -> Result<()> {
         self.update_entry(lemma, pos, |e| {
             for sense in e.sense.iter_mut() {
                 if sense.id == *source {

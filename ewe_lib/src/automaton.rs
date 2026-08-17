@@ -3,7 +3,7 @@ use crate::change_manager::{ChangeList, RelationUpdate};
 use crate::progress::NullProgress;
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::validate::validate;
-use crate::wordnet::{Lexicon, PosKey, SenseId, SynsetId, ILIID};
+use crate::wordnet::{Lexicon, PosKey, SenseId, SenseOrSynsetId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -274,14 +274,29 @@ pub fn apply_automaton<L: Lexicon>(
                 };
                 match source_sense {
                     Some(sense) => {
-                        let target_sense = target_sense
-                            .ok_or(format!("Source sense {} with target sense", sense.as_str()))?;
+                        let rel = SenseRelType::from(&relation)
+                            .ok_or(format!("Bad relation {}.", relation))?;
+                        // A missing target sense means "target the synset itself" for
+                        // relations that allow a synset target (domain_topic/
+                        // domain_region/exemplifies/other); for any other relation
+                        // it's still an error, same as before.
+                        let target_sense = match target_sense {
+                            Some(target_sense) => SenseOrSynsetId::Sense(target_sense),
+                            None if rel.allows_synset_target() => {
+                                SenseOrSynsetId::Synset(target.clone())
+                            }
+                            None => {
+                                return Err(format!(
+                                    "Source sense {} with target sense",
+                                    sense.as_str()
+                                ));
+                            }
+                        };
 
                         change_manager::insert_sense_relation(
                             wn,
                             sense.clone(),
-                            SenseRelType::from(&relation)
-                                .ok_or(format!("Bad relation {}.", relation))?,
+                            rel,
                             target_sense,
                             changes,
                         )
@@ -345,10 +360,15 @@ pub fn apply_automaton<L: Lexicon>(
 
                 match source_sense {
                     Some(source_sense) => {
-                        let target_sense = target_sense.ok_or(format!(
-                            "Source sense {} with target sense",
-                            source_sense.as_str()
-                        ))?;
+                        // `delete_sense_rel` removes whatever relation(s) exist
+                        // between the pair, generically (not relation-type
+                        // specific), so a missing target sense can just fall back
+                        // to the synset itself - a no-op if nothing was ever
+                        // stored there.
+                        let target_sense = match target_sense {
+                            Some(target_sense) => SenseOrSynsetId::Sense(target_sense),
+                            None => SenseOrSynsetId::Synset(target.clone()),
+                        };
                         change_manager::delete_sense_rel(wn, &source_sense, &target_sense, changes)
                             .map_err(|e| e.to_string())?;
                     }
@@ -369,16 +389,29 @@ pub fn apply_automaton<L: Lexicon>(
                         wn,
                         &source.resolve(&last_synset_id)?,
                     )?;
+                    let target_synset = target.resolve(&last_synset_id)?;
+                    // Unlike Add/DeleteRelation, a missing target sense stays an
+                    // error here: reversing a sense-synset relation would need
+                    // to store a relation *from* a synset, which isn't
+                    // representable (there's no defined inverse either - see
+                    // rels.rs).
+                    let target_sense = match target_sense {
+                        Some(target_sense) => {
+                            target_sense.resolve(&last_sense_id, wn, &target_synset)?
+                        }
+                        None => {
+                            return Err(format!(
+                                "Cannot reverse a sense relation from {} targeting synset {}: reversing a sense-synset relation isn't representable",
+                                source_sense.as_str(),
+                                target_synset.as_str()
+                            ));
+                        }
+                    };
 
                     change_manager::reverse_sense_rel(
                         wn,
                         &source_sense,
-                        &target_sense
-                            .ok_or(format!(
-                                "Source sense {} with target sense",
-                                source_sense.as_str()
-                            ))?
-                            .resolve(&last_sense_id, wn, &target.resolve(&last_synset_id)?)?,
+                        &SenseOrSynsetId::Sense(target_sense),
                         changes,
                     )
                     .map_err(|e| e.to_string())?;
@@ -963,14 +996,16 @@ impl UpdateRelationItem {
         };
         match source_sense {
             Some(sense) => {
-                let target_sense = target_sense
-                    .ok_or(format!("Source sense {} with target sense", sense.as_str()))?;
-                Ok(RelationUpdate::Sense(
-                    sense,
-                    SenseRelType::from(&self.relation)
-                        .ok_or(format!("Bad relation {}.", self.relation))?,
-                    target_sense,
-                ))
+                let rel = SenseRelType::from(&self.relation)
+                    .ok_or(format!("Bad relation {}.", self.relation))?;
+                let target_sense = match target_sense {
+                    Some(target_sense) => SenseOrSynsetId::Sense(target_sense),
+                    None if rel.allows_synset_target() => SenseOrSynsetId::Synset(target.clone()),
+                    None => {
+                        return Err(format!("Source sense {} with target sense", sense.as_str()));
+                    }
+                };
+                Ok(RelationUpdate::Sense(sense, rel, target_sense))
             }
             None => Ok(RelationUpdate::Synset(
                 source.clone(),
@@ -985,7 +1020,7 @@ impl UpdateRelationItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wordnet::LexiconHashMapBackend;
+    use crate::wordnet::{LexiconHashMapBackend, UnresolvedSenseOrSynsetId};
 
     #[test]
     fn test_serialize() {
@@ -1265,7 +1300,7 @@ mod tests {
 
         let bar_links = lexicon.sense_links_from_id(&bar_sense).unwrap();
         assert!(
-            bar_links.contains(&(SenseRelType::Exemplifies, foo_sense.clone())),
+            bar_links.contains(&(SenseRelType::Exemplifies, UnresolvedSenseOrSynsetId::Sense(foo_sense.clone()))),
             "expected bar's sense to store 'exemplifies -> foo', got {:?}",
             bar_links
         );
@@ -1275,6 +1310,82 @@ mod tests {
             foo_links.is_empty(),
             "is_exemplified_by must not be stored directly on foo's sense, got {:?}",
             foo_links
+        );
+    }
+
+    #[test]
+    fn test_add_relation_missing_target_sense_targets_synset_when_allowed() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let ssid1 = change_manager::add_synset(
+            &mut lexicon,
+            "def 1".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+        change_manager::add_entry(
+            &mut lexicon,
+            ssid1.clone(),
+            "foo".to_owned(),
+            PosKey::new("n".to_string()),
+            Vec::new(),
+            None,
+            &mut change_list,
+        )
+        .unwrap();
+        let ssid2 = change_manager::add_synset(
+            &mut lexicon,
+            "def 2".to_string(),
+            "noun.animal".to_string(),
+            PosKey::new("n".to_string()),
+            None,
+            &mut change_list,
+        )
+        .expect("Could not create synset");
+
+        // domain_topic allows a synset target: a missing target_sense should
+        // succeed and store "foo domain_topic ssid2" (the whole synset), not error.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(ssid1.clone()),
+            target: SynsetRef::Id(ssid2.clone()),
+            relation: "domain_topic".to_string(),
+            source_sense: Some(SenseRef::lemma("foo")),
+            target_sense: None,
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new())
+            .expect("domain_topic with a missing target sense should target the synset");
+
+        let foo_sense = lexicon.get_sense_id2("foo", &ssid1).unwrap().unwrap();
+        let (_, _, sense) = lexicon.get_sense_by_id(&foo_sense).unwrap().unwrap();
+        assert!(
+            sense
+                .domain_topic
+                .contains(&UnresolvedSenseOrSynsetId::Synset(ssid2.clone())),
+            "expected foo's domain_topic to contain synset {:?}, got {:?}",
+            ssid2,
+            sense.domain_topic
+        );
+
+        // antonym does not allow a synset target: a missing target_sense must
+        // still be an error, same as before this change.
+        let actions = vec![Action::AddRelation {
+            source: SynsetRef::Id(ssid1.clone()),
+            target: SynsetRef::Id(ssid2.clone()),
+            relation: "antonym".to_string(),
+            source_sense: Some(SenseRef::lemma("foo")),
+            target_sense: None,
+            source_lemma: None,
+            target_lemma: None,
+        }];
+        assert!(
+            apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).is_err(),
+            "antonym with a missing target sense must still be an error"
         );
     }
 

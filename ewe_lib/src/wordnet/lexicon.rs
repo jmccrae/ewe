@@ -298,6 +298,70 @@ pub trait Lexicon: Sized {
             }
             bar.inc(1);
         }
+        // The four sense-synset relation fields (domain_topic/domain_region/
+        // exemplifies/other) come off disk as `UnresolvedSenseOrSynsetId::Unresolved`
+        // raw strings - `Deserialize` has no lexicon access to classify them.
+        // Now that every entry and synset is loaded, resolve each one against
+        // the lexicon (has_sense/synset_by_id) and rewrite it in place, so
+        // everything downstream of `load()` sees only `Sense`/`Synset`
+        // variants (or `Unresolved` for a genuinely dangling reference, which
+        // `validate()` reports rather than silently dropping). Resolution is
+        // a pure function of the raw string, so a cache keyed on it avoids
+        // repeating a lookup for the same target seen on multiple senses.
+        let mut resolved_cache: HashMap<String, UnresolvedSenseOrSynsetId> = HashMap::new();
+        let mut lemma_pos_to_resolve: Vec<(String, PosKey)> = Vec::new();
+        for es in self.entries_iter()? {
+            let (_, es) = es?;
+            for e in es.entries()? {
+                let (lemma, pos, e) = e?;
+                let mut needs_resolution = false;
+                for sense in e.sense.iter() {
+                    for id in sense
+                        .domain_topic
+                        .iter()
+                        .chain(sense.domain_region.iter())
+                        .chain(sense.exemplifies.iter())
+                        .chain(sense.other.iter())
+                    {
+                        if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
+                            needs_resolution = true;
+                            if !resolved_cache.contains_key(raw) {
+                                let resolved = match id.resolve(&self) {
+                                    Ok(resolved) => UnresolvedSenseOrSynsetId::from(resolved),
+                                    Err(_) => id.clone(),
+                                };
+                                resolved_cache.insert(raw.clone(), resolved);
+                            }
+                        }
+                    }
+                }
+                if needs_resolution {
+                    lemma_pos_to_resolve.push((lemma, pos));
+                }
+            }
+        }
+        for (lemma, pos) in lemma_pos_to_resolve {
+            self.entries_update(entry_key(&lemma), |e| {
+                e.update_entry(&lemma, &pos, |entry| {
+                    for sense in entry.sense.iter_mut() {
+                        for id in sense
+                            .domain_topic
+                            .iter_mut()
+                            .chain(sense.domain_region.iter_mut())
+                            .chain(sense.exemplifies.iter_mut())
+                            .chain(sense.other.iter_mut())
+                        {
+                            if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
+                                if let Some(resolved) = resolved_cache.get(raw) {
+                                    *id = resolved.clone();
+                                }
+                            }
+                        }
+                    }
+                })
+            })??;
+        }
+
         // Potentially ineffecient and we should try to reimplement it at some point
         let mut sense_links_to = HashMap::new();
         for es in self.entries_iter()? {
@@ -306,10 +370,16 @@ pub trait Lexicon: Sized {
                 let (_, _, e) = e?;
                 for sense in e.sense.iter() {
                     for (rel_type, target) in sense.sense_links_from() {
-                        sense_links_to
-                            .entry(target.clone())
-                            .or_insert_with(Vec::new)
-                            .push((rel_type, sense.id.clone()));
+                        // Only sense-sense targets get a backlink entry - there is
+                        // no defined inverse for the sense-synset direction (see
+                        // rels.rs), and a dangling/unresolved target has nothing
+                        // valid to key on (validate() reports it instead).
+                        if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+                            sense_links_to
+                                .entry(target)
+                                .or_insert_with(Vec::new)
+                                .push((rel_type, sense.id.clone()));
+                        }
                     }
                 }
             }
@@ -657,9 +727,11 @@ pub trait Lexicon: Sized {
         })??;
         for source in keys.iter() {
             for (rel, target) in v.iter() {
-                self.sense_links_to_update(target, |key| {
-                    key.retain(|x| x.0 != *rel && x.1 != *source);
-                })?;
+                if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+                    self.sense_links_to_update(target, |key| {
+                        key.retain(|x| x.0 != *rel && x.1 != *source);
+                    })?;
+                }
             }
         }
         Ok(keys)
@@ -684,7 +756,7 @@ pub trait Lexicon: Sized {
         lemma: &str,
         pos: &PosKey,
         synset_id: &SynsetId,
-    ) -> Result<Vec<(SenseRelType, SenseId)>> {
+    ) -> Result<Vec<(SenseRelType, UnresolvedSenseOrSynsetId)>> {
         Ok(match self.entries_get(entry_key(lemma))? {
             Some(e) => e.sense_links_from(lemma, pos, synset_id)?,
             None => Vec::new(),
@@ -708,7 +780,10 @@ pub trait Lexicon: Sized {
     }
 
     /// For a given sense, get all links from this sense
-    fn sense_links_from_id(&self, sense_id: &SenseId) -> Result<Vec<(SenseRelType, SenseId)>> {
+    fn sense_links_from_id(
+        &self,
+        sense_id: &SenseId,
+    ) -> Result<Vec<(SenseRelType, UnresolvedSenseOrSynsetId)>> {
         Ok(match self.sense_id_to_lemma_pos_get(sense_id)? {
             Some((lemma, pos)) => match self.entries_get(entry_key(&lemma))? {
                 Some(e) => e.sense_links_from_id(&lemma, &pos, sense_id)?,
@@ -722,7 +797,7 @@ pub trait Lexicon: Sized {
     fn all_sense_links(
         &self,
         synset_id: &SynsetId,
-    ) -> Result<Vec<(SenseId, SenseRelType, SenseId)>> {
+    ) -> Result<Vec<(SenseId, SenseRelType, UnresolvedSenseOrSynsetId)>> {
         let mut links = Vec::new();
         for member in self.members_by_id(synset_id)? {
             for sense in self.get_sense(&member, synset_id)? {
@@ -731,7 +806,11 @@ pub trait Lexicon: Sized {
                 }
                 if let Some(links_to) = self.sense_links_to_get(&sense.id)? {
                     for (sense_rel_type, source) in links_to.iter() {
-                        links.push((source.clone(), sense_rel_type.clone(), sense.id.clone()));
+                        links.push((
+                            source.clone(),
+                            sense_rel_type.clone(),
+                            UnresolvedSenseOrSynsetId::Sense(sense.id.clone()),
+                        ));
                     }
                 }
             }
@@ -785,18 +864,40 @@ pub trait Lexicon: Sized {
         })
     }
 
-    /// Add a relation between two senses
+    /// Add a relation between two senses. `target` is the resolved type -
+    /// callers (CLI/`change_manager`/automaton) always have a validated
+    /// target before calling this.
     fn add_sense_rel(
         &mut self,
         source: &SenseId,
         rel: SenseRelType,
-        target: &SenseId,
+        target: &SenseOrSynsetId,
     ) -> Result<()> {
-        self.sense_links_to_push(target.clone(), rel.clone(), source.clone())?;
+        // No defined inverse exists for the sense-synset direction (see
+        // rels.rs), so only a sense target gets a backlink entry.
+        if let SenseOrSynsetId::Sense(target_sense) = target {
+            self.sense_links_to_push(target_sense.clone(), rel.clone(), source.clone())?;
+        }
         let (s2t, rel) = rel.to_canonical();
-        let (store_source, store_target) = if s2t { (source, target) } else { (target, source) };
+        let (store_source, store_target): (SenseId, SenseOrSynsetId) = if s2t {
+            (source.clone(), target.clone())
+        } else {
+            match target {
+                SenseOrSynsetId::Sense(target_sense) => (
+                    target_sense.clone(),
+                    SenseOrSynsetId::Sense(source.clone()),
+                ),
+                SenseOrSynsetId::Synset(_) => {
+                    // `rel` here is one of the Has*/Is* inverses, which are
+                    // sense-sense/synset-synset only, never sense-synset -
+                    // this combination isn't representable and shouldn't be
+                    // requested by a well-behaved caller.
+                    return Ok(());
+                }
+            }
+        };
         let mut lemma_pos = None;
-        match self.sense_id_to_lemma_pos_get(store_source)? {
+        match self.sense_id_to_lemma_pos_get(&store_source)? {
             Some((lemma, pos)) => {
                 lemma_pos = Some((lemma.clone(), pos.clone()));
             }
@@ -807,7 +908,7 @@ pub trait Lexicon: Sized {
         match lemma_pos {
             Some((lemma, pos)) => {
                 self.entries_update(entry_key(&lemma), |e| {
-                    e.add_rel(&lemma, &pos, store_source, rel, store_target)
+                    e.add_rel(&lemma, &pos, &store_source, rel, &store_target)
                 })??;
             }
             None => {}
@@ -815,11 +916,13 @@ pub trait Lexicon: Sized {
         Ok(())
     }
 
-    /// Remove all links between two senses
-    fn remove_sense_rel(&mut self, source: &SenseId, target: &SenseId) -> Result<()> {
-        self.sense_links_to_update(target, |v| {
-            v.retain(|x| x.1 != *source);
-        })?;
+    /// Remove all links between two senses. `target` is the resolved type.
+    fn remove_sense_rel(&mut self, source: &SenseId, target: &SenseOrSynsetId) -> Result<()> {
+        if let SenseOrSynsetId::Sense(target_sense) = target {
+            self.sense_links_to_update(target_sense, |v| {
+                v.retain(|x| x.1 != *source);
+            })?;
+        }
         let mut lemma_pos = None;
         match self.sense_id_to_lemma_pos_get(source)? {
             Some((lemma, pos)) => {
@@ -943,9 +1046,10 @@ pub trait Lexicon: Sized {
         }
         match self.sense_links_to_get(old_key)?.map(|x| x.clone()) {
             Some(links_to) => {
+                let old_key_target = SenseOrSynsetId::Sense(old_key.clone());
                 for (rel, source) in links_to.into_owned() {
-                    self.remove_sense_rel(&source, old_key)?;
-                    self.add_sense_rel(&source, rel.clone(), old_key)?;
+                    self.remove_sense_rel(&source, &old_key_target)?;
+                    self.add_sense_rel(&source, rel.clone(), &old_key_target)?;
                 }
             }
             None => {}
@@ -1153,7 +1257,10 @@ pub trait Lexicon: Sized {
 fn add_sense_link_to<L: Lexicon>(backend: &mut L, entry: &Entry) -> Result<()> {
     for sense in entry.sense.iter() {
         for (rel_type, target) in sense.sense_links_from() {
-            backend.sense_links_to_push(target.clone(), rel_type, sense.id.clone())?;
+            // See add_sense_rel: only a sense target gets a backlink entry.
+            if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+                backend.sense_links_to_push(target, rel_type, sense.id.clone())?;
+            }
         }
     }
     Ok(())
@@ -1161,7 +1268,9 @@ fn add_sense_link_to<L: Lexicon>(backend: &mut L, entry: &Entry) -> Result<()> {
 
 fn add_sense_link_to_sense<L: Lexicon>(backend: &mut L, sense: &Sense) -> Result<()> {
     for (rel_type, target) in sense.sense_links_from() {
-        backend.sense_links_to_push(target.clone(), rel_type, sense.id.clone())?;
+        if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+            backend.sense_links_to_push(target, rel_type, sense.id.clone())?;
+        }
     }
     Ok(())
 }

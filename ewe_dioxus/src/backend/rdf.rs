@@ -425,12 +425,18 @@ fn write_synset_triples<W: std::io::Write>(
             ($rel_type:ident, $rel_name:expr) => {
                 for rel in &synset.$rel_type {
                     if rel.source_lemma == member.lemma {
-                        let target = build_url(
-                            site,
-                            "lemma",
-                            &lemma_id(&rel.target_lemma, &rel.target_poskey),
-                            Some(rel.target_synset.as_str()),
-                        )?;
+                        // domain_topic/domain_region/exemplifies/other can target
+                        // either a sense or a bare synset; when there's no
+                        // specific sense, link straight to the synset resource.
+                        let target = match (&rel.target_lemma, &rel.target_poskey) {
+                            (Some(target_lemma), Some(target_poskey)) => build_url(
+                                site,
+                                "lemma",
+                                &lemma_id(target_lemma, target_poskey),
+                                Some(rel.target_synset.as_str()),
+                            )?,
+                            _ => build_url(site, "synset", rel.target_synset.as_str(), None)?,
+                        };
                         triple!(&sense, &wn($rel_name)?, &target);
                     }
                 }
@@ -654,6 +660,7 @@ mod tests {
             is_body_part_of: vec![],
             vehicle: vec![],
             is_vehicle_of: vec![],
+            other_sense: vec![],
         }
     }
 

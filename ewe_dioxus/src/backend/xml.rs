@@ -239,15 +239,25 @@ fn sense_relations_xml(
         ($field:ident, $rel_type:expr) => {
             for rel in &synset.$field {
                 if rel.source_lemma == lemma {
-                    out.push((
-                        $rel_type,
-                        sense_xml_id(
-                            id_prefix,
-                            &rel.target_lemma,
-                            &rel.target_poskey,
-                            &rel.target_synset,
-                        ),
-                    ));
+                    // A `None` target_lemma/target_poskey means the target is a
+                    // bare synset (domain_topic/domain_region/exemplifies/other
+                    // can point at one instead of a specific sense) - the WN-LMF
+                    // SenseRelation/@target attribute must reference a sense, so
+                    // this can't be expressed here and is skipped, same as the
+                    // is_X_of relations above.
+                    if let (Some(target_lemma), Some(target_poskey)) =
+                        (&rel.target_lemma, &rel.target_poskey)
+                    {
+                        out.push((
+                            $rel_type,
+                            sense_xml_id(
+                                id_prefix,
+                                target_lemma,
+                                target_poskey,
+                                &rel.target_synset,
+                            ),
+                        ));
+                    }
                 }
             }
         };
