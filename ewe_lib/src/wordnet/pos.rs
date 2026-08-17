@@ -2,7 +2,9 @@ use serde::{Serialize,Deserialize};
 use std::fmt;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone,Eq,Hash,PartialOrd,Ord)]
-#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]pub struct PosKey(String);
+#[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
+#[cfg_attr(feature="schema", derive(schemars::JsonSchema))]
+pub struct PosKey(String);
 
 impl PosKey {
     pub fn new(s : impl Into<String>) -> PosKey { PosKey(s.into()) }

@@ -10,7 +10,6 @@ use crate::change_manager;
 
 pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<Vec<ValidationError>> {
     let mut errors = Vec::new();
-    println!("Validating");
     bar.start((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
     bar.set_percent_mode(true);
     let mut sense_keys = HashSet::new();

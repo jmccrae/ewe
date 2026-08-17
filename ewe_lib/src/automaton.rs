@@ -2,14 +2,23 @@ use crate::change_manager;
 use crate::change_manager::{ChangeList, RelationUpdate};
 use crate::progress::NullProgress;
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::validate::validate;
+use crate::validate::{validate, ValidationError};
 use crate::wordnet::{Lexicon, PosKey, SenseId, SenseOrSynsetId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// What a `validate` action within an automaton batch found - carries what
+/// [`crate::validate::validate`] returned, for the caller to report however it likes (e.g.
+/// `ewe_cli` prints it the same way its own interactive "Validate" menu option does).
+pub struct ValidationReport {
+    pub errors: Vec<ValidationError>,
+}
+
 /// Applies a batch of actions, returning the id of the last synset created or referenced
 /// (`SynsetRef::Last`'s target throughout the batch) - `None` if the batch never touched a
-/// synset. Lets callers that just added a synset find out what id it got.
+/// synset - and, if the batch contained a `validate` action, the report it produced (the last
+/// one, if there were several). Lets callers that just added a synset find out what id it got,
+/// and lets callers report validation results without `apply_automaton` printing them itself.
 ///
 /// On full success, also appends the batch to the change log (see [`ChangeLogEntry`]) - a batch
 /// that fails partway through (via an early `?` return below) is not logged, since the point is a
@@ -18,10 +27,11 @@ pub fn apply_automaton<L: Lexicon>(
     actions: Vec<Action>,
     wn: &mut L,
     changes: &mut ChangeList,
-) -> Result<Option<SynsetId>, String> {
+) -> Result<(Option<SynsetId>, Option<ValidationReport>), String> {
     let actions_for_log = actions.clone();
     let mut last_synset_id: Option<SynsetId> = None;
     let mut last_sense_id: Option<SenseId> = None;
+    let mut validation_report: Option<ValidationReport> = None;
     for action in actions {
         match action {
             Action::AddEntry {
@@ -438,14 +448,7 @@ pub fn apply_automaton<L: Lexicon>(
             Action::Validate => {
                 let mut progress = NullProgress;
                 let errors = validate(wn, &mut progress).map_err(|e| e.to_string())?;
-                for error in errors.iter() {
-                    println!("{}", error);
-                }
-                if errors.is_empty() {
-                    println!("No validation errors!");
-                } else {
-                    println!("{} validation errors", errors.len());
-                }
+                validation_report = Some(ValidationReport { errors });
             }
             Action::FixTransitivity => {
                 change_manager::fix_indirect_relations(wn, changes).map_err(|e| e.to_string())?;
@@ -489,7 +492,7 @@ pub fn apply_automaton<L: Lexicon>(
     if !actions_for_log.is_empty() {
         changelog_append(wn, &actions_for_log)?;
     }
-    Ok(last_synset_id)
+    Ok((last_synset_id, validation_report))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -541,6 +544,22 @@ impl<'de> Deserialize<'de> for SynsetRef {
             "last" => Ok(SynsetRef::Last),
             _ => Ok(SynsetRef::Id(SynsetId::new_owned(s))),
         }
+    }
+}
+
+// Hand-written rather than derived: `SynsetRef` has a custom `Serialize`/`Deserialize` (a plain
+// id string, or the literal "last") that a derived schema wouldn't reflect.
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for SynsetRef {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SynsetRef".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A synset id (e.g. \"00001740-n\"), or \"last\" to refer to the most recently created/referenced synset earlier in this action batch."
+        })
     }
 }
 
@@ -619,11 +638,28 @@ impl<'de> Deserialize<'de> for SenseRef {
     }
 }
 
+// Hand-written rather than derived: `SenseRef` has a custom `Serialize`/`Deserialize` (a plain
+// sense id, "lemma=..." , or the literal "last") that a derived schema wouldn't reflect.
+#[cfg(feature = "schema")]
+impl schemars::JsonSchema for SenseRef {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SenseRef".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A sense id (e.g. \"example%1:09:00::\"), \"lemma=<word>\" to pick the sense of the given lemma in the referenced synset, or \"last\" to refer to the most recently created/referenced sense earlier in this action batch."
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ActionWrapper(#[serde(with = "serde_yaml::with::singleton_map")] pub Action);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Action {
     #[serde(rename = "add_entry")]
     AddEntry {
@@ -936,6 +972,7 @@ pub fn has_unsaved_changes<L: Lexicon>(wn: &L) -> Result<bool, String> {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UpdateRelationItem {
     relation: String,
     target: SynsetRef,
@@ -1021,6 +1058,53 @@ impl UpdateRelationItem {
 mod tests {
     use super::*;
     use crate::wordnet::{LexiconHashMapBackend, UnresolvedSenseOrSynsetId};
+
+    // Smoke-checks that the `schema` feature's derived/hand-written `JsonSchema` impls
+    // actually produce schemas, and that they don't drift from what `Action` really
+    // serializes to over JSON (as opposed to `test_serialize`'s YAML format below, which
+    // is what `ewe_cli` automaton scripts use - `ewe_mcp` speaks JSON).
+    #[cfg(feature = "schema")]
+    #[test]
+    fn test_schema_for_action() {
+        let action_schema = serde_json::to_value(schemars::schema_for!(Action)).unwrap();
+        assert!(
+            action_schema.get("oneOf").is_some() || action_schema.get("anyOf").is_some(),
+            "Action's derived schema should be a union of its variants, got {:?}",
+            action_schema
+        );
+
+        // SynsetRef/SenseRef have hand-written schemas (see their `impl JsonSchema` above) -
+        // check they actually describe plain strings, matching their custom Serialize impls.
+        let synset_ref_schema = serde_json::to_value(schemars::schema_for!(SynsetRef)).unwrap();
+        assert_eq!(
+            synset_ref_schema.get("type").and_then(|t| t.as_str()),
+            Some("string"),
+            "SynsetRef's schema should describe a plain string, got {:?}",
+            synset_ref_schema
+        );
+        let sense_ref_schema = serde_json::to_value(schemars::schema_for!(SenseRef)).unwrap();
+        assert_eq!(
+            sense_ref_schema.get("type").and_then(|t| t.as_str()),
+            Some("string"),
+            "SenseRef's schema should describe a plain string, got {:?}",
+            sense_ref_schema
+        );
+
+        // Round-trip a representative action through JSON (not YAML) to confirm the wire
+        // format an MCP client would actually send matches what the schema describes.
+        let action = Action::AddRelation {
+            source: SynsetRef::id("00001740-n"),
+            source_sense: Some(SenseRef::lemma("bar")),
+            relation: "antonym".to_string(),
+            target: SynsetRef::id("00001741-n"),
+            target_sense: Some(SenseRef::id("baz%1:09:00::")),
+            source_lemma: None,
+            target_lemma: None,
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let round_tripped: Action = serde_json::from_value(json).unwrap();
+        assert_eq!(action, round_tripped);
+    }
 
     #[test]
     fn test_serialize() {

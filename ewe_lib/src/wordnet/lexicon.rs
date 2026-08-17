@@ -454,7 +454,6 @@ pub trait Lexicon: Sized {
         folder: P,
         bar: &mut Bar,
     ) -> result::Result<(), LexiconSaveError> {
-        println!("Saving WordNet");
         bar.start(73);
         for entries in self.entries_iter()? {
             let (ekey, entries) = entries?;

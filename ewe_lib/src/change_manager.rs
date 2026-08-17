@@ -21,9 +21,8 @@ impl ChangeList {
 }
 
 /// Remove a relation between synsets
-pub fn delete_rel<L : Lexicon>(wn : &mut L, source : &SynsetId, 
+pub fn delete_rel<L : Lexicon>(wn : &mut L, source : &SynsetId,
                   target : &SynsetId, change_list : &mut ChangeList) {
-    println!("Delete {} =*=> {}", source.as_str(), target.as_str());
     wn.remove_rel(source, target).
         unwrap_or_else(|_| {
             eprintln!("Removing relation from non-existant synset");
@@ -41,7 +40,6 @@ pub fn delete_rel<L : Lexicon>(wn : &mut L, source : &SynsetId,
 pub fn delete_sense_rel<L : Lexicon>(wn : &mut L,
                         source : &SenseId, target : &SenseOrSynsetId,
                         change_list : &mut ChangeList) -> Result<()> {
-    println!("Delete {} =*=> {}", source.as_str(), target.as_str());
     wn.remove_sense_rel(source, target)?;
     if let SenseOrSynsetId::Sense(target_sense) = target {
         wn.remove_sense_rel(target_sense, &SenseOrSynsetId::Sense(source.clone()))?;
@@ -55,8 +53,6 @@ pub fn insert_rel<L : Lexicon>(wn : &mut L,
                   source_id : &SynsetId,
                   rel_type : &SynsetRelType,
                   target_id : &SynsetId, change_list : &mut ChangeList) -> Result<()> {
-    println!("Insert {} ={}=> {}", source_id.as_str(), rel_type.value(),
-                    target_id.as_str());
     wn.add_rel(source_id, rel_type.clone(), target_id).unwrap_or_else(|_| {
         eprintln!("Adding relation to non-existant synset");
     });
@@ -134,15 +130,13 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
                  subcat : Vec<String>,
                  old_sense_id : Option<&SenseId>,
                  change_list : &mut ChangeList) -> Result<Option<SenseId>> {
-    println!("Adding {} to synset {}", lemma, synset_id.as_str());
-
     let mut entries = wn.entry_by_lemma_with_pos(&lemma)?.iter_mut()
         .filter(|(pos, _)| synset_pos == *pos)
         .map(|x| x.1.clone())
         .collect::<Vec<Cow<Entry>>>();
 
     if entries.len() > 1 {
-        println!("More than one entry for {} ({}). Please check the YAML file",
+        eprintln!("More than one entry for {} ({}). Please check the YAML file",
             lemma, synset_pos.as_str());
     }
 
@@ -201,7 +195,6 @@ pub fn add_entry<L : Lexicon>(wn : &mut L,
 pub fn delete_entry<L : Lexicon>(wn : &mut L,
                     synset_id : &SynsetId, lemma : &str, 
                     pos : &PosKey, warn : bool, change_list : &mut ChangeList) -> Result<()> {
-    println!("Removing {} from synset {}", lemma, synset_id.as_str());
     let links = wn.sense_links_to(lemma, pos, synset_id)?;
     for sense_id in  wn.remove_sense(lemma, pos, synset_id)? {
         for (_, source) in links.iter() {
@@ -212,7 +205,7 @@ pub fn delete_entry<L : Lexicon>(wn : &mut L,
     wn.update_synset(&synset_id, |synset| {
         synset.members.retain(|l| l != lemma);
         if warn && synset.members.is_empty() {
-            println!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
+            eprintln!("{} is now empty! Please add at least one new member before saving", synset_id.as_str());
         }
     }).unwrap_or_else(|_| {
         eprintln!("Removing entry from non-existant synset");
@@ -298,7 +291,7 @@ pub fn move_entry<L : Lexicon>(wn : &mut L,
             }
         },
         None => {
-            println!("New synset not created");
+            eprintln!("New synset not created");
         }
     };
     for form in forms {
@@ -315,8 +308,6 @@ pub fn delete_synset<L : Lexicon>(wn : &mut L,
                  synset_id : &SynsetId,
                  supersede_id : Option<&SynsetId>,
                  reason : String, change_list: &mut ChangeList) -> Result<()> {
-    println!("Deleting synset {}", synset_id.as_str());
-
     if let Some(supersede_id) = supersede_id {
         let entries = wn.members_by_id(synset_id)?;
         for entry in entries {
@@ -476,7 +467,6 @@ pub fn reverse_rel<L : Lexicon>(wn : &mut L,
 pub fn insert_sense_relation<L : Lexicon>(wn : &mut L,
                       source : SenseId, rel : SenseRelType,
                       target : SenseOrSynsetId, change_list : &mut ChangeList) -> Result<()> {
-    println!("Insert {} ={}=> {}", source.as_str(), rel.value(), target.as_str());
     // `is_symmetric` relations are never sense-synset (see rels.rs), so the
     // reverse insert only applies - and is only ever reached - when target
     // is itself a sense.

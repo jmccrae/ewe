@@ -163,9 +163,10 @@ pub async fn add_synset(
         lemmas,
         subcats,
     }];
-    let new_id = apply_automaton(actions, &mut *lexicon, &mut ChangeList::new())
-        .map_err(EweEditError::Automaton)?
-        .ok_or_else(|| EweEditError::Automaton("No synset was created".to_string()))?;
+    let (new_id, _validation_report) = apply_automaton(actions, &mut *lexicon, &mut ChangeList::new())
+        .map_err(EweEditError::Automaton)?;
+    let new_id =
+        new_id.ok_or_else(|| EweEditError::Automaton("No synset was created".to_string()))?;
     let synset = lexicon
         .synset_by_id(&new_id)?
         .ok_or_else(|| EweEditError::SynsetNotFoundAfterEdit(new_id.as_str().to_string()))?;

@@ -227,6 +227,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
         } else {
             Vec::new()
         };
+        println!("Adding {} to synset {}", lemma, synset_id.as_str());
         change_manager::add_entry(wn, synset_id, lemma, pos, subcat, None, change_list)
             .expect("Could not add entry");
     } else if action == "D" {
@@ -235,6 +236,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
             .expect("Cannot read wordnet")
         {
             Some(pos) => {
+                println!("Removing {} from synset {}", lemma, synset_id.as_str());
                 change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list)
                     .expect("Could not delete entry");
             }
@@ -253,6 +255,12 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
                     .part_of_speech
                     .equals_pos(&target_synset.part_of_speech)
                 {
+                    println!(
+                        "Moving {} from {} to {}",
+                        lemma,
+                        synset_id.as_str(),
+                        target_synset_id.as_str()
+                    );
                     change_manager::move_entry(
                         wn,
                         synset_id,
@@ -276,6 +284,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
             .expect("Cannot read wordnet")
         {
             Some(pos) => {
+                println!("Removing {} from synset {}", lemma, synset_id.as_str());
                 change_manager::delete_entry(wn, &synset_id, &lemma, &pos, true, change_list)
                     .expect("Could not delete entry");
                 let new_lemma = input("New lemma: ");
@@ -284,6 +293,7 @@ fn change_entry<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
                 } else {
                     Vec::new()
                 };
+                println!("Adding {} to synset {}", new_lemma, synset_id.as_str());
                 change_manager::add_entry(wn, synset_id, new_lemma, pos, subcat, None, change_list)
                     .expect("Could not add new entry");
             }
@@ -313,6 +323,7 @@ fn change_synset<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
         }
         let (supersede_synset_id, _) = enter_synset(wn, "superseding ");
 
+        println!("Deleting synset {}", synset_id.as_str());
         change_manager::delete_synset(
             wn,
             &synset_id,
@@ -355,6 +366,7 @@ fn change_synset<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
                         Vec::new()
                     };
                     if lemma.len() > 0 {
+                        println!("Adding {} to synset {}", lemma, new_id.as_str());
                         change_manager::add_entry(
                             wn,
                             new_id.clone(),
@@ -459,6 +471,12 @@ fn add_relation<L: Lexicon>(wn: &mut L, source_id: Option<SynsetId>, change_list
             }
             let rel = SenseRelType::from(&relation).unwrap();
             let target_sense_id = enter_sense(wn, "target ", rel.allows_synset_target());
+            println!(
+                "Insert {} ={}=> {}",
+                source_sense_id.as_str(),
+                rel.value(),
+                target_sense_id.as_str()
+            );
             change_manager::insert_sense_relation(
                 wn,
                 source_sense_id,
@@ -476,6 +494,12 @@ fn add_relation<L: Lexicon>(wn: &mut L, source_id: Option<SynsetId>, change_list
             }
             let rel = SynsetRelType::from(&relation).unwrap();
             let target_id = enter_synset(wn, "target ").0;
+            println!(
+                "Insert {} ={}=> {}",
+                source_id.as_str(),
+                rel.value(),
+                target_id.as_str()
+            );
             change_manager::insert_rel(wn, &source_id, &rel, &target_id, change_list)
                 .expect("Could not add relation");
         }
@@ -490,11 +514,17 @@ fn delete_relation<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
             // pair regardless of type, so a synset target is always offered
             // here (it's simply a no-op if nothing was ever stored there).
             let target_sense_id = enter_sense(wn, "target ", true);
+            println!(
+                "Delete {} =*=> {}",
+                source_sense_id.as_str(),
+                target_sense_id.as_str()
+            );
             change_manager::delete_sense_rel(wn, &source_sense_id, &target_sense_id, change_list)
                 .expect("Could not delete relation");
         }
         None => {
             let target_id = enter_synset(wn, "target ").0;
+            println!("Delete {} =*=> {}", source_id.as_str(), target_id.as_str());
             change_manager::delete_rel(wn, &source_id, &target_id, change_list);
         }
     }
@@ -505,11 +535,21 @@ fn reverse_relation<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
     match source_sense_id {
         Some(source_sense_id) => {
             let target_sense_id = enter_sense(wn, "target ", false);
+            println!(
+                "Reversing relation between {} and {}",
+                source_sense_id.as_str(),
+                target_sense_id.as_str()
+            );
             change_manager::reverse_sense_rel(wn, &source_sense_id, &target_sense_id, change_list)
                 .expect("Could not reverse relation");
         }
         None => {
             let target_id = enter_synset(wn, "target ").0;
+            println!(
+                "Reversing relation between {} and {}",
+                source_id.as_str(),
+                target_id.as_str()
+            );
             change_manager::reverse_rel(wn, &source_id, &target_id, change_list)
                 .expect("Could not reverse relation");
         }
@@ -743,10 +783,21 @@ fn run_automaton(script: &str, wordnet: Option<PathBuf>) {
 
     let mut ewe_changed = ChangeList::new();
 
-    ewe_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(|e| {
-        eprintln!("Could not apply automaton: {}", e);
-        exit(-1);
-    });
+    let (_, validation_report) = ewe_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed)
+        .unwrap_or_else(|e| {
+            eprintln!("Could not apply automaton: {}", e);
+            exit(-1);
+        });
+    if let Some(report) = validation_report {
+        for error in report.errors.iter() {
+            println!("{}", error);
+        }
+        if report.errors.is_empty() {
+            println!("No validation errors!");
+        } else {
+            println!("{} validation errors", report.errors.len());
+        }
+    }
 
     save(&wn, &path).expect("Could not save");
 }
