@@ -4,6 +4,7 @@ use crate::wordnet::*;
 use crate::wordnet::entry::BTEntries;
 use std::borrow::Cow;
 
+#[derive(Clone)]
 pub struct LexiconHashMapBackend {
     entries : HashMap<char, BTEntries>,
     synsets : HashMap<String, BTSynsets>,
