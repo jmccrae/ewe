@@ -16,10 +16,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release -p ewe-cli
       - run: cp target/release/ewe-cli ewe-cli-macos
+      - run: cargo build --release -p ewe-mcp
+      - run: cp target/release/ewe-mcp ewe-mcp-macos
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ewe-cli-macos
+          files: |
+            ewe-cli-macos
+            ewe-mcp-macos
           prerelease: false
           generate_release_notes: true
 

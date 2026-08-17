@@ -16,10 +16,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release -p ewe-cli
       - run: cp target/release/ewe-cli.exe ewe-cli-windows.exe
+      - run: cargo build --release -p ewe-mcp
+      - run: cp target/release/ewe-mcp.exe ewe-mcp-windows.exe
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ewe-cli-windows.exe
+          files: |
+            ewe-cli-windows.exe
+            ewe-mcp-windows.exe
           prerelease: false
           generate_release_notes: true
 

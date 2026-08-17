@@ -7,10 +7,10 @@ started as an editor for the [Open English Wordnet](https://github.com/globalwor
 but is designed to be configured for any wordnet project, in any language. It ensures
 that changes are consistent and validates the resulting files.
 
-The project is a Cargo workspace of three crates:
+The project is a Cargo workspace of four crates:
 
 - [`ewe_lib`](ewe_lib) — the core Wordnet data model, storage, validation, and the
-  "automaton" engine that applies batches of edits. Used by both tools below.
+  "automaton" engine that applies batches of edits. Used by all three tools below.
 - [`ewe_cli`](ewe_cli) — a menu-driven command-line editor. See
   [`ewe_cli/README.md`](ewe_cli/README.md) for installation, usage, and automaton-file
   scripting.
@@ -18,6 +18,10 @@ The project is a Cargo workspace of three crates:
   offering both read-only browsing (search, lemma/synset pages, JSON/RDF/XML/Turtle
   export) and, behind an `edit` feature, a full in-browser editor. See
   [`ewe_dioxus/README.md`](ewe_dioxus/README.md) for details.
+- [`ewe_mcp`](ewe_mcp) — an [MCP](https://modelcontextprotocol.io/) server exposing
+  wordnet queries and schema-validated automaton edits over stdio, for driving EWE from
+  Claude Code or other MCP-aware agents. See [`ewe_mcp/README.md`](ewe_mcp/README.md)
+  for the tool list and client configuration.
 
 The command-line editor
 ------------------------
@@ -50,3 +54,18 @@ identifiers; creating and deleting synsets; a change-log/history view; and savin
 edits back out to the YAML source (with validation, and the option to revert to the
 source instead). See [`ewe_dioxus/README.md`](ewe_dioxus/README.md) for full setup,
 configuration, and route documentation.
+
+The MCP server
+----------------
+
+`ewe_mcp` exposes wordnet queries and schema-validated automaton edits over the
+[Model Context Protocol](https://modelcontextprotocol.io/), for driving EWE from
+Claude Code or other MCP-aware agents:
+
+```bash
+cargo build --release -p ewe-mcp
+ewe-mcp --wordnet /path/to/wn
+```
+
+See [`ewe_mcp/README.md`](ewe_mcp/README.md) for the full tool list and client
+configuration.

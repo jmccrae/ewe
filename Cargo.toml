@@ -2,7 +2,8 @@
 members = [
     "ewe_lib",
     "ewe_cli",
-    "ewe_dioxus"
+    "ewe_dioxus",
+    "ewe_mcp"
     ]
 resolver = "2"
 
