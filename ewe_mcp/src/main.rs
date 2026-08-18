@@ -15,6 +15,7 @@ use rmcp::{tool, tool_router};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -63,6 +64,19 @@ struct ServerState {
     path: String,
     wn: LexiconHashMapBackend,
     changes: ChangeList,
+    /// The most recent mtime seen under `path` as of the last successful `load`/`reload`/
+    /// `save` - `save` compares this against the current on-disk state to detect a change
+    /// made outside this process (see `perform_save`/the `reload` tool). `None` if it
+    /// couldn't be determined (e.g. `path` didn't exist), in which case the staleness check
+    /// is skipped rather than blocking every future save.
+    loaded_mtime: Option<SystemTime>,
+}
+
+/// Best-effort snapshot of `path`'s current mtime - `None` rather than an error, since a
+/// failure here (e.g. a transient read error) should degrade to "skip the staleness check"
+/// rather than making every load/save in `ServerState` fallible.
+fn source_mtime(path: &str) -> Option<SystemTime> {
+    ewe_lib::source_mtime::latest_source_mtime(path).ok()
 }
 
 #[derive(Clone)]
@@ -140,6 +154,9 @@ struct DryRunReport {
 struct ApplyReport {
     applied: bool,
     saved: bool,
+    /// True if `saved` is false only because the on-disk wordnet has changed since this
+    /// server last loaded/saved it - call `reload` to pick up that change, then reapply.
+    stale: bool,
     last_synset_id: Option<String>,
     validation_errors: Vec<String>,
     change_summaries: Vec<String>,
@@ -148,7 +165,19 @@ struct ApplyReport {
 #[derive(Serialize)]
 struct SaveReport {
     saved: bool,
+    /// True if `saved` is false only because the on-disk wordnet has changed since this
+    /// server last loaded/saved it - call `reload` to pick up that change, then retry (or
+    /// pass `force: true` to save over it anyway).
+    stale: bool,
     validation_errors: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ReloadReport {
+    path: String,
+    /// True if this session had unsaved in-memory changes that `reload` just discarded in
+    /// favor of what was on disk.
+    discarded_unsaved_changes: bool,
 }
 
 fn validation_errors_of(wn: &LexiconHashMapBackend) -> Result<Vec<String>, String> {
@@ -158,6 +187,38 @@ fn validation_errors_of(wn: &LexiconHashMapBackend) -> Result<Vec<String>, Strin
         .iter()
         .map(|e| e.to_string())
         .collect())
+}
+
+/// Whether the wordnet on disk at `state.path` has changed since this server last
+/// loaded/saved it - `false` if that can't be determined (see `source_mtime`), so an
+/// unreadable path degrades to "trust the in-memory copy" rather than locking out every
+/// future save.
+fn is_stale(state: &ServerState) -> bool {
+    match state.loaded_mtime {
+        Some(loaded) => source_mtime(&state.path).is_some_and(|current| current > loaded),
+        None => false,
+    }
+}
+
+/// Save `state.wn` to `state.path` unless validation errors or on-disk staleness block it
+/// (in which case `force` overrides both). Shared by the `save` tool and `apply_automaton`'s
+/// auto-save so the two can't drift out of sync on what "safe to save" means. Returns
+/// `(saved, validation_errors, stale)`.
+fn perform_save(state: &mut ServerState, force: bool) -> Result<(bool, Vec<String>, bool), String> {
+    let validation_errors = validation_errors_of(&state.wn)?;
+    let stale = is_stale(state);
+    let saved = if (validation_errors.is_empty() && !stale) || force {
+        let mut save_progress = NullProgress;
+        state
+            .wn
+            .save(&state.path, &mut save_progress)
+            .map_err(|e| e.to_string())?;
+        state.loaded_mtime = source_mtime(&state.path);
+        true
+    } else {
+        false
+    };
+    Ok((saved, validation_errors, stale && !saved))
 }
 
 #[tool_router(server_handler)]
@@ -328,21 +389,12 @@ impl EweMcpServer {
         )?;
         let last_synset_id = last_synset_id.map(|id| id.as_str().to_string());
 
-        let validation_errors = validation_errors_of(&state.wn)?;
-        let saved = if validation_errors.is_empty() {
-            let mut save_progress = NullProgress;
-            state
-                .wn
-                .save(&state.path, &mut save_progress)
-                .map_err(|e| e.to_string())?;
-            true
-        } else {
-            false
-        };
+        let (saved, validation_errors, stale) = perform_save(state, false)?;
 
         let report = ApplyReport {
             applied: true,
             saved,
+            stale,
             last_synset_id,
             validation_errors,
             change_summaries,
@@ -352,24 +404,45 @@ impl EweMcpServer {
 
     #[tool(
         description = "Persist any pending in-memory changes to disk. Skips saving (returning the \
-        validation errors instead) unless the wordnet currently validates cleanly or `force` is set."
+        validation errors instead) unless the wordnet currently validates cleanly or `force` is \
+        set. Also skips saving - reporting `stale: true` - if the wordnet files on disk have \
+        changed since this server last loaded/saved them (e.g. a `git checkout`/branch switch/ \
+        hand edit made outside this MCP session); call `reload` first to pick up that change, or \
+        pass `force: true` to save over it anyway."
     )]
     fn save(&self, Parameters(SaveParams { force }): Parameters<SaveParams>) -> Result<String, String> {
-        let state = self.state.lock().unwrap();
-        let validation_errors = validation_errors_of(&state.wn)?;
-        let saved = if validation_errors.is_empty() || force {
-            let mut save_progress = NullProgress;
-            state
-                .wn
-                .save(&state.path, &mut save_progress)
-                .map_err(|e| e.to_string())?;
-            true
-        } else {
-            false
-        };
+        let mut guard = self.state.lock().unwrap();
+        let (saved, validation_errors, stale) = perform_save(&mut guard, force)?;
         let report = SaveReport {
             saved,
+            stale,
             validation_errors,
+        };
+        serde_json::to_string(&report).map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Reload the wordnet from disk, replacing the in-memory copy with whatever \
+        is currently at the server's wordnet path. Use this after an out-of-band change to the \
+        wordnet files made outside this MCP session (a `git checkout`, branch switch, or hand \
+        edit) - `save`/`apply_automaton` refuse to write over such a change (reporting \
+        `stale: true`) until this is called. Discards any pending in-memory changes this \
+        session made but never saved; `discarded_unsaved_changes` in the result says whether \
+        that happened."
+    )]
+    fn reload(&self) -> Result<String, String> {
+        let mut guard = self.state.lock().unwrap();
+        let mut progress = NullProgress;
+        let wn = LexiconHashMapBackend::new()
+            .load(&guard.path, &mut progress)
+            .map_err(|e| e.to_string())?;
+        let discarded_unsaved_changes = guard.changes.changed();
+        guard.wn = wn;
+        guard.changes = ChangeList::new();
+        guard.loaded_mtime = source_mtime(&guard.path);
+        let report = ReloadReport {
+            path: guard.path.clone(),
+            discarded_unsaved_changes,
         };
         serde_json::to_string(&report).map_err(|e| e.to_string())
     }
@@ -394,11 +467,13 @@ mod tests {
             &mut ChangeList::new(),
         )
         .unwrap();
+        let loaded_mtime = source_mtime(&path);
         EweMcpServer {
             state: Arc::new(Mutex::new(ServerState {
                 path,
                 wn,
                 changes: ChangeList::new(),
+                loaded_mtime,
             })),
         }
     }
@@ -470,18 +545,114 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// A fresh, uniquely-named `<temp>/<name>/src/yaml` directory to load/save a test
+    /// wordnet against - nested under its own unique parent (rather than a bare
+    /// `<temp>/<name>`) so that `Lexicon::save`'s sibling `../deprecations.csv` write
+    /// lands in a directory private to this test, not the shared `std::env::temp_dir()`
+    /// every other test (and concurrent test run) also writes into. Staleness detection
+    /// stats that sibling file too, so without this isolation an unrelated concurrent
+    /// test's save could make this test's directory look stale (or vice versa).
+    fn isolated_test_wn_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("ewe_mcp_test_{}_{}", std::process::id(), name))
+            .join("src/yaml");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn stale_source_blocks_save_unless_forced() {
+        let dir = isolated_test_wn_dir("stale_source_blocks_save");
+        let path = dir.to_string_lossy().to_string();
+
+        // A fresh `LexiconHashMapBackend` (no lexfiles at all) validates cleanly, so any
+        // block on save below is attributable to staleness alone, not validation errors.
+        let mut state = ServerState {
+            path: path.clone(),
+            wn: LexiconHashMapBackend::new(),
+            changes: ChangeList::new(),
+            loaded_mtime: source_mtime(&path),
+        };
+        assert!(
+            !is_stale(&state),
+            "nothing has touched the directory since loaded_mtime was captured"
+        );
+
+        // Simulate an out-of-band change made outside this session (e.g. `git checkout`).
+        std::fs::write(dir.join("entries-z.yaml"), "{}\n").unwrap();
+        assert!(
+            is_stale(&state),
+            "a file written after loaded_mtime must be detected as stale"
+        );
+
+        let (saved, validation_errors, stale) = perform_save(&mut state, false).unwrap();
+        assert!(!saved, "save must refuse to write over an unseen on-disk change");
+        assert!(validation_errors.is_empty());
+        assert!(stale, "the report must say staleness is why save was skipped");
+
+        let (saved, _validation_errors, stale) = perform_save(&mut state, true).unwrap();
+        assert!(saved, "force must override staleness (same escape hatch as validation errors)");
+        assert!(!stale, "a successful save is never reported as stale");
+
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn reload_picks_up_disk_and_reports_discarded_changes() {
+        let dir = isolated_test_wn_dir("reload_picks_up_disk");
+        let path = dir.to_string_lossy().to_string();
+        let server = test_server(path.clone());
+
+        // A real apply (even one left unsaved by a validation error, as this one is - see
+        // `validation_errors_block_save_but_force_overrides`) marks the session's `changes`
+        // dirty, unlike the synset seeded directly into `wn` by `test_server`.
+        server
+            .apply_automaton(Parameters(ApplyAutomatonParams {
+                actions: add_synset_action("reloadtestcat"),
+                dry_run: false,
+            }))
+            .unwrap();
+
+        // Simulate an out-of-band change made outside this session.
+        std::fs::write(dir.join("entries-z.yaml"), "{}\n").unwrap();
+        let save_result = server
+            .save(Parameters(SaveParams { force: false }))
+            .unwrap();
+        assert!(save_result.contains("\"stale\":true"), "{}", save_result);
+        assert!(save_result.contains("\"saved\":false"), "{}", save_result);
+
+        let reload_result = server.reload().unwrap();
+        assert!(
+            reload_result.contains("\"discarded_unsaved_changes\":true"),
+            "{}",
+            reload_result
+        );
+
+        // Staleness is cleared by reload - a clean empty lexicon (which is what `dir` now
+        // holds on disk) now saves without needing `force`.
+        let save_result = server
+            .save(Parameters(SaveParams { force: false }))
+            .unwrap();
+        assert!(save_result.contains("\"stale\":false"), "{}", save_result);
+        assert!(save_result.contains("\"saved\":true"), "{}", save_result);
+
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).ok();
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let (path, wn) = locate_wordnet(cli.wordnet).map_err(|e| anyhow::anyhow!(e))?;
+    let loaded_mtime = source_mtime(&path);
 
     let server = EweMcpServer {
         state: Arc::new(Mutex::new(ServerState {
             path,
             wn,
             changes: ChangeList::new(),
+            loaded_mtime,
         })),
     };
 
