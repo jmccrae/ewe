@@ -298,152 +298,7 @@ pub trait Lexicon: Sized {
             }
             bar.inc(1);
         }
-        // The four sense-synset relation fields (domain_topic/domain_region/
-        // exemplifies/other) come off disk as `UnresolvedSenseOrSynsetId::Unresolved`
-        // raw strings - `Deserialize` has no lexicon access to classify them.
-        // Now that every entry and synset is loaded, resolve each one against
-        // the lexicon (has_sense/synset_by_id) and rewrite it in place, so
-        // everything downstream of `load()` sees only `Sense`/`Synset`
-        // variants (or `Unresolved` for a genuinely dangling reference, which
-        // `validate()` reports rather than silently dropping). Resolution is
-        // a pure function of the raw string, so a cache keyed on it avoids
-        // repeating a lookup for the same target seen on multiple senses.
-        let mut resolved_cache: HashMap<String, UnresolvedSenseOrSynsetId> = HashMap::new();
-        let mut lemma_pos_to_resolve: Vec<(String, PosKey)> = Vec::new();
-        for es in self.entries_iter()? {
-            let (_, es) = es?;
-            for e in es.entries()? {
-                let (lemma, pos, e) = e?;
-                let mut needs_resolution = false;
-                for sense in e.sense.iter() {
-                    for id in sense
-                        .domain_topic
-                        .iter()
-                        .chain(sense.domain_region.iter())
-                        .chain(sense.exemplifies.iter())
-                        .chain(sense.other.iter())
-                    {
-                        if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
-                            needs_resolution = true;
-                            if !resolved_cache.contains_key(raw) {
-                                let resolved = match id.resolve(&self) {
-                                    Ok(resolved) => UnresolvedSenseOrSynsetId::from(resolved),
-                                    Err(_) => id.clone(),
-                                };
-                                resolved_cache.insert(raw.clone(), resolved);
-                            }
-                        }
-                    }
-                }
-                if needs_resolution {
-                    lemma_pos_to_resolve.push((lemma, pos));
-                }
-            }
-        }
-        for (lemma, pos) in lemma_pos_to_resolve {
-            self.entries_update(entry_key(&lemma), |e| {
-                e.update_entry(&lemma, &pos, |entry| {
-                    for sense in entry.sense.iter_mut() {
-                        for id in sense
-                            .domain_topic
-                            .iter_mut()
-                            .chain(sense.domain_region.iter_mut())
-                            .chain(sense.exemplifies.iter_mut())
-                            .chain(sense.other.iter_mut())
-                        {
-                            if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
-                                if let Some(resolved) = resolved_cache.get(raw) {
-                                    *id = resolved.clone();
-                                }
-                            }
-                        }
-                    }
-                })
-            })??;
-        }
-
-        // Potentially ineffecient and we should try to reimplement it at some point
-        let mut sense_links_to = HashMap::new();
-        for es in self.entries_iter()? {
-            let (_, es) = es?;
-            for e in es.entries()? {
-                let (_, _, e) = e?;
-                for sense in e.sense.iter() {
-                    for (rel_type, target) in sense.sense_links_from() {
-                        // Only sense-sense targets get a backlink entry - there is
-                        // no defined inverse for the sense-synset direction (see
-                        // rels.rs), and a dangling/unresolved target has nothing
-                        // valid to key on (validate() reports it instead).
-                        if let UnresolvedSenseOrSynsetId::Sense(target) = target {
-                            sense_links_to
-                                .entry(target)
-                                .or_insert_with(Vec::new)
-                                .push((rel_type, sense.id.clone()));
-                        }
-                    }
-                }
-            }
-        }
-        self.set_sense_links_to(sense_links_to)?;
-        let mut links_to = HashMap::new();
-        // NameNet-derived sources don't guarantee every synset member has a
-        // corresponding entries-*.yaml entry, unlike hand-curated WordNet
-        // sources. Collect the ones missing an entry here (while already
-        // scanning every synset for links_to) so they can be backfilled
-        // below once the immutable scan below is done.
-        let mut missing_members = Vec::new();
-        for ss in self.synsets_iter()? {
-            let (_, ss) = ss?;
-            for s in ss.iter()? {
-                let (ssid, s) = s?;
-                for (rel_type, target) in s.links_from() {
-                    links_to
-                        .entry(target.clone())
-                        .or_insert_with(Vec::new)
-                        .push((rel_type, ssid.clone()));
-                }
-                for member in s.members.iter() {
-                    if self.pos_for_entry_synset(member, &ssid)?.is_none() {
-                        missing_members.push((member.clone(), ssid.clone()));
-                    }
-                }
-            }
-        }
-        self.set_links_to(links_to)?;
-
-        // Backfill entries for the members collected above. Re-check each
-        // one fresh (rather than trusting the snapshot taken above) since
-        // backfilling one missing member can change the answer for another
-        // missing member that shares the same lemma (e.g. whether an entry
-        // for that lemma/pos now already exists).
-        for (lemma, synset_id) in missing_members {
-            let synset = match self.synset_by_id(&synset_id)? {
-                Some(s) => s.into_owned(),
-                None => continue,
-            };
-            let existing = self.entry_by_lemma_with_pos(&lemma)?;
-            let already_present = existing
-                .iter()
-                .any(|(_, e)| e.sense.iter().any(|sense| sense.synset == synset_id));
-            if already_present {
-                continue;
-            }
-            // Entries file conventions file satellite adjectives (`s`) under
-            // the same `a` bucket as regular adjectives.
-            let pos_key = if synset.part_of_speech == PartOfSpeech::s {
-                PosKey::new("a".to_string())
-            } else {
-                synset.part_of_speech.to_pos_key()
-            };
-            let sense_id = get_sense_key(&self, &lemma, None, &synset, &synset_id)?;
-            let sense = Sense::new(sense_id, synset_id.clone());
-            if existing.iter().any(|(p, _)| *p == pos_key) {
-                self.insert_sense(lemma, pos_key, sense)?;
-            } else {
-                self.insert_entry(lemma.clone(), pos_key.clone(), Entry::new())?;
-                self.insert_sense(lemma, pos_key, sense)?;
-            }
-        }
+        finalize_bulk_load(&mut self)?;
         bar.finish();
         Ok(self)
     }
@@ -1173,7 +1028,6 @@ pub trait Lexicon: Sized {
     }
 
     /// Get the synset augmented with the member data
-    #[cfg(feature = "redb")]
     fn get_member_synset(&self, id: &SynsetId) -> Result<MemberSynset> {
         if let Some(synset) = self.synset_by_id(id)? {
             let synset = synset.into_owned();
@@ -1294,6 +1148,182 @@ fn remove_link_to<L: Lexicon>(
         backend.links_to_update(&target, |m| {
             m.retain(|sr| sr.1 != *synset_id);
         })?;
+    }
+    Ok(())
+}
+
+/// Finalizes a lexicon that has just been bulk-populated with entries/synsets from an external
+/// source (`load()`'s own YAML file loop, or `xml::reader::read_lexicon_xml`) via direct
+/// `entries_insert`/`synsets_insert_synset` calls rather than the change-tracked
+/// `change_manager` API. Resolves every `UnresolvedSenseOrSynsetId` target now that every
+/// sense/synset is present, rebuilds the sense/synset reverse-link indexes, and (for NameNet-
+/// style sources that don't guarantee every synset member has a corresponding entry)
+/// backfills any missing ones.
+/// Removes duplicate entries in place, keeping each item's first occurrence.
+fn dedup_preserve_order<T: Eq + std::hash::Hash + Clone>(items: &mut Vec<T>) {
+    let mut seen = std::collections::HashSet::with_capacity(items.len());
+    items.retain(|item| seen.insert(item.clone()));
+}
+
+pub(crate) fn finalize_bulk_load<L: Lexicon>(
+    lexicon: &mut L,
+) -> result::Result<(), WordNetYAMLIOError> {
+    // The four sense-synset relation fields (domain_topic/domain_region/
+    // exemplifies/other) come off disk as `UnresolvedSenseOrSynsetId::Unresolved`
+    // raw strings - `Deserialize` has no lexicon access to classify them.
+    // Now that every entry and synset is loaded, resolve each one against
+    // the lexicon (has_sense/synset_by_id) and rewrite it in place, so
+    // everything downstream sees only `Sense`/`Synset` variants (or
+    // `Unresolved` for a genuinely dangling reference, which `validate()`
+    // reports rather than silently dropping). Resolution is a pure function
+    // of the raw string, so a cache keyed on it avoids repeating a lookup
+    // for the same target seen on multiple senses.
+    let mut resolved_cache: HashMap<String, UnresolvedSenseOrSynsetId> = HashMap::new();
+    let mut lemma_pos_to_resolve: Vec<(String, PosKey)> = Vec::new();
+    for es in lexicon.entries_iter()? {
+        let (_, es) = es?;
+        for e in es.entries()? {
+            let (lemma, pos, e) = e?;
+            let mut needs_resolution = false;
+            for sense in e.sense.iter() {
+                for id in sense
+                    .domain_topic
+                    .iter()
+                    .chain(sense.domain_region.iter())
+                    .chain(sense.exemplifies.iter())
+                    .chain(sense.other.iter())
+                {
+                    if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
+                        needs_resolution = true;
+                        if !resolved_cache.contains_key(raw) {
+                            let resolved = match id.resolve(lexicon) {
+                                Ok(resolved) => UnresolvedSenseOrSynsetId::from(resolved),
+                                Err(_) => id.clone(),
+                            };
+                            resolved_cache.insert(raw.clone(), resolved);
+                        }
+                    }
+                }
+            }
+            if needs_resolution {
+                lemma_pos_to_resolve.push((lemma, pos));
+            }
+        }
+    }
+    for (lemma, pos) in lemma_pos_to_resolve {
+        lexicon.entries_update(entry_key(&lemma), |e| {
+            e.update_entry(&lemma, &pos, |entry| {
+                for sense in entry.sense.iter_mut() {
+                    for id in sense
+                        .domain_topic
+                        .iter_mut()
+                        .chain(sense.domain_region.iter_mut())
+                        .chain(sense.exemplifies.iter_mut())
+                        .chain(sense.other.iter_mut())
+                    {
+                        if let UnresolvedSenseOrSynsetId::Unresolved(raw) = id {
+                            if let Some(resolved) = resolved_cache.get(raw) {
+                                *id = resolved.clone();
+                            }
+                        }
+                    }
+                    // A source that writes both a relation and its inverse (as our own XML
+                    // exporter does for exemplifies/is_exemplified_by) can produce two entries
+                    // that only turn out to be the same fact once resolved here - e.g. one
+                    // pushed pre-resolved as `Sense(x)` and the other still `Unresolved("x")`
+                    // until this loop just rewrote it to `Sense(x)` too. Each push already
+                    // deduped against what it could see at the time, so a final pass now that
+                    // everything is resolved is what actually catches this.
+                    dedup_preserve_order(&mut sense.domain_topic);
+                    dedup_preserve_order(&mut sense.domain_region);
+                    dedup_preserve_order(&mut sense.exemplifies);
+                    dedup_preserve_order(&mut sense.other);
+                }
+            })
+        })??;
+    }
+
+    // Potentially ineffecient and we should try to reimplement it at some point
+    let mut sense_links_to = HashMap::new();
+    for es in lexicon.entries_iter()? {
+        let (_, es) = es?;
+        for e in es.entries()? {
+            let (_, _, e) = e?;
+            for sense in e.sense.iter() {
+                for (rel_type, target) in sense.sense_links_from() {
+                    // Only sense-sense targets get a backlink entry - there is
+                    // no defined inverse for the sense-synset direction (see
+                    // rels.rs), and a dangling/unresolved target has nothing
+                    // valid to key on (validate() reports it instead).
+                    if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+                        sense_links_to
+                            .entry(target)
+                            .or_insert_with(Vec::new)
+                            .push((rel_type, sense.id.clone()));
+                    }
+                }
+            }
+        }
+    }
+    lexicon.set_sense_links_to(sense_links_to)?;
+    let mut links_to = HashMap::new();
+    // NameNet-derived sources don't guarantee every synset member has a
+    // corresponding entries-*.yaml entry, unlike hand-curated WordNet
+    // sources. Collect the ones missing an entry here (while already
+    // scanning every synset for links_to) so they can be backfilled
+    // below once the immutable scan below is done.
+    let mut missing_members = Vec::new();
+    for ss in lexicon.synsets_iter()? {
+        let (_, ss) = ss?;
+        for s in ss.iter()? {
+            let (ssid, s) = s?;
+            for (rel_type, target) in s.links_from() {
+                links_to
+                    .entry(target.clone())
+                    .or_insert_with(Vec::new)
+                    .push((rel_type, ssid.clone()));
+            }
+            for member in s.members.iter() {
+                if lexicon.pos_for_entry_synset(member, &ssid)?.is_none() {
+                    missing_members.push((member.clone(), ssid.clone()));
+                }
+            }
+        }
+    }
+    lexicon.set_links_to(links_to)?;
+
+    // Backfill entries for the members collected above. Re-check each
+    // one fresh (rather than trusting the snapshot taken above) since
+    // backfilling one missing member can change the answer for another
+    // missing member that shares the same lemma (e.g. whether an entry
+    // for that lemma/pos now already exists).
+    for (lemma, synset_id) in missing_members {
+        let synset = match lexicon.synset_by_id(&synset_id)? {
+            Some(s) => s.into_owned(),
+            None => continue,
+        };
+        let existing = lexicon.entry_by_lemma_with_pos(&lemma)?;
+        let already_present = existing
+            .iter()
+            .any(|(_, e)| e.sense.iter().any(|sense| sense.synset == synset_id));
+        if already_present {
+            continue;
+        }
+        // Entries file conventions file satellite adjectives (`s`) under
+        // the same `a` bucket as regular adjectives.
+        let pos_key = if synset.part_of_speech == PartOfSpeech::s {
+            PosKey::new("a".to_string())
+        } else {
+            synset.part_of_speech.to_pos_key()
+        };
+        let sense_id = get_sense_key(lexicon, &lemma, None, &synset, &synset_id)?;
+        let sense = Sense::new(sense_id, synset_id.clone());
+        if existing.iter().any(|(p, _)| *p == pos_key) {
+            lexicon.insert_sense(lemma, pos_key, sense)?;
+        } else {
+            lexicon.insert_entry(lemma.clone(), pos_key.clone(), Entry::new())?;
+            lexicon.insert_sense(lemma, pos_key, sense)?;
+        }
     }
     Ok(())
 }

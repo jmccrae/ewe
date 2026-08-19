@@ -14,7 +14,8 @@ use ewe_lib::change_manager::ChangeList;
 use ewe_lib::progress::NullProgress;
 use ewe_lib::rels::{SenseRelType, SynsetRelType};
 use ewe_lib::validate::{fix, validate};
-use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
+use ewe_lib::wordnet::xml::{read_lexicon_xml, write_lexicon_xml};
+use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, LexiconMetadata, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -729,6 +730,58 @@ enum Command {
         /// The numeric or textual ID to look up
         id: String,
     },
+    /// Export the wordnet to another format
+    Export {
+        #[command(subcommand)]
+        format: ExportFormat,
+    },
+    /// Import a wordnet from another format
+    Import {
+        #[command(subcommand)]
+        format: ImportFormat,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ExportFormat {
+    /// Export as a whole-lexicon, self-contained WN-LMF XML document
+    /// (https://globalwordnet.github.io/schemas/)
+    Xml {
+        /// Path to write the XML document to
+        path: PathBuf,
+
+        /// The `Lexicon/@id` prefix used to build every element id in the document
+        #[arg(long, default_value = "oewn")]
+        id_prefix: String,
+        /// The `Lexicon/@label`
+        #[arg(long, default_value = "Open English Wordnet")]
+        label: String,
+        /// The `Lexicon/@language` (BCP 47 code)
+        #[arg(long, default_value = "en")]
+        language: String,
+        /// The `Lexicon/@email` contact address
+        #[arg(long)]
+        email: Option<String>,
+        /// The `Lexicon/@license` URL
+        #[arg(long, default_value = "https://creativecommons.org/licenses/by/4.0")]
+        license: String,
+        /// The `Lexicon/@version`
+        #[arg(long, default_value = "1")]
+        version: String,
+        /// The `Lexicon/@url` project homepage
+        #[arg(long)]
+        url: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ImportFormat {
+    /// Import from a WN-LMF XML document (https://globalwordnet.github.io/schemas/), saving the
+    /// result as a YAML source tree
+    Xml {
+        /// Path to the XML document to import
+        path: PathBuf,
+    },
 }
 
 fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBackend), String> {
@@ -933,6 +986,47 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
     }
 }
 
+fn run_export_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
+    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        exit(-1);
+    });
+    let xml = write_lexicon_xml(&wn, &metadata).unwrap_or_else(|e| {
+        eprintln!("Could not generate XML: {}", e);
+        exit(-1);
+    });
+    std::fs::write(path, xml).unwrap_or_else(|e| {
+        eprintln!("Could not write {}: {}", path.display(), e);
+        exit(-1);
+    });
+    println!("Wrote {}", path.display());
+}
+
+fn run_import_xml(path: &Path, out_dir: Option<PathBuf>) {
+    let out_dir = out_dir.unwrap_or_else(|| PathBuf::from("./"));
+    let file = File::open(path).unwrap_or_else(|e| {
+        eprintln!("Could not open {}: {}", path.display(), e);
+        exit(-1);
+    });
+    let (wn, metadata) = read_lexicon_xml(LexiconHashMapBackend::new(), file).unwrap_or_else(|e| {
+        eprintln!("Could not import {}: {}", path.display(), e);
+        exit(-1);
+    });
+    println!(
+        "Imported {} entries, {} synsets from lexicon {:?} ({})",
+        wn.n_entries().expect("Cannot read imported lexicon"),
+        wn.n_synsets().expect("Cannot read imported lexicon"),
+        metadata.label,
+        metadata.id_prefix
+    );
+    let mut progress = IndicatifProgress::new();
+    wn.save(&out_dir, &mut progress).unwrap_or_else(|e| {
+        eprintln!("Could not save to {}: {}", out_dir.display(), e);
+        exit(-1);
+    });
+    println!("Saved YAML to {}", out_dir.display());
+}
+
 fn run_tui() {
     println!("");
     println!("         ,ww                             ");
@@ -988,6 +1082,35 @@ fn main() {
             sense_ids,
         }) => {
             run_word(word, *ignore_case, *sense_ids, cli.wordnet);
+        }
+        Some(Command::Export {
+            format:
+                ExportFormat::Xml {
+                    ref path,
+                    id_prefix,
+                    label,
+                    language,
+                    email,
+                    license,
+                    version,
+                    url,
+                },
+        }) => {
+            let metadata = LexiconMetadata {
+                id_prefix: id_prefix.clone(),
+                label: label.clone(),
+                language: language.clone(),
+                email: email.clone(),
+                license: license.clone(),
+                version: version.clone(),
+                url: url.clone(),
+            };
+            run_export_xml(path, metadata, cli.wordnet);
+        }
+        Some(Command::Import {
+            format: ImportFormat::Xml { ref path },
+        }) => {
+            run_import_xml(path, cli.wordnet);
         }
         None => {
             run_tui();
