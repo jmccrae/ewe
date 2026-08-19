@@ -12,6 +12,12 @@
 //! `SynsetRelation` targets are always emitted regardless (a `Synset/@id` is just `{prefix}-{id}`,
 //! so it doesn't need the target to be present to be constructed - this mirrors how the RDF
 //! export links to synsets it doesn't itself describe).
+//!
+//! `LexicalEntry` and `Synset` elements are sorted by their own `@id` string, and
+//! `SyntacticBehaviour` elements (the subcategorization-frame table) come last - matching the
+//! real OEWN release's layout, confirmed by inspecting it directly, rather than following
+//! whatever order a `Lexicon` backend happens to iterate synsets/entries in (a `HashMap`-backed
+//! one has no defined order at all).
 
 use super::ids;
 use super::{LexiconMetadata, XmlExportError, WN_LMF_DOCTYPE};
@@ -37,7 +43,8 @@ pub fn write_lexicon_xml<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Resu
             synsets.push(MemberSynset::from_synset(&id, synset.into_owned(), wn)?);
         }
     }
-    write_lexicon_xml_subset(&synsets, metadata)
+    let frames = wn.frames_get()?;
+    write_lexicon_xml_subset(&synsets, metadata, &frames)
 }
 
 struct EntryAcc<'a> {
@@ -46,8 +53,14 @@ struct EntryAcc<'a> {
 }
 
 /// Export exactly the given synsets (see the module doc comment for the self-containment
-/// caveat this implies).
-pub fn write_lexicon_xml_subset(synsets: &[MemberSynset], metadata: &LexiconMetadata) -> Result<Vec<u8>> {
+/// caveat this implies). `frames` is the subcategorization-frame table (`Lexicon::frames_get`)
+/// written out as `SyntacticBehaviour` elements at the end of the document, in the order given -
+/// pass `&[]` if the caller has no frame table (e.g. a fragment export with no notion of one).
+pub fn write_lexicon_xml_subset(
+    synsets: &[MemberSynset],
+    metadata: &LexiconMetadata,
+    frames: &[(String, String)],
+) -> Result<Vec<u8>> {
     let prefix = metadata.id_prefix.as_str();
 
     let mut entries: BTreeMap<(String, PosKey), EntryAcc> = BTreeMap::new();
@@ -69,6 +82,20 @@ pub fn write_lexicon_xml_subset(synsets: &[MemberSynset], metadata: &LexiconMeta
         }
     }
 
+    // Match the real OEWN release's element order: both `LexicalEntry` and `Synset` are sorted
+    // by their own `@id` string (not by insertion/iteration order, which for a whole-lexicon
+    // export starting from a HashMap-backed `Lexicon` is otherwise unspecified) - confirmed by
+    // inspecting the real file directly, e.g. entries interleave punctuation/digits/letters in
+    // plain byte order ("'hood" < ".22-caliber" < "0-a" < "1-a"...), and synsets are one flat
+    // sequence by id across the whole lexicon, not grouped by lexfile.
+    let mut entries_sorted: Vec<(String, &(String, PosKey), &EntryAcc)> = entries
+        .iter()
+        .map(|(key, acc)| (ids::entry_xml_id(prefix, &key.0, &key.1), key, acc))
+        .collect();
+    entries_sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut synsets_sorted: Vec<&MemberSynset> = synsets.iter().collect();
+    synsets_sorted.sort_by(|a, b| a.id.cmp(&b.id));
+
     let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
     writer.write_event(Event::DocType(BytesText::from_escaped(WN_LMF_DOCTYPE)))?;
@@ -87,12 +114,19 @@ pub fn write_lexicon_xml_subset(synsets: &[MemberSynset], metadata: &LexiconMeta
     lexicon.push_attribute(("url", metadata.url.as_deref().unwrap_or("")));
     writer.write_event(Event::Start(lexicon))?;
 
-    for ((lemma, poskey), acc) in &entries {
+    for (_, (lemma, poskey), acc) in &entries_sorted {
         write_lexical_entry(&mut writer, prefix, lemma, poskey, acc, &sense_id_lookup)?;
     }
 
-    for synset in synsets {
+    for synset in &synsets_sorted {
         write_synset(&mut writer, prefix, synset)?;
+    }
+
+    for (id, subcategorization_frame) in frames {
+        let mut el = BytesStart::new("SyntacticBehaviour");
+        el.push_attribute(("id", id.as_str()));
+        el.push_attribute(("subcategorizationFrame", subcategorization_frame.as_str()));
+        writer.write_event(Event::Empty(el))?;
     }
 
     writer.write_event(Event::End(BytesEnd::new("Lexicon")))?;
@@ -161,6 +195,10 @@ fn write_sense<W: std::io::Write>(
 ) -> Result<()> {
     let mut sense = BytesStart::new("Sense");
     sense.push_attribute(("id", ids::sense_xml_id(prefix, &member.sense.id).as_str()));
+    let subcat = member.sense.subcat.join(" ");
+    if !subcat.is_empty() {
+        sense.push_attribute(("subcat", subcat.as_str()));
+    }
     sense.push_attribute(("synset", ids::synset_xml_id(prefix, &synset.id).as_str()));
 
     let relations = sense_relations_xml(prefix, synset, &member.lemma, sense_id_lookup);
@@ -383,13 +421,60 @@ mod tests {
     }
 
     #[test]
+    fn test_write_lexicon_xml_orders_entries_and_synsets_by_id_and_emits_frames() {
+        // Deliberately inserted in the "wrong" order (synset id descending, entries not
+        // alphabetical) - the real OEWN release sorts LexicalEntry/Synset by their own @id
+        // string regardless of insertion order, so the writer must too.
+        let mut wn = LexiconHashMapBackend::new();
+        let mut zebra_ss = Synset::new(PartOfSpeech::n);
+        zebra_ss.definition.push("a striped animal".to_string());
+        zebra_ss.members.push("zebra".to_string());
+        wn.insert_synset("noun.animal".to_string(), SsId::new("00002000-n"), zebra_ss)
+            .unwrap();
+        let mut ant_ss = Synset::new(PartOfSpeech::n);
+        ant_ss.definition.push("a small insect".to_string());
+        ant_ss.members.push("ant".to_string());
+        wn.insert_synset("noun.animal".to_string(), SsId::new("00001000-n"), ant_ss)
+            .unwrap();
+
+        let mut zebra_entry = Entry::new();
+        zebra_entry
+            .sense
+            .push(Sense::new(SId::new("zebra%1:05:00::"), SsId::new("00002000-n")));
+        wn.insert_entry("zebra".to_string(), PosKey::new("n"), zebra_entry).unwrap();
+        let mut ant_entry = Entry::new();
+        let mut ant_sense = Sense::new(SId::new("ant%1:05:00::"), SsId::new("00001000-n"));
+        ant_sense.subcat = vec!["vii".to_string()];
+        ant_entry.sense.push(ant_sense);
+        wn.insert_entry("ant".to_string(), PosKey::new("n"), ant_entry).unwrap();
+
+        wn.frames_set(vec![("vii".to_string(), "Something ----s".to_string())]).unwrap();
+
+        let xml = write_lexicon_xml(&wn, &metadata()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+
+        let ant_entry_pos = xml.find(r#"<LexicalEntry id="oewn-ant-n">"#).unwrap();
+        let zebra_entry_pos = xml.find(r#"<LexicalEntry id="oewn-zebra-n">"#).unwrap();
+        assert!(ant_entry_pos < zebra_entry_pos, "entries must be sorted by id, ant before zebra");
+
+        let ant_synset_pos = xml.find(r#"<Synset id="oewn-00001000-n""#).unwrap();
+        let zebra_synset_pos = xml.find(r#"<Synset id="oewn-00002000-n""#).unwrap();
+        assert!(ant_synset_pos < zebra_synset_pos, "synsets must be sorted by id, 00001000 before 00002000");
+
+        assert!(xml.contains(r#"subcat="vii""#));
+        assert!(xml.contains(r#"<SyntacticBehaviour id="vii" subcategorizationFrame="Something ----s"/>"#));
+        // SyntacticBehaviour comes after every Synset, matching the real release's layout.
+        assert!(xml.find("SyntacticBehaviour").unwrap() > zebra_synset_pos);
+    }
+
+    #[test]
     fn test_write_lexicon_xml_subset_skips_unresolvable_sense_relation_target() {
         // hypernym/hyponym-style synset relations always resolve since they're pure id
         // formatting, but a sense relation pointing outside the given subset can't be
         // constructed and must be dropped rather than emit a broken target.
         let wn = simple_lexicon();
         let member_synset = wn.get_member_synset(&SsId::new("00001740-n")).unwrap();
-        let xml = write_lexicon_xml_subset(std::slice::from_ref(&member_synset), &metadata()).unwrap();
+        let xml = write_lexicon_xml_subset(std::slice::from_ref(&member_synset), &metadata(), &[]).unwrap();
         let xml = String::from_utf8(xml).unwrap();
         assert!(!xml.contains("SenseRelation"));
     }

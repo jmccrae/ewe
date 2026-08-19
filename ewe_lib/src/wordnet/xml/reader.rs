@@ -81,6 +81,8 @@ struct Accumulator {
     pending_synset_rels: Vec<PendingSynsetRel>,
     pending_sense_rels: Vec<PendingSenseRel>,
 
+    frames: Vec<(String, String)>,
+
     warned_rel_types: HashSet<String>,
 }
 
@@ -126,6 +128,11 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
                 acc.synset_index.insert(id.clone(), acc.synsets.len());
                 acc.synsets.push((lexname, id, synset));
             }
+            Event::Empty(e) if e.name().as_ref() == b"SyntacticBehaviour" => {
+                let id = require_attr(&e, "id", "SyntacticBehaviour")?;
+                let frame = require_attr(&e, "subcategorizationFrame", "SyntacticBehaviour")?;
+                acc.frames.push((id, frame));
+            }
             _ => {}
         }
         buf.clear();
@@ -161,6 +168,9 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
     }
     for (lexname, id, synset) in acc.synsets {
         lexicon.insert_synset(lexname, id, synset)?;
+    }
+    if !acc.frames.is_empty() {
+        lexicon.frames_set(acc.frames)?;
     }
 
     finalize_bulk_load(&mut lexicon)?;
@@ -310,7 +320,11 @@ fn build_sense(e: &BytesStart, prefix: &str) -> Result<Sense> {
     let synset_attr = require_attr(e, "synset", "Sense")?;
     let sense_id = SenseId::new(ids::unmap_sense_key(&sense_xml_id, prefix));
     let synset_id = SynsetId::new_owned(ids::strip_prefix_id(prefix, &synset_attr));
-    Ok(Sense::new(sense_id, synset_id))
+    let mut sense = Sense::new(sense_id, synset_id);
+    if let Some(subcat) = attr(e, "subcat")? {
+        sense.subcat = subcat.split_whitespace().map(str::to_string).collect();
+    }
+    Ok(sense)
 }
 
 fn parse_sense_relations<R: Read>(
@@ -705,12 +719,12 @@ mod tests {
         assert_eq!(&normalized_truth, reimported, "synset {id} mismatch after XML round trip");
     }
 
-    /// Compares every `Sense` field the XML writer actually emits a `SenseRelation` for.
-    /// `also`/`similar`/`domain_topic`/`domain_region`/`other` are real fields on `Sense` but
-    /// `writer.rs`'s `sense_relations_xml` never emits them at the sense level (only at the
-    /// synset level, under different field names) - another pre-existing gap carried over
-    /// unchanged from the original exporter. `subcat`/`adjposition`/`sent` are YAML-only
-    /// extensions with no WN-LMF equivalent at all.
+    /// Compares every `Sense` field the XML writer actually emits a `SenseRelation`/attribute
+    /// for. `also`/`similar`/`domain_topic`/`domain_region`/`other` are real fields on `Sense`
+    /// but `writer.rs`'s `sense_relations_xml` never emits them at the sense level (only at the
+    /// synset level, under different field names) - a pre-existing gap carried over unchanged
+    /// from the original exporter. `adjposition`/`sent` are YAML-only extensions with no WN-LMF
+    /// equivalent at all; `subcat` *is* covered, via `Sense/@subcat`.
     fn assert_sense_round_trips(entry_lemma: &str, ground_truth: &Sense, reimported: &Sense) {
         macro_rules! field {
             ($f:ident) => {
@@ -725,6 +739,7 @@ mod tests {
         }
         field!(id);
         field!(synset);
+        field!(subcat);
         field!(antonym);
         field!(participle);
         field!(pertainym);
@@ -776,6 +791,11 @@ mod tests {
         assert_eq!(ground_truth.n_entries().unwrap(), reimported.n_entries().unwrap());
         assert_eq!(ground_truth.n_synsets().unwrap(), reimported.n_synsets().unwrap());
         assert_eq!(ground_truth.n_senses().unwrap(), reimported.n_senses().unwrap());
+        assert_eq!(
+            ground_truth.frames_get().unwrap().into_owned(),
+            reimported.frames_get().unwrap().into_owned(),
+            "subcategorization frame table mismatch after XML round trip"
+        );
 
         let mut synsets_compared = 0usize;
         for lexfile in ground_truth.synsets_iter().unwrap() {
