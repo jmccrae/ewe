@@ -21,6 +21,7 @@
 
 use super::ids;
 use super::{LexiconMetadata, XmlExportError, WN_LMF_DOCTYPE};
+use crate::wordnet::entry::Entries;
 use crate::wordnet::synset_members::Member;
 use crate::wordnet::{Lexicon, MemberSynset, PosKey, Pronunciation, SenseId, SynsetId, Synsets};
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
@@ -44,7 +45,25 @@ pub fn write_lexicon_xml<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Resu
         }
     }
     let frames = wn.frames_get()?;
-    write_lexicon_xml_subset(&synsets, metadata, &frames)
+
+    // The order senses appear within one LexicalEntry is semantically meaningful (roughly
+    // frequency/primacy rank) and is carried entirely by each `Entry.sense` Vec's own order -
+    // confirmed against the real release, whose Sense-element order matches the source YAML's
+    // declaration order exactly. `MemberSynset`-based reconstruction below has no way to see
+    // that (it only knows, per synset, which senses belong to it), so record each sense's rank
+    // within its own entry up front and use it to sort at write time.
+    let mut sense_rank: HashMap<SenseId, usize> = HashMap::new();
+    for bucket in wn.entries_iter()? {
+        let (_, entries) = bucket?;
+        for entry in entries.entries()? {
+            let (_, _, entry) = entry?;
+            for (rank, sense) in entry.sense.iter().enumerate() {
+                sense_rank.insert(sense.id.clone(), rank);
+            }
+        }
+    }
+
+    write_lexicon_xml_subset(&synsets, metadata, &frames, &sense_rank)
 }
 
 struct EntryAcc<'a> {
@@ -56,10 +75,15 @@ struct EntryAcc<'a> {
 /// caveat this implies). `frames` is the subcategorization-frame table (`Lexicon::frames_get`)
 /// written out as `SyntacticBehaviour` elements at the end of the document, in the order given -
 /// pass `&[]` if the caller has no frame table (e.g. a fragment export with no notion of one).
+/// `sense_rank` orders the `Sense` elements within each `LexicalEntry` (see
+/// [`write_lexicon_xml`]'s doc comment) - pass `&HashMap::new()` if unavailable, which falls
+/// back to whatever order the given `synsets` happen to be in (harmless for a single-synset
+/// fragment, since there's at most one sense per entry to order in that case).
 pub fn write_lexicon_xml_subset(
     synsets: &[MemberSynset],
     metadata: &LexiconMetadata,
     frames: &[(String, String)],
+    sense_rank: &HashMap<SenseId, usize>,
 ) -> Result<Vec<u8>> {
     let prefix = metadata.id_prefix.as_str();
 
@@ -80,6 +104,10 @@ pub fn write_lexicon_xml_subset(
                 member.sense.id.clone(),
             );
         }
+    }
+    for acc in entries.values_mut() {
+        acc.senses
+            .sort_by_key(|(_, member)| sense_rank.get(&member.sense.id).copied().unwrap_or(usize::MAX));
     }
 
     // Match the real OEWN release's element order: both `LexicalEntry` and `Synset` are sorted
@@ -300,8 +328,9 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
     writer.write_event(Event::Start(el))?;
 
     for defn in &synset.definition {
-        let mut def_el = BytesStart::new("Definition");
-        def_el.push_attribute(("language", "en"));
+        // No `language` attribute: it's inherited from `Lexicon/@language` when absent (the
+        // real release never sets it explicitly either).
+        let def_el = BytesStart::new("Definition");
         writer.write_event(Event::Start(def_el))?;
         writer.write_event(Event::Text(BytesText::new(defn)))?;
         writer.write_event(Event::End(BytesEnd::new("Definition")))?;
@@ -315,8 +344,8 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
     }
 
     for example in &synset.example {
+        // No `language` attribute here either - see the Definition loop above.
         let mut ex_el = BytesStart::new("Example");
-        ex_el.push_attribute(("language", "en"));
         if let Some(source) = &example.source {
             ex_el.push_attribute(("dc:source", source.as_str()));
         }
@@ -474,7 +503,7 @@ mod tests {
         // constructed and must be dropped rather than emit a broken target.
         let wn = simple_lexicon();
         let member_synset = wn.get_member_synset(&SsId::new("00001740-n")).unwrap();
-        let xml = write_lexicon_xml_subset(std::slice::from_ref(&member_synset), &metadata(), &[]).unwrap();
+        let xml = write_lexicon_xml_subset(std::slice::from_ref(&member_synset), &metadata(), &[], &HashMap::new()).unwrap();
         let xml = String::from_utf8(xml).unwrap();
         assert!(!xml.contains("SenseRelation"));
     }

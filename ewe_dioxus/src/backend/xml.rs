@@ -20,7 +20,7 @@ pub async fn synset_xml(id: String) -> Result<Response<Body>> {
     match resolve_synset(&id) {
         // No frame table for a single-synset fragment - see write_lexicon_xml_subset's doc
         // comment on why a subset export isn't fully self-contained anyway.
-        Ok(Some(ms)) => match write_lexicon_xml_subset(std::slice::from_ref(&ms), &metadata(&crate::db::read_settings()), &[]) {
+        Ok(Some(ms)) => match write_lexicon_xml_subset(std::slice::from_ref(&ms), &metadata(&crate::db::read_settings()), &[], &Default::default()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },
@@ -33,7 +33,7 @@ pub async fn synset_xml(id: String) -> Result<Response<Body>> {
 pub async fn lemma_xml(lemma: String) -> Result<Response<Body>> {
     match resolve_lemma_synsets(&lemma) {
         Ok(synsets) if synsets.is_empty() => Ok(not_found("Lemma not found")),
-        Ok(synsets) => match write_lexicon_xml_subset(&synsets, &metadata(&crate::db::read_settings()), &[]) {
+        Ok(synsets) => match write_lexicon_xml_subset(&synsets, &metadata(&crate::db::read_settings()), &[], &Default::default()) {
             Ok(xml) => Ok(xml_response(xml)),
             Err(e) => Ok(server_error(e)),
         },
