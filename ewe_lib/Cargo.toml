@@ -18,6 +18,9 @@ redb = { version = "3.1.0", optional = true }
 ouroboros = "0.18.5"
 speedy = { version = "0.8.7", optional = true }
 schemars = { version = "1", optional = true }
+oxrdf = { version = "0.3.3", optional = true }
+oxrdfio = { version = "0.2.4", optional = true }
+percent-encoding = { version = "2.3.2", optional = true }
 rand = "0.9"
 # rand pulls in getrandom transitively; on wasm32-unknown-unknown (the `web`
 # build of ewe_dioxus, which links ewe_lib even though it never actually
@@ -32,3 +35,4 @@ serde_json = "1"
 default = []
 redb = ["dep:redb", "dep:speedy"]
 schema = ["dep:schemars"]
+rdf = ["dep:oxrdf", "dep:oxrdfio", "dep:percent-encoding"]

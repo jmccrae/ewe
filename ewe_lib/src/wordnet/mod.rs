@@ -34,6 +34,11 @@ pub use synset_members::{MemberSynset, SenseRelation};
 pub mod xml;
 pub use xml::{LexiconMetadata, XmlExportError, XmlImportError};
 
+#[cfg(feature = "rdf")]
+pub mod rdf;
+#[cfg(feature = "rdf")]
+pub use rdf::{RdfExportError, RdfExportOptions, RdfFormat};
+
 #[cfg(feature = "redb")]
 pub mod redb_lexicon;
 #[cfg(feature = "redb")]
