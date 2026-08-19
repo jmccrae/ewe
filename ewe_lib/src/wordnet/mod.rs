@@ -31,6 +31,9 @@ pub use hashmap::LexiconHashMapBackend;
 pub mod synset_members;
 pub use synset_members::{MemberSynset, SenseRelation};
 
+pub mod xml;
+pub use xml::{LexiconMetadata, XmlExportError, XmlImportError};
+
 #[cfg(feature = "redb")]
 pub mod redb_lexicon;
 #[cfg(feature = "redb")]

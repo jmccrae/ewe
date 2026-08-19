@@ -135,6 +135,12 @@ pub struct MemberSynset {
     pub antonym: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub also_sense: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub similar_sense: Vec<SenseRelation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub participle: Vec<SenseRelation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -275,6 +281,9 @@ pub struct MemberSense {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adjposition: Option<String>,
 }
  
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
@@ -305,7 +314,8 @@ impl MemberSynset {
                         lemma: m.clone(),
                         sense: MemberSense {
                             id: sense.id.clone(),
-                            subcat: sense.subcat.clone()
+                            subcat: sense.subcat.clone(),
+                            adjposition: sense.adjposition.clone()
                         },
                         form: entry.form.clone(),
                         pronunciation: entry.pronunciation.clone(),
@@ -364,6 +374,8 @@ impl MemberSynset {
                         }
                     }
                     extract_sense_rel!(antonym,Antonym);
+                    extract_sense_rel!(also,Also);
+                    extract_sense_rel!(similar,Similar);
                     extract_sense_rel!(participle,Participle);
                     extract_sense_rel!(pertainym,Pertainym);
                     extract_sense_rel!(derivation,Derivation);
@@ -458,6 +470,8 @@ impl MemberSynset {
             holo_substance: links.remove(&SynsetRelType::HoloSubstance).unwrap_or_else(|| Vec::new()),
             holonym: links.remove(&SynsetRelType::Holonym).unwrap_or_else(|| Vec::new()),
             antonym: sense_links.remove(&SenseRelType::Antonym).unwrap_or_else(|| Vec::new()),
+            also_sense: sense_links.remove(&SenseRelType::Also).unwrap_or_else(|| Vec::new()),
+            similar_sense: sense_links.remove(&SenseRelType::Similar).unwrap_or_else(|| Vec::new()),
             participle: sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
             is_participle_of: inv_sense_links.remove(&SenseRelType::Participle).unwrap_or_else(|| Vec::new()),
             pertainym: sense_links.remove(&SenseRelType::Pertainym).unwrap_or_else(|| Vec::new()),

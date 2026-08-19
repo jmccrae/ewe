@@ -14,7 +14,8 @@ use ewe_lib::change_manager::ChangeList;
 use ewe_lib::progress::NullProgress;
 use ewe_lib::rels::{SenseRelType, SynsetRelType};
 use ewe_lib::validate::{fix, validate};
-use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
+use ewe_lib::wordnet::xml::{read_lexicon_xml, write_lexicon_xml};
+use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, LexiconMetadata, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -729,13 +730,79 @@ enum Command {
         /// The numeric or textual ID to look up
         id: String,
     },
+    /// Export the wordnet to another format
+    Export {
+        #[command(subcommand)]
+        format: ExportFormat,
+    },
+    /// Import a wordnet from another format
+    Import {
+        #[command(subcommand)]
+        format: ImportFormat,
+    },
+    /// Create a new, empty wordnet project, prompting for its key metadata
+    Init {
+        /// Directory to create the new project in (created if it doesn't exist)
+        #[arg(default_value = "./")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ExportFormat {
+    /// Export as a whole-lexicon, self-contained WN-LMF XML document
+    /// (https://globalwordnet.github.io/schemas/)
+    Xml {
+        /// Path to write the XML document to
+        path: PathBuf,
+
+        /// The `Lexicon/@id` prefix used to build every element id in the document
+        #[arg(long, default_value = "oewn")]
+        id_prefix: String,
+        /// The `Lexicon/@label`
+        #[arg(long, default_value = "Open English Wordnet")]
+        label: String,
+        /// The `Lexicon/@language` (BCP 47 code)
+        #[arg(long, default_value = "en")]
+        language: String,
+        /// The `Lexicon/@email` contact address
+        #[arg(long)]
+        email: Option<String>,
+        /// The `Lexicon/@license` URL
+        #[arg(long, default_value = "https://creativecommons.org/licenses/by/4.0")]
+        license: String,
+        /// The `Lexicon/@version`
+        #[arg(long, default_value = "1")]
+        version: String,
+        /// The `Lexicon/@url` project homepage
+        #[arg(long)]
+        url: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ImportFormat {
+    /// Import from a WN-LMF XML document (https://globalwordnet.github.io/schemas/), saving the
+    /// result as a YAML source tree
+    Xml {
+        /// Path to the XML document to import
+        path: PathBuf,
+    },
+}
+
+/// Whether `path` looks like a YAML wordnet source directory. `entries-a.yaml` is the
+/// traditional check, but a brand new project (e.g. fresh out of `ewe init`) has no entries at
+/// all yet, so also accept `frames.yaml` - unlike any particular `entries-*.yaml`, `Lexicon::save`
+/// always writes that one, empty or not.
+fn looks_like_wordnet_dir(path: &Path) -> bool {
+    path.join("entries-a.yaml").exists() || path.join("frames.yaml").exists()
 }
 
 fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBackend), String> {
     let path = if let Some(path) = path {
-        if path.join("entries-a.yaml").exists() {
+        if looks_like_wordnet_dir(&path) {
             path.to_string_lossy().to_string()
-        } else if path.join("src/yaml/entries-a.yaml").exists() {
+        } else if looks_like_wordnet_dir(&path.join("src/yaml")) {
             path.join("src/yaml/").to_string_lossy().to_string()
         } else {
             return Err(format!(
@@ -743,9 +810,9 @@ fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBacken
                 path.to_string_lossy()
             ));
         }
-    } else if Path::new("./src/yaml/entries-a.yaml").exists() {
+    } else if looks_like_wordnet_dir(Path::new("./src/yaml")) {
         "./src/yaml/".to_owned()
-    } else if Path::new("./entries-a.yaml").exists() {
+    } else if looks_like_wordnet_dir(Path::new("./")) {
         "./".to_owned()
     } else {
         return Err(format!("Please specify WordNet home"));
@@ -933,6 +1000,127 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
     }
 }
 
+fn run_export_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
+    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        exit(-1);
+    });
+    let xml = write_lexicon_xml(&wn, &metadata).unwrap_or_else(|e| {
+        eprintln!("Could not generate XML: {}", e);
+        exit(-1);
+    });
+    std::fs::write(path, xml).unwrap_or_else(|e| {
+        eprintln!("Could not write {}: {}", path.display(), e);
+        exit(-1);
+    });
+    println!("Wrote {}", path.display());
+}
+
+/// Escapes a value for a TOML basic string (`"..."`).
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// A minimal `settings.toml` for the freshly-imported project, in the same format
+/// `ewe_dioxus/english-wordnet-settings.toml` documents (see that crate's README) - populated
+/// from the imported `Lexicon` element's own metadata rather than OEWN's specific branding,
+/// which wouldn't be correct for an arbitrary imported GWA wordnet.
+fn generate_settings_toml(metadata: &LexiconMetadata) -> String {
+    let mut out = String::new();
+    out.push_str("database = \"wordnet.db\"\n");
+    out.push_str("wordnet_source = \"src/yaml/\"\n");
+    out.push_str(&format!("id_prefix = \"{}\"\n", toml_escape(&metadata.id_prefix)));
+    if !metadata.label.is_empty() {
+        out.push_str(&format!("project_name = \"{}\"\n", toml_escape(&metadata.label)));
+    }
+    if let Some(email) = &metadata.email {
+        out.push_str(&format!("contact_email = \"{}\"\n", toml_escape(email)));
+    }
+    if let Some(url) = &metadata.url {
+        out.push_str(&format!("source_url = \"{}\"\n", toml_escape(url)));
+    }
+    out
+}
+
+/// Writes `wn`/`metadata` out as a full project directory, mirroring the real OEWN layout:
+/// entries-*.yaml/lexfile.yaml/frames.yaml under `src/yaml/`, `deprecations.csv` as its sibling
+/// (`Lexicon::save` already writes that one via `src/yaml/../deprecations.csv`), and a
+/// `settings.toml` an `ewe_dioxus` deployment can point straight at. Shared by `ewe import xml`
+/// and `ewe init`, so both produce the same project shape.
+fn write_project_structure<L: Lexicon>(wn: &L, metadata: &LexiconMetadata, out_dir: &Path) {
+    let yaml_dir = out_dir.join("src").join("yaml");
+    std::fs::create_dir_all(&yaml_dir).unwrap_or_else(|e| {
+        eprintln!("Could not create {}: {}", yaml_dir.display(), e);
+        exit(-1);
+    });
+    let mut progress = IndicatifProgress::new();
+    wn.save(&yaml_dir, &mut progress).unwrap_or_else(|e| {
+        eprintln!("Could not save to {}: {}", yaml_dir.display(), e);
+        exit(-1);
+    });
+    let settings_path = out_dir.join("settings.toml");
+    std::fs::write(&settings_path, generate_settings_toml(metadata)).unwrap_or_else(|e| {
+        eprintln!("Could not write {}: {}", settings_path.display(), e);
+        exit(-1);
+    });
+}
+
+fn run_import_xml(path: &Path, out_dir: Option<PathBuf>) {
+    let out_dir = out_dir.unwrap_or_else(|| PathBuf::from("./"));
+    let file = File::open(path).unwrap_or_else(|e| {
+        eprintln!("Could not open {}: {}", path.display(), e);
+        exit(-1);
+    });
+    let (wn, metadata) = read_lexicon_xml(LexiconHashMapBackend::new(), file).unwrap_or_else(|e| {
+        eprintln!("Could not import {}: {}", path.display(), e);
+        exit(-1);
+    });
+    println!(
+        "Imported {} entries, {} synsets from lexicon {:?} ({})",
+        wn.n_entries().expect("Cannot read imported lexicon"),
+        wn.n_synsets().expect("Cannot read imported lexicon"),
+        metadata.label,
+        metadata.id_prefix
+    );
+
+    write_project_structure(&wn, &metadata, &out_dir);
+    println!("Saved project to {}", out_dir.display());
+}
+
+fn input_with_default(prompt: &str, default: &str) -> String {
+    let value = input(&format!("{} [{}]: ", prompt, default));
+    if value.is_empty() {
+        default.to_string()
+    } else {
+        value
+    }
+}
+
+fn input_optional(prompt: &str) -> Option<String> {
+    let value = input(&format!("{} (optional): ", prompt));
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn run_init(path: &Path) {
+    println!("Creating a new wordnet project at {}", path.display());
+    let metadata = LexiconMetadata {
+        id_prefix: input_with_default("Id prefix", "wn"),
+        label: input_with_default("Project name", "My Wordnet"),
+        language: input_with_default("Language (BCP 47 code)", "en"),
+        license: input_with_default("License URL", "https://creativecommons.org/licenses/by/4.0"),
+        version: input_with_default("Version", "1"),
+        email: input_optional("Contact email"),
+        url: input_optional("Source/homepage URL"),
+    };
+
+    write_project_structure(&LexiconHashMapBackend::new(), &metadata, path);
+    println!("Created new wordnet project at {}", path.display());
+}
+
 fn run_tui() {
     println!("");
     println!("         ,ww                             ");
@@ -941,19 +1129,17 @@ fn run_tui() {
     println!("    II  II                               ");
     println!("");
 
-    let path = if Path::new("./src/yaml/entries-a.yaml").exists() {
+    let path = if looks_like_wordnet_dir(Path::new("./src/yaml")) {
         "./src/yaml/".to_owned()
-    } else if Path::new("./entries-a.yaml").exists() {
+    } else if looks_like_wordnet_dir(Path::new("./")) {
         "./".to_owned()
     } else {
         let mut s = input("WordNet Home Folder: ");
-        while !Path::new(&s).join("entries-a.yaml").exists()
-            && !Path::new(&s).join("src/yaml/entries-a.yaml").exists()
-        {
+        while !looks_like_wordnet_dir(Path::new(&s)) && !looks_like_wordnet_dir(&Path::new(&s).join("src/yaml")) {
             println!("Could not find WordNet at this path.");
             s = input("WordNet Home Folder: ");
         }
-        if Path::new(&s).join("entries-a.yaml").exists() {
+        if looks_like_wordnet_dir(Path::new(&s)) {
             s
         } else {
             Path::new(&s)
@@ -988,6 +1174,38 @@ fn main() {
             sense_ids,
         }) => {
             run_word(word, *ignore_case, *sense_ids, cli.wordnet);
+        }
+        Some(Command::Export {
+            format:
+                ExportFormat::Xml {
+                    ref path,
+                    id_prefix,
+                    label,
+                    language,
+                    email,
+                    license,
+                    version,
+                    url,
+                },
+        }) => {
+            let metadata = LexiconMetadata {
+                id_prefix: id_prefix.clone(),
+                label: label.clone(),
+                language: language.clone(),
+                email: email.clone(),
+                license: license.clone(),
+                version: version.clone(),
+                url: url.clone(),
+            };
+            run_export_xml(path, metadata, cli.wordnet);
+        }
+        Some(Command::Import {
+            format: ImportFormat::Xml { ref path },
+        }) => {
+            run_import_xml(path, cli.wordnet);
+        }
+        Some(Command::Init { ref path }) => {
+            run_init(path);
         }
         None => {
             run_tui();
