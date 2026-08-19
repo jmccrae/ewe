@@ -2,13 +2,13 @@ use crate::progress::Progress;
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::sense_keys::get_sense_key;
 use crate::wordnet::entry::BTEntries;
-use crate::wordnet::util::LexiconSaveError;
+use crate::wordnet::util::{escape_yaml_string, LexiconSaveError};
 use crate::wordnet::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::result;
 
@@ -321,6 +321,15 @@ pub trait Lexicon: Sized {
             let mut w = File::create(folder.as_ref().join(format!("{}.yaml", skey)))?;
             synsets.save(&mut w)?;
             bar.inc(1);
+        }
+        // A flat `key: description` mapping - the inverse of the `frames.yaml` loading in
+        // `load()` above. Written even when there are no frames at all (an empty file), so a
+        // freshly-saved project always has one, matching what `load()` expects to find.
+        {
+            let mut w = File::create(folder.as_ref().join("frames.yaml"))?;
+            for (key, description) in self.frames_get()?.iter() {
+                writeln!(w, "{}: {}", escape_yaml_string(key, 0, 0), escape_yaml_string(description, 0, 0))?;
+            }
         }
         csv::WriterBuilder::new()
             .quote_style(csv::QuoteStyle::Always)
@@ -1340,6 +1349,36 @@ pub(crate) fn entry_key(lemma: &str) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_save_writes_frames_yaml_and_load_recovers_it() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_save_frames_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon
+            .frames_set(vec![
+                ("vii".to_string(), "Something ----s".to_string()),
+                ("vtai".to_string(), "Somebody ----s something".to_string()),
+            ])
+            .unwrap();
+        let mut bar = crate::progress::NullProgress;
+        lexicon.save(&dir, &mut bar).unwrap();
+
+        let frames_yaml = fs::read_to_string(dir.join("frames.yaml")).unwrap();
+        assert_eq!(frames_yaml, "vii: Something ----s\nvtai: Somebody ----s something\n");
+
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        assert_eq!(
+            reloaded.frames_get().unwrap().into_owned(),
+            vec![
+                ("vii".to_string(), "Something ----s".to_string()),
+                ("vtai".to_string(), "Somebody ----s something".to_string()),
+            ]
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn test_flush_synset_batch_empty_buffer_registers_lexname() {

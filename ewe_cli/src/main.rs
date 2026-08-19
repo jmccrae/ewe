@@ -1002,6 +1002,32 @@ fn run_export_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBu
     println!("Wrote {}", path.display());
 }
 
+/// Escapes a value for a TOML basic string (`"..."`).
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// A minimal `settings.toml` for the freshly-imported project, in the same format
+/// `ewe_dioxus/english-wordnet-settings.toml` documents (see that crate's README) - populated
+/// from the imported `Lexicon` element's own metadata rather than OEWN's specific branding,
+/// which wouldn't be correct for an arbitrary imported GWA wordnet.
+fn generate_settings_toml(metadata: &LexiconMetadata) -> String {
+    let mut out = String::new();
+    out.push_str("database = \"wordnet.db\"\n");
+    out.push_str("wordnet_source = \"src/yaml/\"\n");
+    out.push_str(&format!("id_prefix = \"{}\"\n", toml_escape(&metadata.id_prefix)));
+    if !metadata.label.is_empty() {
+        out.push_str(&format!("project_name = \"{}\"\n", toml_escape(&metadata.label)));
+    }
+    if let Some(email) = &metadata.email {
+        out.push_str(&format!("contact_email = \"{}\"\n", toml_escape(email)));
+    }
+    if let Some(url) = &metadata.url {
+        out.push_str(&format!("source_url = \"{}\"\n", toml_escape(url)));
+    }
+    out
+}
+
 fn run_import_xml(path: &Path, out_dir: Option<PathBuf>) {
     let out_dir = out_dir.unwrap_or_else(|| PathBuf::from("./"));
     let file = File::open(path).unwrap_or_else(|e| {
@@ -1019,12 +1045,27 @@ fn run_import_xml(path: &Path, out_dir: Option<PathBuf>) {
         metadata.label,
         metadata.id_prefix
     );
-    let mut progress = IndicatifProgress::new();
-    wn.save(&out_dir, &mut progress).unwrap_or_else(|e| {
-        eprintln!("Could not save to {}: {}", out_dir.display(), e);
+
+    // Mirror the real OEWN project layout: entries-*.yaml/lexfile.yaml/frames.yaml under
+    // src/yaml/, deprecations.csv as its sibling (Lexicon::save already writes that one via
+    // "src/yaml/../deprecations.csv"), and a settings.toml an ewe_dioxus deployment can point
+    // straight at.
+    let yaml_dir = out_dir.join("src").join("yaml");
+    std::fs::create_dir_all(&yaml_dir).unwrap_or_else(|e| {
+        eprintln!("Could not create {}: {}", yaml_dir.display(), e);
         exit(-1);
     });
-    println!("Saved YAML to {}", out_dir.display());
+    let mut progress = IndicatifProgress::new();
+    wn.save(&yaml_dir, &mut progress).unwrap_or_else(|e| {
+        eprintln!("Could not save to {}: {}", yaml_dir.display(), e);
+        exit(-1);
+    });
+    let settings_path = out_dir.join("settings.toml");
+    std::fs::write(&settings_path, generate_settings_toml(&metadata)).unwrap_or_else(|e| {
+        eprintln!("Could not write {}: {}", settings_path.display(), e);
+        exit(-1);
+    });
+    println!("Saved project to {}", out_dir.display());
 }
 
 fn run_tui() {
