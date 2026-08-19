@@ -310,11 +310,24 @@ pub trait Lexicon: Sized {
         bar: &mut Bar,
     ) -> result::Result<(), LexiconSaveError> {
         bar.start(73);
+        // `entry_key` only ever produces '0' or 'a'..='z', so this is the complete, fixed set of
+        // entries-*.yaml files a project can have. Always write all of them - even a bucket with
+        // no entries at all yet, as every one of them is for a brand new project - rather than
+        // only whichever ones entries_iter() happens to have populated, matching the real OEWN
+        // layout (entries-0.yaml..entries-z.yaml always present) instead of leaving some missing
+        // until their first entry.
+        let mut written_keys: std::collections::HashSet<char> = std::collections::HashSet::new();
         for entries in self.entries_iter()? {
             let (ekey, entries) = entries?;
             let mut w = File::create(folder.as_ref().join(format!("entries-{}.yaml", ekey)))?;
             entries.save(&mut w)?;
+            written_keys.insert(ekey);
             bar.inc(1);
+        }
+        for key in std::iter::once('0').chain('a'..='z') {
+            if !written_keys.contains(&key) {
+                File::create(folder.as_ref().join(format!("entries-{}.yaml", key)))?;
+            }
         }
         for synsets in self.synsets_iter()? {
             let (skey, synsets) = synsets?;
@@ -1368,7 +1381,18 @@ mod tests {
         let frames_yaml = fs::read_to_string(dir.join("frames.yaml")).unwrap();
         assert_eq!(frames_yaml, "vii: Something ----s\nvtai: Somebody ----s something\n");
 
+        // The full entries-0.yaml..entries-z.yaml skeleton must exist even though this lexicon
+        // has no entries at all yet - matching the real OEWN layout, and letting a project fresh
+        // out of `ewe init` be loaded straight back (an empty file must still parse).
+        for key in std::iter::once('0').chain('a'..='z') {
+            assert!(
+                dir.join(format!("entries-{key}.yaml")).is_file(),
+                "entries-{key}.yaml should exist even when empty"
+            );
+        }
+
         let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        assert_eq!(reloaded.n_entries().unwrap(), 0);
         assert_eq!(
             reloaded.frames_get().unwrap().into_owned(),
             vec![
