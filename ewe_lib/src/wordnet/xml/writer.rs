@@ -314,7 +314,6 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
         .map(|i| i.as_str().to_string())
         .unwrap_or_else(|| "in".to_string());
     el.push_attribute(("ili", ili.as_str()));
-    el.push_attribute(("partOfSpeech", synset.part_of_speech.value()));
     let members = synset
         .members
         .iter()
@@ -324,6 +323,7 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
     if !members.is_empty() {
         el.push_attribute(("members", members.as_str()));
     }
+    el.push_attribute(("partOfSpeech", synset.part_of_speech.value()));
     el.push_attribute(("lexfile", synset.lexname.as_str()));
     writer.write_event(Event::Start(el))?;
 
@@ -445,7 +445,7 @@ mod tests {
         assert!(xml.contains(r#"<LexicalEntry id="oewn-dog-n">"#));
         assert!(xml.contains(r#"<Lemma writtenForm="dog" partOfSpeech="n"/>"#));
         assert!(xml.contains(r#"<Sense id="oewn-dog__1.05.00.." synset="oewn-00001740-n"/>"#));
-        assert!(xml.contains(r#"<Synset id="oewn-00001740-n" ili="in" partOfSpeech="n" members="oewn-dog-n" lexfile="noun.animal">"#));
+        assert!(xml.contains(r#"<Synset id="oewn-00001740-n" ili="in" members="oewn-dog-n" partOfSpeech="n" lexfile="noun.animal">"#));
         assert!(xml.contains("a domestic canine"));
     }
 
