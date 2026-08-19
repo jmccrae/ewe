@@ -147,7 +147,7 @@ pub fn write_lexicon_xml_subset(
     }
 
     for synset in &synsets_sorted {
-        write_synset(&mut writer, prefix, synset)?;
+        write_synset(&mut writer, prefix, synset, &metadata.language)?;
     }
 
     for (id, subcategorization_frame) in frames {
@@ -310,7 +310,12 @@ fn sense_relations_xml(
     out
 }
 
-fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset: &MemberSynset) -> Result<()> {
+fn write_synset<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    prefix: &str,
+    synset: &MemberSynset,
+    language: &str,
+) -> Result<()> {
     let mut el = BytesStart::new("Synset");
     el.push_attribute(("id", ids::synset_xml_id(prefix, &synset.id).as_str()));
     let ili = synset
@@ -342,6 +347,29 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
         writer.write_event(Event::Start(def_el))?;
         writer.write_event(Event::Text(BytesText::new(defn)))?;
         writer.write_event(Event::End(BytesEnd::new("Definition")))?;
+    }
+
+    // A synset with no ILI of its own (`ili="in"`, "included") needs an `ILIDefinition` - a
+    // standalone English-language gloss for the concept, since the ILI registry itself is
+    // English-language-only. The real release always reuses its (English) first Definition
+    // verbatim for this. That's only actually correct when the lexicon *is* English - there's no
+    // general "the definition, translated to English" field on `Synset` yet (tracked separately;
+    // see the model's `ili_definition` follow-up), so for any other `Lexicon/@language` this
+    // would silently emit a non-English string mislabeled as the concept's English definition.
+    if synset.ili.is_none() {
+        if language != "en" {
+            panic!(
+                "Synset {}: cannot generate ILIDefinition for a non-English lexicon \
+                 (language {language:?}) yet - see ewe#33",
+                synset.id
+            );
+        }
+        if let Some(defn) = synset.definition.first() {
+            let ili_def_el = BytesStart::new("ILIDefinition");
+            writer.write_event(Event::Start(ili_def_el))?;
+            writer.write_event(Event::Text(BytesText::new(defn)))?;
+            writer.write_event(Event::End(BytesEnd::new("ILIDefinition")))?;
+        }
     }
 
     for (rel_type, target) in synset_relations_xml(prefix, synset) {
@@ -455,6 +483,34 @@ mod tests {
         assert!(xml.contains(r#"<Sense id="oewn-dog__1.05.00.." synset="oewn-00001740-n"/>"#));
         assert!(xml.contains(r#"<Synset id="oewn-00001740-n" ili="in" members="oewn-dog-n" partOfSpeech="n" lexfile="noun.animal">"#));
         assert!(xml.contains("a domestic canine"));
+        // ili="in" ("included", i.e. no ILI of its own) needs an ILIDefinition - a standalone
+        // English gloss, reusing the synset's own Definition since the lexicon is English.
+        assert!(xml.contains("<ILIDefinition>a domestic canine</ILIDefinition>"));
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_omits_ili_definition_when_synset_has_a_real_ili() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut synset = Synset::new(PartOfSpeech::n);
+        synset.definition.push("a domestic canine".to_string());
+        synset.members.push("dog".to_string());
+        synset.ili = Some(crate::wordnet::ILIID::new("i12345"));
+        wn.insert_synset("noun.animal".to_string(), SsId::new("00001740-n"), synset)
+            .unwrap();
+
+        let xml = write_lexicon_xml(&wn, &metadata()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+        assert!(xml.contains(r#"ili="i12345""#));
+        assert!(!xml.contains("ILIDefinition"), "a synset with a real ILI needs no ILIDefinition");
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot generate ILIDefinition for a non-English lexicon")]
+    fn test_write_lexicon_xml_panics_for_ili_in_synset_in_non_english_lexicon() {
+        let wn = simple_lexicon();
+        let mut non_english = metadata();
+        non_english.language = "fr".to_string();
+        let _ = write_lexicon_xml(&wn, &non_english);
     }
 
     #[test]
