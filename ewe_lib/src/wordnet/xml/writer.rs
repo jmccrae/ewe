@@ -223,6 +223,9 @@ fn write_sense<W: std::io::Write>(
 ) -> Result<()> {
     let mut sense = BytesStart::new("Sense");
     sense.push_attribute(("id", ids::sense_xml_id(prefix, &member.sense.id).as_str()));
+    if let Some(adjposition) = &member.sense.adjposition {
+        sense.push_attribute(("adjposition", adjposition.as_str()));
+    }
     let subcat = member.sense.subcat.join(" ");
     if !subcat.is_empty() {
         sense.push_attribute(("subcat", subcat.as_str()));
@@ -282,6 +285,8 @@ fn sense_relations_xml(
     }
 
     rel!(antonym, "antonym");
+    rel!(also_sense, "also");
+    rel!(similar_sense, "similar");
     rel!(participle, "participle");
     rel!(pertainym, "pertainym");
     rel!(derivation, "derivation");
@@ -325,6 +330,9 @@ fn write_synset<W: std::io::Write>(writer: &mut Writer<W>, prefix: &str, synset:
     }
     el.push_attribute(("partOfSpeech", synset.part_of_speech.value()));
     el.push_attribute(("lexfile", synset.lexname.as_str()));
+    if let Some(source) = &synset.source {
+        el.push_attribute(("dc:source", source.as_str()));
+    }
     writer.write_event(Event::Start(el))?;
 
     for defn in &synset.definition {
@@ -494,6 +502,61 @@ mod tests {
         assert!(xml.contains(r#"<SyntacticBehaviour id="vii" subcategorizationFrame="Something ----s"/>"#));
         // SyntacticBehaviour comes after every Synset, matching the real release's layout.
         assert!(xml.find("SyntacticBehaviour").unwrap() > zebra_synset_pos);
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_emits_sense_also_adjposition_and_synset_source() {
+        // Modeled on the real "abound"/"abound in" entries, which have an explicit sense-level
+        // `also` relation between them - previously dropped entirely, since MemberSynset had no
+        // field to carry it and the writer had no relType for it.
+        let mut wn = LexiconHashMapBackend::new();
+        let mut abound_ss = Synset::new(PartOfSpeech::v);
+        abound_ss.definition.push("be abundant".to_string());
+        abound_ss.members.push("abound".to_string());
+        abound_ss.source = Some("Colloquial WordNet".to_string());
+        wn.insert_synset("verb.stative".to_string(), SsId::new("00001000-v"), abound_ss)
+            .unwrap();
+        let mut abound_in_ss = Synset::new(PartOfSpeech::v);
+        abound_in_ss.definition.push("be abundant in".to_string());
+        abound_in_ss.members.push("abound in".to_string());
+        wn.insert_synset("verb.stative".to_string(), SsId::new("00002000-v"), abound_in_ss)
+            .unwrap();
+
+        let mut abound_entry = Entry::new();
+        let mut abound_sense = Sense::new(SId::new("abound%2:42:00::"), SsId::new("00001000-v"));
+        abound_sense.also.push(SId::new("abound_in%2:42:00::"));
+        abound_entry.sense.push(abound_sense);
+        wn.insert_entry("abound".to_string(), PosKey::new("v"), abound_entry).unwrap();
+        let mut abound_in_entry = Entry::new();
+        let mut abound_in_sense = Sense::new(SId::new("abound_in%2:42:00::"), SsId::new("00002000-v"));
+        abound_in_sense.also.push(SId::new("abound%2:42:00::"));
+        abound_in_entry.sense.push(abound_in_sense);
+        wn.insert_entry("abound in".to_string(), PosKey::new("v"), abound_in_entry).unwrap();
+
+        let mut fahrenheit_ss = Synset::new(PartOfSpeech::s);
+        fahrenheit_ss.definition.push("measured on the Fahrenheit scale".to_string());
+        fahrenheit_ss.members.push("fahrenheit".to_string());
+        wn.insert_synset("adj.pert".to_string(), SsId::new("00003000-s"), fahrenheit_ss)
+            .unwrap();
+        let mut fahrenheit_entry = Entry::new();
+        let mut fahrenheit_sense = Sense::new(SId::new("fahrenheit%3:01:00::"), SsId::new("00003000-s"));
+        fahrenheit_sense.adjposition = Some("ip".to_string());
+        fahrenheit_entry.sense.push(fahrenheit_sense);
+        wn.insert_entry("fahrenheit".to_string(), PosKey::new("s"), fahrenheit_entry).unwrap();
+
+        let xml = write_lexicon_xml(&wn, &metadata()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+
+        assert!(
+            xml.contains(r#"relType="also" target="oewn-abound_in__2.42.00.."#),
+            "abound's sense must carry an also relation to abound_in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"relType="also" target="oewn-abound__2.42.00.."#),
+            "abound_in's sense must carry an also relation back to abound"
+        );
+        assert!(xml.contains(r#"adjposition="ip""#));
+        assert!(xml.contains(r#"dc:source="Colloquial WordNet""#));
     }
 
     #[test]

@@ -324,6 +324,7 @@ fn build_sense(e: &BytesStart, prefix: &str) -> Result<Sense> {
     if let Some(subcat) = attr(e, "subcat")? {
         sense.subcat = subcat.split_whitespace().map(str::to_string).collect();
     }
+    sense.adjposition = attr(e, "adjposition")?;
     Ok(sense)
 }
 
@@ -418,6 +419,7 @@ fn build_synset(e: &BytesStart, prefix: &str, entry_id_lookup: &HashMap<String, 
             }
         }
     }
+    synset.source = attr(e, "dc:source")?;
     Ok((lexname, id, synset))
 }
 
@@ -714,17 +716,18 @@ mod tests {
     /// rather than compared.
     fn assert_synset_round_trips(id: &SynsetId, ground_truth: &Synset, reimported: &Synset) {
         let mut normalized_truth = ground_truth.clone();
+        // wikidata isn't part of WN-LMF's core schema and was never emitted by the exporter
+        // this was moved from (a pre-existing gap, not something introduced by this module).
         normalized_truth.wikidata = Vec::new();
-        normalized_truth.source = None;
         assert_eq!(&normalized_truth, reimported, "synset {id} mismatch after XML round trip");
     }
 
     /// Compares every `Sense` field the XML writer actually emits a `SenseRelation`/attribute
-    /// for. `also`/`similar`/`domain_topic`/`domain_region`/`other` are real fields on `Sense`
-    /// but `writer.rs`'s `sense_relations_xml` never emits them at the sense level (only at the
+    /// for. `domain_topic`/`domain_region`/`other` are real fields on `Sense` but
+    /// `writer.rs`'s `sense_relations_xml` never emits them at the sense level (only at the
     /// synset level, under different field names) - a pre-existing gap carried over unchanged
-    /// from the original exporter. `adjposition`/`sent` are YAML-only extensions with no WN-LMF
-    /// equivalent at all; `subcat` *is* covered, via `Sense/@subcat`.
+    /// from the original exporter. `sent` is a YAML-only extension with no WN-LMF equivalent at
+    /// all; `subcat`/`adjposition`/`also`/`similar`/`exemplifies` *are* covered.
     fn assert_sense_round_trips(entry_lemma: &str, ground_truth: &Sense, reimported: &Sense) {
         macro_rules! field {
             ($f:ident) => {
@@ -740,7 +743,10 @@ mod tests {
         field!(id);
         field!(synset);
         field!(subcat);
+        field!(adjposition);
         field!(antonym);
+        field!(also);
+        field!(similar);
         field!(participle);
         field!(pertainym);
         field!(derivation);
