@@ -16,7 +16,7 @@ use teanga::disk_corpus::RedbDb;
 use teanga::DiskCorpus;
 #[cfg(not(feature = "desktop"))]
 use views::Downloads;
-use views::{ByLemma, BySenses, BySynset, History, Home, WNLayout};
+use views::{ByIli, ByLemma, BySenses, BySynset, History, Home, WNLayout};
 
 /// Define a backend module that contains all business logic for our app.
 mod backend;
@@ -56,6 +56,11 @@ enum Route {
 
         #[route("/view/synset/:synset")]
         BySynset { synset: String },
+
+        // Resolves the old `en-word.net/ili/iXXX` namespace (issue #20) to whichever synset
+        // currently carries that ILI.
+        #[route("/ili/:id")]
+        ByIli { id: String },
 
         #[route("/view/senses/:id?:page")]
         BySenses { id: String, page: usize },

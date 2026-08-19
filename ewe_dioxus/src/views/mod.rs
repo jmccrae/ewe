@@ -10,6 +10,9 @@ pub use by_lemma::ByLemma;
 mod by_synset;
 pub use by_synset::BySynset;
 
+mod by_ili;
+pub use by_ili::ByIli;
+
 mod by_senses;
 pub use by_senses::BySenses;
 
