@@ -94,8 +94,14 @@ h1.en-title {
         margin-right: auto;
     }
 
+    /* #logo-title's default height (above) is a fixed 135px, sized for the title fitting on
+       one or two lines. On narrow screens the title text wraps onto more lines than that fits,
+       and since the box has no overflow clipping, the extra lines spill downward past the box's
+       bottom edge, overlapping whatever follows the header (e.g. the search box) - see #30.
+       home.css does the same override for the home page's own wider logo variant. */
     #logo-title {
         text-align: center;
+        height: auto;
     }
 }
 
