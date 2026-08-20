@@ -20,8 +20,6 @@ ewe_lib = { workspace = true , features = ["redb"] }
 toml = "1.0.4"
 serde = "1.0.228"
 thiserror = "2.0.18"
-oxrdf = { version = "0.3.3", optional = true }
-oxrdfio = { version = "0.2.4", optional = true }
 quick-xml = { version = "0.37.5", optional = true }
 # Only used to format change-log timestamps (`backend::edit::get_changelog`), on `server` and
 # `desktop` - no "clock" feature, since that needs current-time access that doesn't build cleanly
@@ -63,7 +61,5 @@ mobile = ["dioxus/mobile"]
 # (needs both the client and server binary built with it, since those remain separate there).
 edit = []
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
-server = ["dioxus/server", "dep:oxrdf", "dep:oxrdfio", "dep:quick-xml", "dep:chrono", "dep:tokio"]
-oxrdf = ["dep:oxrdf"]
-oxrdfio = ["dep:oxrdfio"]
+server = ["dioxus/server", "ewe_lib/rdf", "dep:quick-xml", "dep:chrono", "dep:tokio"]
 quick-xml = ["dep:quick-xml"]

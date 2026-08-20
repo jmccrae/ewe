@@ -37,6 +37,11 @@ pub use xml::{LexiconMetadata, XmlExportError, XmlImportError};
 pub mod wndb;
 pub use wndb::{write_wndb, WndbExportError, WndbExportOptions};
 
+#[cfg(feature = "rdf")]
+pub mod rdf;
+#[cfg(feature = "rdf")]
+pub use rdf::{RdfExportError, RdfExportOptions, RdfFormat};
+
 #[cfg(feature = "redb")]
 pub mod redb_lexicon;
 #[cfg(feature = "redb")]

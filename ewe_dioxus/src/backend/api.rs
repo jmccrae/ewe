@@ -83,6 +83,15 @@ pub async fn get_random_synset() -> Result<Option<SynsetId>> {
     Ok(lexicon.random_synset_id()?)
 }
 
+/// Look up the synset carrying a given ILI id, for `/ili/:id`-style links (see issue #20) -
+/// the old `en-word.net/ili/iXXX` namespace, and the standard `globalwordnet.org/cili/iXXX`
+/// URL now hyperlinked from a synset's own ILI identifier.
+#[cfg_attr(not(feature = "desktop"), get("/api/synset_by_ili/{ili}"))]
+pub async fn get_synset_by_ili(ili: String) -> Result<Option<SynsetId>> {
+    let lexicon = read_lexicon()?;
+    Ok(lexicon.synset_by_ili(&ili)?)
+}
+
 /// What a [`SearchResult`] refers to, so the frontend knows which page to
 /// navigate to when a suggestion is picked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

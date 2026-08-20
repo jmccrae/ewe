@@ -326,8 +326,9 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 class: "synset-id-title",
                                                 "Interlingual Index: "
                                             },
-                                            span {
+                                            a {
                                                 class: "identifier",
+                                                href: "https://globalwordnet.org/cili/{ili}",
                                                 "{ili}"
                                             }
                                         }
