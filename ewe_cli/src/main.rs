@@ -14,6 +14,7 @@ use ewe_lib::change_manager::ChangeList;
 use ewe_lib::progress::NullProgress;
 use ewe_lib::rels::{SenseRelType, SynsetRelType};
 use ewe_lib::validate::{fix, validate};
+use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
 use ewe_lib::wordnet::xml::{read_lexicon_xml, write_lexicon_xml};
 use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, LexiconMetadata, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
 use regex::Regex;
@@ -778,6 +779,68 @@ enum ExportFormat {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Export as a whole-lexicon RDF document (Turtle or RDF/XML), suitable for an
+    /// `en-word.net`-style RDF release - every `LexicalEntry` is declared exactly once,
+    /// regardless of how many senses/synsets it appears in, so no external dedup pass
+    /// (the old release process's `rapper -i turtle -o turtle`) is needed
+    Rdf {
+        /// Path to write the RDF document to
+        path: PathBuf,
+
+        /// The RDF serialization to write
+        #[arg(long, value_enum, default_value_t = RdfSyntax::Turtle)]
+        format: RdfSyntax,
+        /// Base URI resources (`{site}synset/...`, `{site}lemma/...`) are built under, and the
+        /// subject of the export's `lime:Lexicon` header
+        #[arg(long, default_value = "https://en-word.net/")]
+        site: String,
+        /// The `lime:Lexicon` header's `rdfs:label`
+        #[arg(long, default_value = "Open English Wordnet")]
+        label: String,
+        /// BCP 47 language tag applied to lemma/definition/example literals and the header's
+        /// `dc:language`
+        #[arg(long, default_value = "en")]
+        language: String,
+        /// The header's `schema:email` contact address
+        #[arg(long)]
+        email: Option<String>,
+        /// License URL asserted as the header's `cc:license`
+        #[arg(long, default_value = "https://creativecommons.org/licenses/by/4.0/")]
+        license: String,
+        /// The header's `owl:versionInfo`
+        #[arg(long, default_value = "1")]
+        version: String,
+        /// The header's `schema:url` project homepage (defaults to `--site` if unset)
+        #[arg(long)]
+        url: Option<String>,
+    },
+}
+
+/// The RDF serialization to write - maps directly onto `ewe_lib::wordnet::rdf::RdfFormat`
+/// (`oxrdfio::RdfFormat`), just with kebab-case CLI-friendly variant names.
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum RdfSyntax {
+    Turtle,
+    #[value(name = "rdf-xml")]
+    RdfXml,
+}
+
+impl std::fmt::Display for RdfSyntax {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RdfSyntax::Turtle => write!(f, "turtle"),
+            RdfSyntax::RdfXml => write!(f, "rdf-xml"),
+        }
+    }
+}
+
+impl From<RdfSyntax> for RdfFormat {
+    fn from(syntax: RdfSyntax) -> RdfFormat {
+        match syntax {
+            RdfSyntax::Turtle => RdfFormat::Turtle,
+            RdfSyntax::RdfXml => RdfFormat::RdfXml,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1016,6 +1079,22 @@ fn run_export_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBu
     println!("Wrote {}", path.display());
 }
 
+fn run_export_rdf(path: &Path, options: RdfExportOptions, wordnet: Option<PathBuf>) {
+    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        exit(-1);
+    });
+    let rdf = write_lexicon_rdf(&wn, &options).unwrap_or_else(|e| {
+        eprintln!("Could not generate RDF: {}", e);
+        exit(-1);
+    });
+    std::fs::write(path, rdf).unwrap_or_else(|e| {
+        eprintln!("Could not write {}: {}", path.display(), e);
+        exit(-1);
+    });
+    println!("Wrote {}", path.display());
+}
+
 /// Escapes a value for a TOML basic string (`"..."`).
 fn toml_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -1198,6 +1277,37 @@ fn main() {
                 url: url.clone(),
             };
             run_export_xml(path, metadata, cli.wordnet);
+        }
+        Some(Command::Export {
+            format:
+                ExportFormat::Rdf {
+                    ref path,
+                    format,
+                    site,
+                    label,
+                    language,
+                    email,
+                    license,
+                    version,
+                    url,
+                },
+        }) => {
+            let options = RdfExportOptions {
+                format: format.clone().into(),
+                site: site.clone(),
+                metadata: LexiconMetadata {
+                    // Unused by the RDF export (its URIs are built from bare lemma/synset
+                    // ids, not a `Lexicon/@id` prefix) - not exposed as a CLI flag.
+                    id_prefix: String::new(),
+                    label: label.clone(),
+                    language: language.clone(),
+                    email: email.clone(),
+                    license: license.clone(),
+                    version: version.clone(),
+                    url: url.clone().or_else(|| Some(site.clone())),
+                },
+            };
+            run_export_rdf(path, options, cli.wordnet);
         }
         Some(Command::Import {
             format: ImportFormat::Xml { ref path },
