@@ -34,6 +34,9 @@ pub use synset_members::{MemberSynset, SenseRelation};
 pub mod xml;
 pub use xml::{LexiconMetadata, XmlExportError, XmlImportError};
 
+pub mod wndb;
+pub use wndb::{write_wndb, WndbExportError, WndbExportOptions};
+
 #[cfg(feature = "redb")]
 pub mod redb_lexicon;
 #[cfg(feature = "redb")]
