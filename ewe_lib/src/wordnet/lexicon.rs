@@ -1122,6 +1122,21 @@ pub trait Lexicon: Sized {
         Ok(results)
     }
 
+    /// Find the synset with a given ILI id, if any. Same linear scan as
+    /// `ili_by_prefix`, but matches the whole id rather than a prefix.
+    fn synset_by_ili(&self, ili: &str) -> Result<Option<SynsetId>> {
+        for v in self.synsets_iter()? {
+            let (_, synsets) = v?;
+            for entry in synsets.iter()? {
+                let (id, synset) = entry?;
+                if synset.ili.as_ref().is_some_and(|i| i.as_str() == ili) {
+                    return Ok(Some(id));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     //#[cfg(test)]
     //fn add_lexfile(&mut self, lexfile : &str) -> Result<()> {
     //    self.synsets_insert(lexfile.to_owned(), Synsets::new());
