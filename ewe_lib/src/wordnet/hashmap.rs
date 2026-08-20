@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use crate::rels::{SenseRelType,SynsetRelType};
 use crate::wordnet::*;
 use crate::wordnet::entry::BTEntries;
@@ -6,8 +6,15 @@ use std::borrow::Cow;
 
 #[derive(Clone)]
 pub struct LexiconHashMapBackend {
-    entries : HashMap<char, BTEntries>,
-    synsets : HashMap<String, BTSynsets>,
+    // `BTreeMap`, not `HashMap`: `entries_iter`/`synsets_iter` walk these to build the
+    // `links_to`/`sense_links_to` backlink indexes in `finalize_bulk_load` (see lexicon.rs), and
+    // that build order becomes the order backlinks are returned in thereafter. `HashMap`'s
+    // iteration order is randomized per-process, which made every WNDB export run-to-run
+    // nondeterministic in relation-list ordering even on identical input - confirmed while
+    // chasing the WNDB export (#28) byte-exactness gap. `char`/`String` are both `Ord`, so this
+    // is a direct swap with no behavior change beyond fixing the iteration order.
+    entries : BTreeMap<char, BTEntries>,
+    synsets : BTreeMap<String, BTSynsets>,
     synset_id_to_lexfile : HashMap<SynsetId, String>,
     sense_links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
     links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
@@ -21,8 +28,8 @@ pub struct LexiconHashMapBackend {
 impl LexiconHashMapBackend {
     pub fn new() -> LexiconHashMapBackend {
         LexiconHashMapBackend {
-            entries : HashMap::new(),
-            synsets : HashMap::new(),
+            entries : BTreeMap::new(),
+            synsets : BTreeMap::new(),
             synset_id_to_lexfile : HashMap::new(),
             sense_links_to : HashMap::new(),
             links_to : HashMap::new(),

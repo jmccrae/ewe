@@ -318,6 +318,55 @@ impl SynsetRelType {
         }
     }
 
+    /// The classic Princeton WNDB pointer symbol for this relation, or `None` if WNDB has no
+    /// symbol for it at all (the format predates - and can't represent - the newer GWA relation
+    /// kinds: generic `holonym`/`meronym`/`*_location`/`*_portion`, `feminine`/`masculine`/
+    /// `other`, and the never-directly-stored `is_caused_by`/`is_entailed_by`). `pos` only matters
+    /// for `Similar`, whose symbol depends on whether the source synset is a verb - mirrors
+    /// `PointerType.toWN` in `gwn-scala-api`'s `wndb.scala`.
+    pub fn wndb_pointer(&self, pos: &PartOfSpeech) -> Option<&'static str> {
+        match self {
+            SynsetRelType::Also => Some("^"),
+            SynsetRelType::Attribute => Some("="),
+            SynsetRelType::Causes => Some(">"),
+            SynsetRelType::DomainRegion => Some(";r"),
+            SynsetRelType::DomainTopic => Some(";c"),
+            SynsetRelType::Exemplifies => Some(";u"),
+            SynsetRelType::Entails => Some("*"),
+            SynsetRelType::HasDomainRegion => Some("-r"),
+            SynsetRelType::HasDomainTopic => Some("-c"),
+            SynsetRelType::IsExemplifiedBy => Some("-u"),
+            SynsetRelType::HoloMember => Some("#m"),
+            SynsetRelType::HoloPart => Some("#p"),
+            SynsetRelType::HoloSubstance => Some("#s"),
+            SynsetRelType::Hypernym => Some("@"),
+            SynsetRelType::Hyponym => Some("~"),
+            SynsetRelType::InstanceHypernym => Some("@i"),
+            SynsetRelType::InstanceHyponym => Some("~i"),
+            SynsetRelType::MeroMember => Some("%m"),
+            SynsetRelType::MeroPart => Some("%p"),
+            SynsetRelType::MeroSubstance => Some("%s"),
+            SynsetRelType::Similar => {
+                if *pos == PartOfSpeech::v {
+                    Some("$")
+                } else {
+                    Some("&")
+                }
+            }
+            SynsetRelType::HoloLocation
+            | SynsetRelType::HoloPortion
+            | SynsetRelType::Holonym
+            | SynsetRelType::MeroLocation
+            | SynsetRelType::MeroPortion
+            | SynsetRelType::Meronym
+            | SynsetRelType::Feminine
+            | SynsetRelType::Masculine
+            | SynsetRelType::Other
+            | SynsetRelType::IsCausedBy
+            | SynsetRelType::IsEntailedBy => None,
+        }
+    }
+
     pub fn inverse(&self) -> Option<SynsetRelType> {
         match self {
             SynsetRelType::Also => Some(SynsetRelType::Also),
@@ -629,7 +678,49 @@ impl SenseRelType {
         }
     }
 
-    /// Get the inverse of the relation, for relations that are 
+    /// The classic Princeton WNDB pointer symbol for this relation, or `None` for the newer
+    /// GWA semantic-role relations (`agent`/`material`/`event`/... and `other`) WNDB has no
+    /// symbol for at all. `pos` only matters for `Similar` - see
+    /// [`SynsetRelType::wndb_pointer`], whose doc comment this mirrors.
+    pub fn wndb_pointer(&self, pos: &PartOfSpeech) -> Option<&'static str> {
+        match self {
+            SenseRelType::Antonym => Some("!"),
+            SenseRelType::Also => Some("^"),
+            SenseRelType::Participle => Some("<"),
+            SenseRelType::Pertainym => Some("\\"),
+            SenseRelType::Derivation => Some("+"),
+            SenseRelType::DomainTopic => Some(";c"),
+            SenseRelType::HasDomainTopic => Some("-c"),
+            SenseRelType::DomainRegion => Some(";r"),
+            SenseRelType::HasDomainRegion => Some("-r"),
+            SenseRelType::Exemplifies => Some(";u"),
+            SenseRelType::IsExemplifiedBy => Some("-u"),
+            SenseRelType::Similar => {
+                if *pos == PartOfSpeech::v {
+                    Some("$")
+                } else {
+                    Some("&")
+                }
+            }
+            SenseRelType::Agent
+            | SenseRelType::Material
+            | SenseRelType::Event
+            | SenseRelType::Instrument
+            | SenseRelType::Location
+            | SenseRelType::ByMeansOf
+            | SenseRelType::Undergoer
+            | SenseRelType::Property
+            | SenseRelType::Result
+            | SenseRelType::State
+            | SenseRelType::Uses
+            | SenseRelType::Destination
+            | SenseRelType::BodyPart
+            | SenseRelType::Vehicle
+            | SenseRelType::Other => None,
+        }
+    }
+
+    /// Get the inverse of the relation, for relations that are
     /// not directly stored
     pub fn inverse(&self) -> Option<SenseRelType> {
         match self {

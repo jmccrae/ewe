@@ -16,7 +16,7 @@ use ewe_lib::rels::{SenseRelType, SynsetRelType};
 use ewe_lib::validate::{fix, validate};
 use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
 use ewe_lib::wordnet::xml::{read_lexicon_xml, write_lexicon_xml};
-use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, LexiconMetadata, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId};
+use ewe_lib::wordnet::{write_wndb, Lexicon, LexiconHashMapBackend, LexiconMetadata, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId, WndbExportOptions};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -779,6 +779,22 @@ enum ExportFormat {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Export as the classic WNDB (Princeton WordNet database) file set
+    /// (data.*/index.*/index.sense/*.exc)
+    Wndb {
+        /// Directory to write the WNDB files to (created if it doesn't exist)
+        path: PathBuf,
+
+        /// A license/header file, prepended verbatim to every `data.*`/`index.*` file. Omit for
+        /// no header at all.
+        #[arg(long)]
+        license_file: Option<PathBuf>,
+
+        /// A `lemma,pos,synset_id1 synset_id2 ...` CSV recording sense order for lemmas that fold
+        /// together case-insensitively in `index.{pos}` (e.g. `afghani`/`Afghani`)
+        #[arg(long)]
+        sense_orders: Option<PathBuf>,
+    },
     /// Export as a whole-lexicon RDF document (Turtle or RDF/XML), suitable for an
     /// `en-word.net`-style RDF release - every `LexicalEntry` is declared exactly once,
     /// regardless of how many senses/synsets it appears in, so no external dedup pass
@@ -1063,6 +1079,27 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
     }
 }
 
+fn run_export_wndb(
+    path: &Path,
+    license_file: Option<PathBuf>,
+    sense_orders: Option<PathBuf>,
+    wordnet: Option<PathBuf>,
+) {
+    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        exit(-1);
+    });
+    let options = WndbExportOptions {
+        license_file,
+        sense_orders,
+    };
+    write_wndb(&wn, path, &options).unwrap_or_else(|e| {
+        eprintln!("Could not generate WNDB: {}", e);
+        exit(-1);
+    });
+    println!("Wrote {}", path.display());
+}
+
 fn run_export_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
     let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
@@ -1277,6 +1314,16 @@ fn main() {
                 url: url.clone(),
             };
             run_export_xml(path, metadata, cli.wordnet);
+        }
+        Some(Command::Export {
+            format:
+                ExportFormat::Wndb {
+                    ref path,
+                    license_file,
+                    sense_orders,
+                },
+        }) => {
+            run_export_wndb(path, license_file.clone(), sense_orders.clone(), cli.wordnet);
         }
         Some(Command::Export {
             format:

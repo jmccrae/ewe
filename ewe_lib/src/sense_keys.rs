@@ -7,7 +7,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 
 lazy_static! {
-    static ref LEX_FILENUMS: HashMap<&'static str, usize> = {
+    pub(crate) static ref LEX_FILENUMS: HashMap<&'static str, usize> = {
         let mut map = HashMap::new();
         map.insert("adj.all", 0);
         map.insert("adj.pert", 1);
@@ -83,7 +83,7 @@ fn gen_lex_id<L: Lexicon>(wn: &L, lemma: &str) -> Result<i32> {
     Ok(max_id + 1)
 }
 
-fn extract_lex_id(sense_key: &SenseId) -> i32 {
+pub(crate) fn extract_lex_id(sense_key: &SenseId) -> i32 {
     for m in SENSE_ID_LEX_ID.captures_iter(sense_key.as_str()) {
         match m[1].parse() {
             Ok(id2) => {
