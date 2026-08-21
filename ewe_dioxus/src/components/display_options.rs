@@ -1,4 +1,8 @@
+use dioxus::events::KeyboardEvent;
 use dioxus::prelude::*;
+use dioxus::prelude::Key;
+
+use crate::components::use_dismiss_on_outside_click;
 
 static CSS: Asset = asset!("/assets/styling/display_options.css");
 
@@ -37,10 +41,23 @@ pub fn provide_panel_visibility() -> Signal<ShowOptionsPanel> {
 pub fn DisplayOptionsButton() -> Element {
     let mut show_panel = use_context::<Signal<ShowOptionsPanel>>();
 
+    use_dismiss_on_outside_click("wordnet-options-container", move || {
+        show_panel.write().0 = false;
+    });
+
+    let onkeydown = move |e: KeyboardEvent| {
+        if e.key() == Key::Escape {
+            e.prevent_default();
+            show_panel.write().0 = false;
+        }
+    };
+
     rsx! {
         document::Style { href: CSS },
         div {
+            id: "wordnet-options-container",
             class: "wordnet-options",
+            onkeydown,
             a {
                 class: if show_panel().0 { "option_button option_button_selected" } else { "option_button" },
                 onclick: move |_| show_panel.write().0 = !show_panel().0,
