@@ -216,6 +216,9 @@ fn main() {
             )
             .layer(dioxus_fullstack::axum::middleware::from_fn(
                 strip_referer_from_export_links,
+            ))
+            .layer(dioxus_fullstack::axum::middleware::from_fn(
+                synset_view_redirects_and_404,
             ));
 
         Ok(router)
@@ -260,6 +263,44 @@ async fn strip_referer_from_export_links(
             .remove(dioxus_fullstack::http::header::REFERER);
     }
     next.run(req).await
+}
+
+/// Intercepts `/view/synset/{id}` before it reaches the SSR renderer (issue #40).
+/// `views::BySynset`/`components::Synset` has no HTTP-level notion of the request it's being
+/// rendered for, so it can't itself issue a redirect or change the response status - its "No
+/// synset found" fallback would otherwise always ship as a plain 200. This middleware does the
+/// id lookup up front (`backend::rdf::lookup_synset_for_view`, which also follows
+/// `deprecations.csv` merge chains) and either redirects straight to the superseding synset's
+/// canonical URL, or lets the page render as normal and then corrects the status code to 404
+/// when the id doesn't resolve to anything at all.
+#[cfg(feature = "server")]
+async fn synset_view_redirects_and_404(
+    req: dioxus_fullstack::axum::extract::Request,
+    next: dioxus_fullstack::axum::middleware::Next,
+) -> dioxus_fullstack::axum::response::Response {
+    use dioxus_fullstack::axum::response::IntoResponse;
+
+    let lookup = req
+        .uri()
+        .path()
+        .strip_prefix("/view/synset/")
+        .map(|id| backend::rdf::lookup_synset_for_view(&ewe_lib::wordnet::SynsetId::new(id)));
+
+    match lookup {
+        Some(backend::rdf::SynsetLookup::Deprecated(new_id)) => {
+            dioxus_fullstack::axum::response::Redirect::permanent(&format!(
+                "/view/synset/{}",
+                new_id.as_str()
+            ))
+            .into_response()
+        }
+        Some(backend::rdf::SynsetLookup::NotFound) => {
+            let mut response = next.run(req).await;
+            *response.status_mut() = dioxus_fullstack::http::StatusCode::NOT_FOUND;
+            response
+        }
+        Some(backend::rdf::SynsetLookup::Found) | None => next.run(req).await,
+    }
 }
 
 /// App is the main component of our app. Components are the building blocks of dioxus apps. Each component is a function

@@ -907,6 +907,46 @@ pub trait Lexicon: Sized {
         Ok(())
     }
 
+    /// Follows `id` through the deprecation chain written by [`Lexicon::deprecate`] to whatever
+    /// synset currently holds its content, e.g. resolving a URL like `en-word.net/synset/{id}`
+    /// that names a since-merged/deleted synset. A superseding synset can itself later be
+    /// deprecated (merged again), so this walks hop by hop rather than stopping at the first
+    /// record - but stops as soon as a hop lands on a synset that actually still exists, rather
+    /// than blindly following every record to the end of the chain. That existence check matters
+    /// because `deprecations.csv` accumulates forever and can contain stale/contradictory
+    /// entries - e.g. `en-word.net`'s real data has a pair of records deprecating two ids to each
+    /// other, even though one of them is a perfectly live synset today; walking the chain past a
+    /// live synset would otherwise both serve the wrong content and (for that particular pair)
+    /// redirect the live id to itself forever. A `seen` guard still makes a chain with no live
+    /// synset in it (a pure cycle, or one that dead-ends with no further record) terminate
+    /// instead of looping forever; that case returns `None` - same as `id` having no deprecation
+    /// record at all, or already naming a live synset - since there's no live synset to send the
+    /// caller to.
+    fn resolve_deprecation(&self, id: &SynsetId) -> Result<Option<SynsetId>> {
+        if self.synset_by_id(id)?.is_some() {
+            return Ok(None);
+        }
+        let deprecations = self.deprecations_get()?;
+        let mut current = format!("ewn-{}", id.as_str());
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(current.clone());
+        loop {
+            let Some(record) = deprecations.iter().find(|record| record.0 == current) else {
+                return Ok(None);
+            };
+            current = record.2.clone();
+            let candidate = SynsetId::new_owned(
+                current.strip_prefix("ewn-").unwrap_or(&current).to_string(),
+            );
+            if self.synset_by_id(&candidate)?.is_some() {
+                return Ok(Some(candidate));
+            }
+            if !seen.insert(current.clone()) {
+                return Ok(None);
+            }
+        }
+    }
+
     fn update_sense_key(&mut self, old_key: &SenseId, new_key: &SenseId) -> Result<()> {
         let mut lemma_pos = None;
         match self.sense_id_to_lemma_pos_get(old_key)? {
@@ -1448,5 +1488,110 @@ mod tests {
             .unwrap()
             .map(|s| s.len().unwrap() == 1)
             .unwrap_or(false));
+    }
+
+    /// Inserts a minimal but genuinely "live" synset - `resolve_deprecation`'s existence checks
+    /// need `synset_by_id` to find something, not just a deprecation record naming the id.
+    fn insert_live_synset(lexicon: &mut LexiconHashMapBackend, id: &SynsetId) {
+        lexicon
+            .insert_synset("noun.animal".to_string(), id.clone(), Synset::new(PartOfSpeech::n))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_resolve_deprecation_no_record_returns_none() {
+        let lexicon = LexiconHashMapBackend::new();
+        assert_eq!(
+            lexicon.resolve_deprecation(&SynsetId::new("00001740-n")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resolve_deprecation_id_still_live_returns_none() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let id = SynsetId::new("00001740-n");
+        insert_live_synset(&mut lexicon, &id);
+        // A stray/stale deprecation record naming a still-live id must not cause a redirect.
+        lexicon
+            .deprecate(&id, &SynsetId::new("00002000-n"), "stale record".to_string())
+            .unwrap();
+        assert_eq!(lexicon.resolve_deprecation(&id).unwrap(), None);
+    }
+
+    #[test]
+    fn test_resolve_deprecation_single_hop() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let target = SynsetId::new("01923704-v");
+        insert_live_synset(&mut lexicon, &target);
+        lexicon
+            .deprecate(&SynsetId::new("01916702-v"), &target, "Duplicate meaning".to_string())
+            .unwrap();
+        assert_eq!(
+            lexicon.resolve_deprecation(&SynsetId::new("01916702-v")).unwrap(),
+            Some(target)
+        );
+    }
+
+    /// A synset that superseded one deprecation can itself later be merged away - the resolved
+    /// id should be the final live synset, not the intermediate one (which no longer exists).
+    #[test]
+    fn test_resolve_deprecation_follows_multi_hop_chain() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let live = SynsetId::new("c");
+        insert_live_synset(&mut lexicon, &live);
+        lexicon
+            .deprecate(&SynsetId::new("a"), &SynsetId::new("b"), "merge 1".to_string())
+            .unwrap();
+        lexicon
+            .deprecate(&SynsetId::new("b"), &live, "merge 2".to_string())
+            .unwrap();
+        assert_eq!(
+            lexicon.resolve_deprecation(&SynsetId::new("a")).unwrap(),
+            Some(live)
+        );
+    }
+
+    /// A chain that dead-ends (no further record) without ever reaching a live synset has
+    /// nothing to redirect to.
+    #[test]
+    fn test_resolve_deprecation_dead_end_returns_none() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon
+            .deprecate(&SynsetId::new("a"), &SynsetId::new("b"), "merge".to_string())
+            .unwrap();
+        assert_eq!(lexicon.resolve_deprecation(&SynsetId::new("a")).unwrap(), None);
+    }
+
+    /// Regression test for a real `deprecations.csv` pathology: two ids deprecated to each other,
+    /// where one of them (`live`) is actually a perfectly live synset today. Resolving the dead
+    /// one must land on `live`, not loop the pair forever.
+    #[test]
+    fn test_resolve_deprecation_cycle_with_live_synset_resolves_to_it() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let live = SynsetId::new("02057872-a");
+        let dead = SynsetId::new("02801550-a");
+        insert_live_synset(&mut lexicon, &live);
+        lexicon.deprecate(&dead, &live, "duplicate".to_string()).unwrap();
+        lexicon.deprecate(&live, &dead, "duplicate".to_string()).unwrap();
+
+        // Querying the live id directly must not redirect at all - it already exists.
+        assert_eq!(lexicon.resolve_deprecation(&live).unwrap(), None);
+        // Querying the dead id must resolve to the live one, not loop back to itself.
+        assert_eq!(lexicon.resolve_deprecation(&dead).unwrap(), Some(live));
+    }
+
+    /// A pure cycle with no live synset anywhere in it (both real, current data pathologies and
+    /// hypothetical malformed CSVs) must terminate rather than looping forever.
+    #[test]
+    fn test_resolve_deprecation_cycle_without_live_synset_returns_none() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon
+            .deprecate(&SynsetId::new("a"), &SynsetId::new("b"), "merge 1".to_string())
+            .unwrap();
+        lexicon
+            .deprecate(&SynsetId::new("b"), &SynsetId::new("a"), "merge 2".to_string())
+            .unwrap();
+        assert_eq!(lexicon.resolve_deprecation(&SynsetId::new("a")).unwrap(), None);
     }
 }
