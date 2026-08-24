@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::synset::BTSynsets;
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use crate::rels::{SenseRelType, SynsetRelType};
 use std::borrow::Cow;
 use std::path::Path;
@@ -17,7 +18,7 @@ use speedy::{Readable, Writable};
 use std::result;
 
 const INITIAL_CHARS : [char;27] = ['0', 'a','b', 'c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'];
-/// (initial character, lemma) -> HashMap<PosKey, Entry>
+/// (initial character, lemma) -> BTreeMap<PosKey, Entry>
 const ENTRIES_TABLE: TableDefinition<(char, String), Vec<u8>> = TableDefinition::new("entries");
 const LOWERCASE_ENTRIES_TABLE: TableDefinition<String, Vec<String>> = TableDefinition::new("lowercase_entries");
 /// (lexname, synset_id) -> Synset
@@ -103,6 +104,20 @@ impl ReDBLexicon {
     /// Create a new database, deleting the existing file if necessary.
     /// See [`ReDBLexicon::open`] for `cache_size_bytes`.
     pub fn create<P: AsRef<Path>>(path : P, cache_size_bytes: usize) -> Result<ReDBLexicon> {
+        // `redb::Builder::create` opens with `.truncate(false)`, so it happily reopens an
+        // existing file's tables as-is rather than starting fresh - despite this method's
+        // doc comment (and every caller's intent: `open_lexicon_with_progress`'s stale-source
+        // rebuild and `revert_lexicon` both want a truly clean database). Left alone, a rebuild
+        // over an already-populated file merges with the old contents instead of replacing them;
+        // for `entries`/`synsets` that's silently masked because those are keyed upserts, but
+        // `deprecations_push` just appends, so every deprecation record gets duplicated on each
+        // such rebuild. Remove any existing file first so `create` always starts from empty.
+        if path.as_ref().exists() {
+            std::fs::remove_file(path.as_ref())
+                .map_err(|e| LexiconError::GenericError(format!(
+                    "Could not remove existing database file {}: {}", path.as_ref().display(), e
+                )))?;
+        }
         let db = Arc::new(
             Database::builder()
                 .set_cache_size(cache_size_bytes)
@@ -730,7 +745,7 @@ impl Entries for ReDBEntries {
         let mut entry_map = if let Some(entry_str) = table.get((self.key, lemma.clone()))? {
             deserialize_entry(entry_str.value())?
         } else {
-            HashMap::new()
+            BTreeMap::new()
         };
         entry_map.insert(pos, entry);
         table.insert((self.key, lemma), serialize_entry(&entry_map)?)?;
@@ -1076,7 +1091,7 @@ pub struct EntryIterator {
 }
 
 impl Iterator for EntryIterator {
-    type Item = Result<(String, HashMap<PosKey, Entry>)>;
+    type Item = Result<(String, BTreeMap<PosKey, Entry>)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.with_inner_mut(|inner| {
@@ -1101,11 +1116,11 @@ fn serialize_synset(synset : &Synset) -> Result<Vec<u8>> {
     Ok(synset.write_to_vec()?)
 }
 
-fn deserialize_entry(s : Vec<u8>) -> Result<HashMap<PosKey, Entry>> {
-    Ok(HashMap::<PosKey, Entry>::read_from_buffer(&s)?)
+fn deserialize_entry(s : Vec<u8>) -> Result<BTreeMap<PosKey, Entry>> {
+    Ok(BTreeMap::<PosKey, Entry>::read_from_buffer(&s)?)
 }
 
-fn serialize_entry(entry : &HashMap<PosKey, Entry>) -> Result<Vec<u8>> {
+fn serialize_entry(entry : &BTreeMap<PosKey, Entry>) -> Result<Vec<u8>> {
     Ok(entry.write_to_vec()?)
 }
 
@@ -1143,4 +1158,107 @@ fn deserialize_frames(s : Vec<u8>) -> Result<Vec<(String, String)>> {
 
 fn serialize_frames(frames : Vec<(String, String)>) -> Result<Vec<u8>> {
     Ok(frames.write_to_vec()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wordnet::entry::Entry;
+
+    // Regression test for the "desktop editor scrambles PoS order" bug: entries were
+    // previously stored per-lemma as a `HashMap<PosKey, Entry>`, so re-saving a lexicon
+    // loaded through the redb backend (as the GUI does) reordered the `n:`/`a:`/... blocks
+    // within a lemma essentially at random, producing a huge spurious diff on every edit.
+    // Storing them in a `BTreeMap` instead makes the PoS order deterministic (sorted by
+    // `PosKey`), matching the order the plain YAML-file backend already produced.
+    #[test]
+    fn test_entry_pos_order_is_deterministic_regardless_of_insertion_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_redb_pos_order_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.redb");
+
+        // Insert "s" (adjective satellite) before "a" (adjective) - the reverse of
+        // alphabetical order - to make sure the stored order does not just happen to
+        // match insertion order.
+        let mut lexicon = ReDBLexicon::create(&db_path, 1024 * 1024).unwrap();
+        lexicon
+            .insert_entry("bendy".to_string(), PosKey::new("s"), Entry::new())
+            .unwrap();
+        lexicon
+            .insert_entry("bendy".to_string(), PosKey::new("a"), Entry::new())
+            .unwrap();
+        lexicon
+            .insert_entry("bendy".to_string(), PosKey::new("n"), Entry::new())
+            .unwrap();
+
+        let pos_order: Vec<String> = lexicon
+            .entry_by_lemma_with_pos("bendy")
+            .unwrap()
+            .into_iter()
+            .map(|(pos, _)| pos.as_str().to_string())
+            .collect();
+        assert_eq!(pos_order, vec!["a".to_string(), "n".to_string(), "s".to_string()]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // Regression test for the "deprecations.csv doubles on every rebuild" bug:
+    // `redb::Builder::create` opens with `.truncate(false)`, so calling `ReDBLexicon::create`
+    // again on a path that already holds a populated database reused its existing tables
+    // instead of starting empty. `entries`/`synsets` are keyed upserts so that was masked
+    // there, but `deprecations_push` just appends records with no dedup, so
+    // `open_lexicon_with_progress`'s stale-source rebuild (which calls `create` in place on the
+    // real database file, not a fresh temp path) re-imported every `deprecations.csv` row on
+    // top of what was already stored, doubling (tripling, ...) them on each rebuild.
+    #[test]
+    fn test_create_on_existing_populated_file_starts_empty() {
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_redb_recreate_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.redb");
+
+        {
+            let mut lexicon = ReDBLexicon::create(&db_path, 1024 * 1024).unwrap();
+            lexicon
+                .deprecations_push(DeprecationRecord(
+                    "ewn-1".to_string(),
+                    "i1".to_string(),
+                    "ewn-2".to_string(),
+                    "i2".to_string(),
+                    "reason".to_string(),
+                ))
+                .unwrap();
+            assert_eq!(lexicon.deprecations_get().unwrap().len(), 1);
+        }
+
+        // Simulate a later "source is newer than the database" rebuild, which calls `create`
+        // again on the same real database path rather than a fresh temp path.
+        let mut rebuilt = ReDBLexicon::create(&db_path, 1024 * 1024).unwrap();
+        assert_eq!(rebuilt.deprecations_get().unwrap().len(), 0);
+        rebuilt
+            .deprecations_push(DeprecationRecord(
+                "ewn-1".to_string(),
+                "i1".to_string(),
+                "ewn-2".to_string(),
+                "i2".to_string(),
+                "reason".to_string(),
+            ))
+            .unwrap();
+        assert_eq!(rebuilt.deprecations_get().unwrap().len(), 1);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
