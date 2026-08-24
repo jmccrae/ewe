@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus::events::{FormEvent, KeyboardEvent};
 use dioxus::prelude::Key;
 use crate::backend::api::{autocomplete, SearchResult, SearchResultKind};
-use crate::components::{AddSynsetTrigger, DisplayOptionsButton};
+use crate::components::{use_dismiss_on_outside_click, AddSynsetTrigger, DisplayOptionsButton};
 use crate::Route;
 
 #[component]
@@ -25,6 +25,9 @@ pub fn WordNet() -> Element {
         if let Some(Ok(list)) = suggestions.value() {
             visible_suggestions.set(list.cloned());
         }
+    });
+    use_dismiss_on_outside_click("wordnet-search-container", move || {
+        show_suggestions.set(false)
     });
 
     let update_lemma = move |e: FormEvent| async move {
@@ -53,6 +56,14 @@ pub fn WordNet() -> Element {
     };
 
     let onkeydown = move |e: KeyboardEvent| {
+        // Checked before the "any suggestions loaded" guard below, unlike the other arms -
+        // Escape needs to dismiss the dropdown even while it's only showing the "add a new
+        // synset" row (no matches yet, or none at all).
+        if e.key() == Key::Escape {
+            e.prevent_default();
+            show_suggestions.set(false);
+            return;
+        }
         let current = visible_suggestions.read().clone();
         if current.is_empty() {
             return;
@@ -81,6 +92,7 @@ pub fn WordNet() -> Element {
             div {
                 class: "wordnet-input",
                 span {
+                    id: "wordnet-search-container",
                     class: "suggestions-span",
                     input {
                         class: "wordnet-lemma",
@@ -94,26 +106,27 @@ pub fn WordNet() -> Element {
                     // any) and, always, the "add a new synset" row - the latter deliberately
                     // isn't one of the `<li>` results (it isn't a search *result*), so it stays
                     // available regardless of whether there are any matches, any suggestions
-                    // loaded yet, or the fetch errored.
-                    if !lemma().trim().is_empty() {
+                    // loaded yet, or the fetch errored. Gated on `show_suggestions` too (not just
+                    // the lemma being non-empty) so a click outside `#wordnet-search-container`
+                    // or an Escape press (see `use_dismiss_on_outside_click`/`onkeydown` above)
+                    // dismisses the whole box, not just the `<ul>` inside it.
+                    if !lemma().trim().is_empty() && *show_suggestions.read() {
                         div {
                             class: "suggestions-dropdown",
-                            if *show_suggestions.read() {
-                                ul {
-                                    class: "suggestions",
-                                    if let Some(Err(_e)) = suggestions.value() {
-                                        div { "Failed to load suggestions" }
-                                    } else {
-                                        for (i, s) in visible_suggestions.read().iter().cloned().enumerate() {
-                                            li {
-                                                key: "{s.display}",
-                                                class: if i == selected() { "selected" },
-                                                onmousedown: {
-                                                    let s = s.clone();
-                                                    move |_| go_to(s.clone())
-                                                },
-                                                "{s.display}"
-                                            }
+                            ul {
+                                class: "suggestions",
+                                if let Some(Err(_e)) = suggestions.value() {
+                                    div { "Failed to load suggestions" }
+                                } else {
+                                    for (i, s) in visible_suggestions.read().iter().cloned().enumerate() {
+                                        li {
+                                            key: "{s.display}",
+                                            class: if i == selected() { "selected" },
+                                            onmousedown: {
+                                                let s = s.clone();
+                                                move |_| go_to(s.clone())
+                                            },
+                                            "{s.display}"
                                         }
                                     }
                                 }

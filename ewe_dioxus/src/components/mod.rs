@@ -5,6 +5,9 @@
 mod wordnet;
 pub use wordnet::WordNet;
 
+mod dismiss;
+pub use dismiss::use_dismiss_on_outside_click;
+
 mod synset;
 pub use synset::Synset;
 
