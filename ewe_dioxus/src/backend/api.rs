@@ -7,6 +7,187 @@ use std::collections::BTreeSet;
 #[cfg(any(feature = "server", feature = "desktop"))]
 use crate::db::read_lexicon;
 
+/// CSS custom-property overrides applied on top of the bundled `assets/styling/theme.css`
+/// defaults, via `document.documentElement.style.setProperty(...)` at runtime (see
+/// `views::wn_layout::WNLayout`) rather than by swapping the whole stylesheet. Every field is
+/// optional; `None` means "use the compiled-in default" via the normal CSS cascade - this struct
+/// never needs to duplicate those default values itself. Field names map onto
+/// `assets/styling/theme.css`'s "Roles" custom properties (e.g. `primary` -> `--color-primary`,
+/// `text_secondary` -> `--color-text-secondary`) and its font custom properties (`font_body` ->
+/// `--font-body`, etc.).
+///
+/// Lives here (in `backend::api`, alongside `Branding` which embeds it) rather than in
+/// `settings` - `EweSettings::theme` uses this same type, but `settings` is gated to `server`/
+/// `desktop` while `backend::api` compiles unconditionally (including into the WASM client on a
+/// `web` build, since `Branding` is fetched through a server function view code on every target
+/// calls isomorphically), so the type has to live on the side both builds can see.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ThemeOverrides {
+    #[serde(default)]
+    pub primary: Option<String>,
+    #[serde(default)]
+    pub accent: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub text_secondary: Option<String>,
+    #[serde(default)]
+    pub text_muted: Option<String>,
+    #[serde(default)]
+    pub text_dim: Option<String>,
+    #[serde(default)]
+    pub text_faint: Option<String>,
+    #[serde(default)]
+    pub text_mute: Option<String>,
+    #[serde(default)]
+    pub text_strong: Option<String>,
+    #[serde(default)]
+    pub text_on_dark: Option<String>,
+    #[serde(default)]
+    pub border: Option<String>,
+    #[serde(default)]
+    pub border_light: Option<String>,
+    #[serde(default)]
+    pub surface_light: Option<String>,
+    #[serde(default)]
+    pub surface_hover: Option<String>,
+    #[serde(default)]
+    pub surface_dark: Option<String>,
+    #[serde(default)]
+    pub font_body: Option<String>,
+    #[serde(default)]
+    pub font_heading: Option<String>,
+    #[serde(default)]
+    pub font_heading_weight: Option<String>,
+    #[serde(default)]
+    pub font_mono: Option<String>,
+}
+
+impl ThemeOverrides {
+    /// The full set of overridable color properties as `(field name, value)` pairs, for
+    /// `validate`'s loop and any other code that needs to walk every field generically rather
+    /// than naming each one - keeps that code from silently missing a field added here later.
+    fn color_fields(&self) -> [(&'static str, &Option<String>); 15] {
+        [
+            ("theme.primary", &self.primary),
+            ("theme.accent", &self.accent),
+            ("theme.text", &self.text),
+            ("theme.text_secondary", &self.text_secondary),
+            ("theme.text_muted", &self.text_muted),
+            ("theme.text_dim", &self.text_dim),
+            ("theme.text_faint", &self.text_faint),
+            ("theme.text_mute", &self.text_mute),
+            ("theme.text_strong", &self.text_strong),
+            ("theme.text_on_dark", &self.text_on_dark),
+            ("theme.border", &self.border),
+            ("theme.border_light", &self.border_light),
+            ("theme.surface_light", &self.surface_light),
+            ("theme.surface_hover", &self.surface_hover),
+            ("theme.surface_dark", &self.surface_dark),
+        ]
+    }
+
+    fn font_fields(&self) -> [(&'static str, &Option<String>); 4] {
+        [
+            ("theme.font_body", &self.font_body),
+            ("theme.font_heading", &self.font_heading),
+            ("theme.font_heading_weight", &self.font_heading_weight),
+            ("theme.font_mono", &self.font_mono),
+        ]
+    }
+
+    /// Checks every set field against `is_valid_hex_color`/`is_valid_font_value`, returning a
+    /// descriptive error naming the first offending field. Called from `EweSettings::load` (via
+    /// the `settings` module's `pub use` of this type) so a malformed `settings.toml` fails
+    /// loudly at load time rather than silently rendering half-styled (these are
+    /// deployment-author-controlled config, not end-user input, and every valid value ends up
+    /// interpolated into JS run via `document::eval` - see `views::wn_layout::build_theme_eval_js`
+    /// - so a tight allowlist here is worth enforcing up front).
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        for (name, value) in self.color_fields() {
+            if let Some(v) = value {
+                if !is_valid_hex_color(v) {
+                    return Err(format!(
+                        "{name} = \"{v}\" is not a valid CSS hex color (expected e.g. \"#002868\")"
+                    ));
+                }
+            }
+        }
+        for (name, value) in self.font_fields() {
+            if let Some(v) = value {
+                if !is_valid_font_value(v) {
+                    return Err(format!(
+                        "{name} = \"{v}\" contains a character not allowed in a theme font value"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Matches a CSS hex color: `#` followed by 3, 4, 6, or 8 hex digits (matching CSS's own
+/// shorthand/alpha forms). Deliberately stricter than valid CSS overall (no named colors, no
+/// `rgb()`/`hsl()`) since every real-world override so far is a hex color, and a narrow allowlist
+/// is easiest to reason about as safe to interpolate into `document::eval`'d JS.
+fn is_valid_hex_color(s: &str) -> bool {
+    let hex = s.strip_prefix('#').unwrap_or_default();
+    s.starts_with('#') && matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Rejects only the characters that could break out of the double-quoted JS string literal a
+/// theme font value is later interpolated into (see `views::wn_layout::build_theme_eval_js`), or
+/// inject extra CSS/JS: `"`, `\`, `<`, `>`, `;`, and control characters. Single quotes are allowed
+/// - `'Times New Roman'` is a normal, legitimate CSS font-stack style, and harmless inside a
+/// double-quoted JS string.
+fn is_valid_font_value(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii() && !c.is_control() && !"\"\\<>;".contains(c))
+}
+
+#[cfg(test)]
+mod theme_overrides_tests {
+    use super::*;
+
+    #[test]
+    fn is_valid_hex_color_accepts_3_4_6_8_digit_forms_and_rejects_others() {
+        assert!(is_valid_hex_color("#fff"));
+        assert!(is_valid_hex_color("#ffff"));
+        assert!(is_valid_hex_color("#002868"));
+        assert!(is_valid_hex_color("#002868ff"));
+        assert!(!is_valid_hex_color("002868")); // missing #
+        assert!(!is_valid_hex_color("#02868")); // 5 digits
+        assert!(!is_valid_hex_color("#00286z")); // non-hex char
+        assert!(!is_valid_hex_color("navy")); // named color, not hex
+        assert!(!is_valid_hex_color("#"));
+    }
+
+    #[test]
+    fn is_valid_font_value_allows_quotes_and_commas_rejects_injection_chars() {
+        assert!(is_valid_font_value("'Times New Roman', serif"));
+        assert!(is_valid_font_value("Dosis, sans-serif"));
+        for bad in ["Evil\"", "Evil\\", "Evil<b>", "Evil>", "Evil;alert(1)", "Evil\n"] {
+            assert!(!is_valid_font_value(bad), "expected {bad:?} to be rejected");
+        }
+        assert!(!is_valid_font_value(""));
+    }
+
+    #[test]
+    fn validate_rejects_first_bad_color_field() {
+        let theme = ThemeOverrides { primary: Some("notacolor".to_string()), ..Default::default() };
+        assert!(theme.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_valid_overrides_and_leaves_rest_none() {
+        let theme = ThemeOverrides {
+            primary: Some("#002868".to_string()),
+            font_body: Some("'Times New Roman', serif".to_string()),
+            ..Default::default()
+        };
+        assert!(theme.validate().is_ok());
+    }
+}
+
 /// The branding fields configurable via `settings.toml` that need to reach
 /// client-rendered pages. Fetched through a server function (rather than
 /// reading `crate::SETTINGS` directly from view code) because `SETTINGS` is
@@ -17,17 +198,17 @@ use crate::db::read_lexicon;
 pub struct Branding {
     pub project_name: String,
     pub footer: String,
-    /// The theme stylesheet's own contents, inlined into a `<style>` tag by
-    /// `views::wn_layout::WNLayout` rather than linked via `<link href="/theme.css">`. A `<link>`
-    /// is a plain static-resource URL the browser/webview caches on its own with no reactive
-    /// dependency on server state, so after `backend::setup::configure_wordnet_source`
-    /// hot-swaps `SETTINGS` to point `theme` at a different file, it kept showing whatever was
-    /// cached from before. Bundling the CSS text into this struct instead means it rides along
-    /// with `project_name`/`footer` through the same `Loader<Branding>`, which already correctly
-    /// refetches on `.restart()`.
-    pub theme_css: String,
+    /// CSS custom-property overrides from `settings.toml`'s `[theme]` table, applied by
+    /// `views::wn_layout::WNLayout` via `document.documentElement.style.setProperty(...)` rather
+    /// than by swapping a stylesheet. Riding along in this struct means it rides along with
+    /// `project_name`/`footer` through the same `Loader<Branding>`, which already correctly
+    /// refetches on `.restart()` after `backend::setup::configure_wordnet_source` hot-swaps
+    /// `SETTINGS`.
+    pub theme: ThemeOverrides,
     /// The logo's own raw SVG markup, inlined directly into the page (via `dangerous_inner_html`)
-    /// instead of linked via `<img src="/logo">`, for the same reason as `theme_css` above.
+    /// instead of linked via `<img src="/logo">`: a `<link>`/`<img src>` is a plain
+    /// static-resource URL the browser/webview caches on its own with no reactive dependency on
+    /// server state, so after a hot-swap it'd keep showing whatever was cached from before.
     /// Assumes `settings.toml`'s `logo` points at an SVG file, which is true of every logo
     /// shipped with this app (`assets/gwa.svg`, `assets/english.svg`).
     pub logo_svg: String,
@@ -46,7 +227,7 @@ pub async fn get_branding() -> Result<Branding> {
     Ok(Branding {
         project_name: settings.project_name.clone(),
         footer: settings.footer.clone(),
-        theme_css: std::fs::read_to_string(&settings.theme).unwrap_or_default(),
+        theme: settings.theme.clone(),
         logo_svg: std::fs::read_to_string(&settings.logo).unwrap_or_default(),
     })
 }

@@ -28,10 +28,13 @@ pub struct EweSettings {
     /// Footer HTML, rendered as-is beneath the main content
     #[serde(default = "default_footer")]
     pub footer: String,
-    /// Path (relative to the working directory) of the theme stylesheet
-    /// (colours and fonts), served at `/theme.css`
-    #[serde(default = "default_theme")]
-    pub theme: String,
+    /// CSS custom-property overrides applied on top of the bundled `assets/styling/theme.css`
+    /// defaults, via `document.documentElement.style.setProperty(...)` at runtime (see
+    /// `views::wn_layout::WNLayout`) rather than by swapping the whole stylesheet. Every field is
+    /// optional; `None` means "use the compiled-in default" via the normal CSS cascade - this
+    /// struct never needs to duplicate those default values itself.
+    #[serde(default)]
+    pub theme: ThemeOverrides,
     /// If true, skip checking whether `wordnet_source`/`corpus_source` are newer
     /// than the existing databases on startup, so the databases are never
     /// automatically rebuilt (they're still built if missing). Useful to avoid
@@ -61,6 +64,12 @@ pub struct EweSettings {
     #[serde(default)]
     pub base_url: Option<String>,
 }
+
+// `ThemeOverrides` itself lives in `backend::api` (re-exported here), not this module: `Branding`
+// (in that module) needs the same type, and `backend::api` compiles unconditionally (including
+// into the WASM client on a `web` build), whereas this whole module is gated to `server`/
+// `desktop` - so the type has to live on the side both builds can see, not the other way around.
+pub use crate::backend::api::ThemeOverrides;
 
 fn default_lexicon_cache_mb() -> usize {
     128
@@ -138,19 +147,6 @@ fn default_corpus_database() -> String {
     "corpus.db".to_string()
 }
 
-/// See `resolve_bundled_asset`'s doc comment.
-#[cfg(feature = "desktop")]
-fn default_theme() -> String {
-    resolve_bundled_asset("styling/theme.css")
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "assets/assets/styling/theme.css".to_string())
-}
-
-#[cfg(not(feature = "desktop"))]
-fn default_theme() -> String {
-    "assets/styling/theme.css".to_string()
-}
-
 fn default_project_name() -> String {
     "EWE Wordnet Editor".to_string()
 }
@@ -197,7 +193,7 @@ impl EweSettings {
             tagline: default_tagline(),
             intro: default_intro(),
             footer: default_footer(),
-            theme: default_theme(),
+            theme: ThemeOverrides::default(),
             disable_auto_reload: false,
             lexicon_cache_mb: default_lexicon_cache_mb(),
             id_prefix: default_id_prefix(),
@@ -208,18 +204,25 @@ impl EweSettings {
     }
 
     /// Loads settings from `path`, resolving every path-valued field (`database`,
-    /// `wordnet_source`, `corpus_database`, `corpus_source`, `logo`, `theme`) relative to
-    /// `path`'s own directory rather than the process's working directory. This lets a
-    /// `settings.toml` be dropped into (and moved between) any project folder - e.g. a Wordnet
-    /// checkout picked via the desktop setup screen's folder dialog (see
+    /// `wordnet_source`, `corpus_database`, `corpus_source`, `logo`) relative to `path`'s own
+    /// directory rather than the process's working directory. This lets a `settings.toml` be
+    /// dropped into (and moved between) any project folder - e.g. a Wordnet checkout picked via
+    /// the desktop setup screen's folder dialog (see
     /// `backend::setup::configure_wordnet_source`) - and have its relative paths keep pointing
     /// at its own sibling files/folders no matter where the server process itself was launched
     /// from. A bare filename like `"settings.toml"` (no directory component) resolves to an
     /// empty base, leaving paths unchanged - so this is a no-op for the common case of a
     /// `settings.toml` sitting directly in the process's working directory.
+    ///
+    /// Also validates `theme` (see `ThemeOverrides::validate`), failing the whole load with a
+    /// descriptive error if any override value isn't a value this app can safely use - this is
+    /// deployment-author-controlled config, not end-user input, so a mistake here should surface
+    /// loudly at load time rather than silently rendering half-styled.
     pub fn load(path: &str) -> Result<EweSettings, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
         let mut settings: EweSettings = toml::from_str(&contents)?;
+
+        settings.theme.validate()?;
 
         let base = std::path::Path::new(path)
             .parent()
@@ -235,7 +238,6 @@ impl EweSettings {
         settings.database = resolve(&settings.database);
         settings.corpus_database = resolve(&settings.corpus_database);
         settings.logo = resolve(&settings.logo);
-        settings.theme = resolve(&settings.theme);
         settings.wordnet_source = settings.wordnet_source.as_deref().map(|s| resolve(s));
         settings.corpus_source = settings.corpus_source.as_deref().map(|s| resolve(s));
 
@@ -326,5 +328,80 @@ mod tests {
 
         let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
         assert_eq!(settings.database, "/absolute/path/wordnet.db");
+    }
+
+    #[test]
+    fn theme_overrides_default_to_none_when_table_absent() {
+        let scratch = ScratchDir::new("theme-absent");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(&settings_path, r#"database = "wordnet.db""#).unwrap();
+
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(settings.theme, ThemeOverrides::default());
+    }
+
+    #[test]
+    fn theme_overrides_parse_when_present_and_leave_others_none() {
+        let scratch = ScratchDir::new("theme-present");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            r##"
+                database = "wordnet.db"
+
+                [theme]
+                primary = "#002868"
+                accent = "#bf0a30"
+            "##,
+        )
+        .unwrap();
+
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(settings.theme.primary.as_deref(), Some("#002868"));
+        assert_eq!(settings.theme.accent.as_deref(), Some("#bf0a30"));
+        assert_eq!(settings.theme.text, None);
+        assert_eq!(settings.theme.font_body, None);
+    }
+
+    #[test]
+    fn invalid_hex_color_is_rejected_at_load() {
+        let scratch = ScratchDir::new("theme-invalid-color");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            "database = \"wordnet.db\"\n\n[theme]\nprimary = \"navy\"\n",
+        )
+        .unwrap();
+
+        assert!(EweSettings::load(settings_path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn font_value_with_disallowed_character_is_rejected_at_load() {
+        let scratch = ScratchDir::new("theme-invalid-font");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            "database = \"wordnet.db\"\n\n[theme]\nfont_body = \"Evil\\\"; alert(1); //\"\n",
+        )
+        .unwrap();
+
+        assert!(EweSettings::load(settings_path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn font_value_with_single_quotes_is_accepted() {
+        let scratch = ScratchDir::new("theme-quoted-font");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(
+            &settings_path,
+            "database = \"wordnet.db\"\n\n[theme]\nfont_body = \"'Times New Roman', serif\"\n",
+        )
+        .unwrap();
+
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+        assert_eq!(settings.theme.font_body.as_deref(), Some("'Times New Roman', serif"));
     }
 }

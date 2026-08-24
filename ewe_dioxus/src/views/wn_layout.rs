@@ -45,51 +45,111 @@ fn HistoryLink() -> Element {
     rsx! {}
 }
 
-/// HACK: reaches past `document::Style`'s public API to mutate a head element it created, using
-/// undocumented internals (a hardcoded DOM id, and `document::eval` running raw JS against
-/// `document.getElementById`) rather than anything Dioxus actually supports for this. It exists
-/// because `document::Style` (see `WNLayout` below) only ever inserts its content once - "Any
-/// updates to the props after the first render will not be reflected in the head", per its own
-/// doc comment - which is a real problem here: on desktop, there's no SSR pass to resolve
-/// `branding` before the first render, so that first render's `theme_css` is still `""`
-/// (loading), and without this workaround the tag would be permanently stuck empty. Every fix
-/// attempted that stayed within Dioxus's supported API (freezing the prop via `use_hook`, moving
-/// `document::Style` up into `main.rs`'s `App2` with its own loader) either failed to actually
-/// update the tag on desktop or otherwise didn't work - see git history on this file/`main.rs`
-/// around this comment for what was tried.
+/// The full set of theme override CSS custom properties, in application order. Field names on
+/// `ThemeOverrides` map 1:1 onto `assets/styling/theme.css`'s "Roles"/font custom properties -
+/// see that struct's doc comment.
+fn theme_override_pairs(theme: &crate::backend::api::ThemeOverrides) -> Vec<(&'static str, Option<&str>)> {
+    vec![
+        ("--color-primary", theme.primary.as_deref()),
+        ("--color-accent", theme.accent.as_deref()),
+        ("--color-text", theme.text.as_deref()),
+        ("--color-text-secondary", theme.text_secondary.as_deref()),
+        ("--color-text-muted", theme.text_muted.as_deref()),
+        ("--color-text-dim", theme.text_dim.as_deref()),
+        ("--color-text-faint", theme.text_faint.as_deref()),
+        ("--color-text-mute", theme.text_mute.as_deref()),
+        ("--color-text-strong", theme.text_strong.as_deref()),
+        ("--color-text-on-dark", theme.text_on_dark.as_deref()),
+        ("--color-border", theme.border.as_deref()),
+        ("--color-border-light", theme.border_light.as_deref()),
+        ("--color-surface-light", theme.surface_light.as_deref()),
+        ("--color-surface-hover", theme.surface_hover.as_deref()),
+        ("--color-surface-dark", theme.surface_dark.as_deref()),
+        ("--font-body", theme.font_body.as_deref()),
+        ("--font-heading", theme.font_heading.as_deref()),
+        ("--font-heading-weight", theme.font_heading_weight.as_deref()),
+        ("--font-mono", theme.font_mono.as_deref()),
+    ]
+}
+
+/// Builds the JS run against `document.documentElement`'s inline style to apply (`setProperty`)
+/// or clear (`removeProperty`, for `None`) every theme override in one `document::eval` call.
+/// `documentElement` (rather than some wrapping `<div>` in the render tree) is the target because
+/// `assets/styling/main.css`'s own `body` rule reads `var(--font-body)`/`var(--color-accent)`/
+/// `var(--color-text)` directly, and `body` is an *ancestor* of everything `WNLayout` renders - an
+/// override set only on a descendant element would never reach `body`'s own rule, but
+/// `documentElement` is an ancestor of `body` too, so it correctly cascades everywhere.
+/// `removeProperty` on `None` matters on desktop: `SETTINGS` is hot-swapped in place on a project
+/// switch (see `backend::setup::configure_wordnet_source`), so without it a stale override from a
+/// previously themed project would leak into an unthemed one in the same running session.
 ///
-/// Consequences of the hack, worth knowing before touching this again:
-/// - Trips `document::Style`'s own "Changing the props of `Style {}` is not supported" console
-///   warning every time `theme_css` actually changes (the initial load-resolves transition, or a
-///   later desktop reconfigure) - harmless, but expected noise, not a sign something's broken.
-/// - Depends on `document::Style` continuing to render a real `<style id="...">` element with
-///   exactly the id we pass it, and on `document::eval` continuing to support arbitrary JS - both
-///   currently true (dioxus 0.7.9) but neither is a documented contract, so a Dioxus upgrade could
-///   silently break this (the id stops appearing, `textContent` writes go missing, etc.) without
-///   any compile error to flag it. If the theme ever stops updating after a dioxus bump, look here
-///   first.
-#[component]
-fn ThemeStyleUpdater(css: String) -> Element {
-    let last_css = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(css.clone())));
-    let mut last_css = last_css.borrow_mut();
-    if css != *last_css {
-        document::eval(&format!(
-            "var el = document.getElementById('ewe-theme-style'); if (el) el.textContent = \"{}\";",
-            escape_js_string(&css)
-        ));
-        *last_css = css;
+/// Pure string-building, deliberately separated from the actual `document::eval` call so it's
+/// unit-testable without a real DOM/webview.
+fn build_theme_eval_js(pairs: &[(&str, Option<&str>)]) -> String {
+    let mut js = String::new();
+    for (var_name, value) in pairs {
+        match value {
+            Some(v) => js.push_str(&format!(
+                "document.documentElement.style.setProperty('{var_name}', \"{}\");",
+                escape_js_string(v)
+            )),
+            None => js.push_str(&format!(
+                "document.documentElement.style.removeProperty('{var_name}');"
+            )),
+        }
     }
-    rsx! {}
+    js
 }
 
 /// A minimal JS string-literal escaper, matching the one `dioxus_document` uses internally for
 /// its own `document::eval` calls (it isn't exposed publicly, so this is a small copy rather than
-/// pulling in `serde_json` as a dependency just for this one call site).
+/// pulling in `serde_json` as a dependency just for this one call site). Kept as a defense-in-depth
+/// layer around `build_theme_eval_js`'s interpolated values even though `EweSettings::load`
+/// already validates them - validation and this call site live in different modules, and the
+/// escape is cheap insurance against them drifting apart later (e.g. a new override field added
+/// here without a matching validation arm there).
 fn escape_js_string(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod theme_eval_tests {
+    use super::*;
+
+    #[test]
+    fn build_theme_eval_js_sets_present_and_clears_absent() {
+        let js = build_theme_eval_js(&[
+            ("--color-primary", Some("#002868")),
+            ("--color-accent", None),
+        ]);
+        assert!(js.contains(
+            "document.documentElement.style.setProperty('--color-primary', \"#002868\");"
+        ));
+        assert!(js.contains("document.documentElement.style.removeProperty('--color-accent');"));
+    }
+
+    #[test]
+    fn build_theme_eval_js_escapes_values() {
+        let js = build_theme_eval_js(&[("--font-body", Some("weird\"value"))]);
+        assert!(js.contains("weird\\\"value"));
+        assert!(!js.contains("\"weird\"value\""));
+    }
+
+    #[test]
+    fn build_theme_eval_js_all_none_yields_only_removes() {
+        let js = build_theme_eval_js(&[("--color-primary", None), ("--color-accent", None)]);
+        assert!(js.contains("removeProperty('--color-primary')"));
+        assert!(js.contains("removeProperty('--color-accent')"));
+        assert!(!js.contains("setProperty"));
+    }
+
+    #[test]
+    fn build_theme_eval_js_empty_input_yields_empty_string() {
+        assert_eq!(build_theme_eval_js(&[]), "");
+    }
 }
 
 #[component]
@@ -103,17 +163,16 @@ pub fn WNLayout() -> Element {
     // `crate::SETTINGS` here directly, since this component also runs in the
     // WASM client and `SETTINGS` is a server-only `Lazy`.
     let branding = use_loader(get_branding);
-    let (project_name, footer, logo_svg, theme_css) = match &branding {
+    let (project_name, footer, logo_svg) = match &branding {
         Ok(loaded) if !loaded.loading() => {
             let branding = loaded.read();
             (
                 branding.project_name.clone(),
                 branding.footer.clone(),
                 branding.logo_svg.clone(),
-                branding.theme_css.clone(),
             )
         }
-        _ => (String::new(), String::new(), String::new(), String::new()),
+        _ => (String::new(), String::new(), String::new()),
     };
     // `branding` is fetched here at the layout level - once, before it's known whether the app
     // is even configured - so it's already stuck showing stale (pre-configure) project_name/
@@ -124,6 +183,26 @@ pub fn WNLayout() -> Element {
         Ok(loaded) => Some(*loaded),
         Err(_) => None,
     };
+
+    // Applies `branding.theme`'s overrides (colours/fonts) to `document.documentElement`'s
+    // inline style - see `build_theme_eval_js`'s doc comment for why `documentElement` and not a
+    // rendered element. `loader.read()` happens *inside* the closure (not hoisted out with
+    // `project_name`/`footer`/`logo_svg` above) so this effect's reactive subscription is on the
+    // loader's own signal - it reruns exactly when the resolved branding changes (the initial
+    // "still loading" -> loaded transition, and again after a desktop project switch's
+    // `.restart()`), with no manual before/after diffing needed.
+    use_effect(move || {
+        if let Some(loader) = branding_loader {
+            if !loader.loading() {
+                let branding = loader.read();
+                let pairs = theme_override_pairs(&branding.theme);
+                let js = build_theme_eval_js(&pairs);
+                if !js.is_empty() {
+                    document::eval(&js);
+                }
+            }
+        }
+    });
 
     // Shares `project_name` with route views via context so each can compose its own
     // `document::Title` (e.g. "{lemma} - {project_name}") without fetching branding itself.
@@ -159,8 +238,6 @@ pub fn WNLayout() -> Element {
     };
 
     rsx! {
-        document::Style { id: "ewe-theme-style", "{theme_css}" }
-        ThemeStyleUpdater { css: theme_css.clone() }
         div {
             class: "container",
             Link {
