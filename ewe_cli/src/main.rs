@@ -785,15 +785,12 @@ enum ExportFormat {
         /// Directory to write the WNDB files to (created if it doesn't exist)
         path: PathBuf,
 
-        /// A license/header file, prepended verbatim to every `data.*`/`index.*` file. Omit for
-        /// no header at all.
+        /// A license/header file, prepended verbatim to every `data.*`/`index.*` file. Defaults
+        /// to `WNDB_License.txt` at the WordNet's root if that file exists (see
+        /// https://github.com/globalwordnet/english-wordnet's layout); pass this to override it,
+        /// or point at a file explicitly when there's no such default to find.
         #[arg(long)]
         license_file: Option<PathBuf>,
-
-        /// A `lemma,pos,synset_id1 synset_id2 ...` CSV recording sense order for lemmas that fold
-        /// together case-insensitively in `index.{pos}` (e.g. `afghani`/`Afghani`)
-        #[arg(long)]
-        sense_orders: Option<PathBuf>,
     },
     /// Export as a whole-lexicon RDF document (Turtle or RDF/XML), suitable for an
     /// `en-word.net`-style RDF release - every `LexicalEntry` is declared exactly once,
@@ -1079,12 +1076,36 @@ fn run_id(id: &str, wordnet: Option<PathBuf>) {
     }
 }
 
-fn run_export_wndb(
-    path: &Path,
-    license_file: Option<PathBuf>,
-    sense_orders: Option<PathBuf>,
-    wordnet: Option<PathBuf>,
-) {
+/// The WordNet root - `WNDB_License.txt` and `src/sense-orders.csv` (see
+/// [`default_license_file`]/[`default_sense_orders`]) both live relative to this, not to
+/// [`locate_wordnet`]'s resolved yaml directory (`{root}/src/yaml/`). `locate_wordnet` accepts
+/// either the root or the yaml directory itself, so this is only exact for the (overwhelmingly
+/// common) former case - pointing `--wordnet` straight at a bare yaml directory just means
+/// neither file is found, same as if they didn't exist.
+fn wordnet_root(wordnet: &Option<PathBuf>) -> PathBuf {
+    wordnet.clone().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Auto-detects `WNDB_License.txt` at the WordNet's root (issue #41) - the layout
+/// https://github.com/globalwordnet/english-wordnet ships, and the real OEWN release's source of
+/// this file. Only consulted when `--license-file` isn't given explicitly.
+fn default_license_file(wordnet: &Option<PathBuf>) -> Option<PathBuf> {
+    let candidate = wordnet_root(wordnet).join("WNDB_License.txt");
+    candidate.is_file().then_some(candidate)
+}
+
+/// Auto-detects `src/sense-orders.csv` at the WordNet's root (issue #41), if present - see
+/// `WndbExportOptions::sense_orders`'s doc comment for what it's for. Not a CLI flag at all
+/// (unlike `license_file`): it's derived data checked into the source layout alongside `src/yaml`,
+/// not something callers should need to point at by hand.
+fn default_sense_orders(wordnet: &Option<PathBuf>) -> Option<PathBuf> {
+    let candidate = wordnet_root(wordnet).join("src").join("sense-orders.csv");
+    candidate.is_file().then_some(candidate)
+}
+
+fn run_export_wndb(path: &Path, license_file: Option<PathBuf>, wordnet: Option<PathBuf>) {
+    let license_file = license_file.or_else(|| default_license_file(&wordnet));
+    let sense_orders = default_sense_orders(&wordnet);
     let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
@@ -1320,10 +1341,9 @@ fn main() {
                 ExportFormat::Wndb {
                     ref path,
                     license_file,
-                    sense_orders,
                 },
         }) => {
-            run_export_wndb(path, license_file.clone(), sense_orders.clone(), cli.wordnet);
+            run_export_wndb(path, license_file.clone(), cli.wordnet);
         }
         Some(Command::Export {
             format:
