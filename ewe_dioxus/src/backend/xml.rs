@@ -7,8 +7,9 @@
 //! settings, then hands off to the shared writer. See that module's doc comment for the
 //! self-containment caveat a partial export like this implies.
 
-use crate::backend::rdf::{resolve_lemma_synsets, resolve_synset};
-use crate::dioxus_fullstack::{body::Body, http::Response};
+use crate::backend::rdf::{resolve_deprecated_id, resolve_lemma_synsets, resolve_synset};
+use crate::dioxus_fullstack::response::IntoResponse;
+use crate::dioxus_fullstack::{body::Body, http::Response, Redirect};
 use crate::settings::EweSettings;
 use dioxus::prelude::*;
 use ewe_lib::wordnet::xml::write_lexicon_xml_subset;
@@ -17,6 +18,9 @@ use ewe_lib::wordnet::{LexiconMetadata, SynsetId};
 #[get("/xml/synset/{id}")]
 pub async fn synset_xml(id: String) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
+    if let Some(new_id) = resolve_deprecated_id(&id)? {
+        return Ok(Redirect::permanent(&format!("/xml/synset/{}", new_id.as_str())).into_response());
+    }
     match resolve_synset(&id) {
         // No frame table for a single-synset fragment - see write_lexicon_xml_subset's doc
         // comment on why a subset export isn't fully self-contained anyway.

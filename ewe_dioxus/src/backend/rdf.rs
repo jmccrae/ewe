@@ -66,6 +66,39 @@ pub async fn synset_id_alias(id: String) -> Result<Response<Body>> {
     Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response())
 }
 
+/// Looks up whether `id` has been superseded by another synset - see
+/// [`ewe_lib::wordnet::Lexicon::resolve_deprecation`], which follows `deprecations.csv`
+/// (possibly through several merge hops) - so callers can permanently redirect a request for a
+/// deprecated id to whatever synset now holds its content (issue #40) instead of either serving
+/// stale content or a plain 404. `Ok(None)` covers both "no deprecation record" and "lexicon not
+/// loaded", matching [`resolve_synset`]'s "empty, not an error" convention.
+pub(crate) fn resolve_deprecated_id(id: &SynsetId) -> Result<Option<SynsetId>> {
+    let Ok(lexicon) = crate::db::read_lexicon() else {
+        return Ok(None);
+    };
+    Ok(lexicon.resolve_deprecation(id)?)
+}
+
+/// The outcome of looking a synset id up for a user-facing view (currently just
+/// `/view/synset/{id}` - see `main.rs`'s `synset_view_redirects_and_404` middleware, which acts
+/// on this before the SSR renderer ever sees the request).
+pub(crate) enum SynsetLookup {
+    /// `id` has been superseded - redirect here instead.
+    Deprecated(SynsetId),
+    Found,
+    NotFound,
+}
+
+pub(crate) fn lookup_synset_for_view(id: &SynsetId) -> SynsetLookup {
+    if let Ok(Some(new_id)) = resolve_deprecated_id(id) {
+        return SynsetLookup::Deprecated(new_id);
+    }
+    match resolve_synset(id) {
+        Ok(Some(_)) => SynsetLookup::Found,
+        _ => SynsetLookup::NotFound,
+    }
+}
+
 #[get("/synset/{id}", headers : HeaderMap)]
 pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
     let settings = crate::db::read_settings();
@@ -73,29 +106,51 @@ pub async fn synset_negotiated(id: String) -> Result<Response<Body>> {
     if let Some(bare_id) = strip_synset_id_prefix(&id, id_prefix) {
         return Ok(Redirect::permanent(&format!("/synset/{}", bare_id)).into_response());
     }
-    let content_type = negotiate(headers);
-    let response = match content_type {
-        ContentType::HTML => Redirect::to(&format!("/view/synset/{}", id)).into_response(),
-        ContentType::RDFXML => Redirect::to(&format!("/rdf/synset/{}", id)).into_response(),
-        ContentType::Turtle => Redirect::to(&format!("/ttl/synset/{}", id)).into_response(),
-        ContentType::XML => Redirect::to(&format!("/xml/synset/{}", id)).into_response(),
-        ContentType::JSON => Redirect::to(&format!("/api/synset/{}", id)).into_response(),
+
+    let id = SynsetId::new_owned(id);
+    let (id, permanent) = match resolve_deprecated_id(&id)? {
+        Some(new_id) => (new_id, true),
+        None => (id, false),
     };
-    Ok(response)
+    if resolve_synset(&id)?.is_none() {
+        return Ok(Response::builder()
+            .status(404)
+            .body(Body::from("Synset not found"))
+            .unwrap());
+    }
+    let id = id.as_str();
+
+    let content_type = negotiate(headers);
+    let target = match content_type {
+        ContentType::HTML => format!("/view/synset/{}", id),
+        ContentType::RDFXML => format!("/rdf/synset/{}", id),
+        ContentType::Turtle => format!("/ttl/synset/{}", id),
+        ContentType::XML => format!("/xml/synset/{}", id),
+        ContentType::JSON => format!("/api/synset/{}", id),
+    };
+    let response = if permanent {
+        Redirect::permanent(&target)
+    } else {
+        Redirect::to(&target)
+    };
+    Ok(response.into_response())
 }
 
 #[get("/rdf/synset/{id}")]
 pub async fn synset_rdf(id: String) -> Result<Response<Body>> {
-    synset_serialized(id, RdfFormat::RdfXml).await
+    synset_serialized(id, RdfFormat::RdfXml, "rdf").await
 }
 
 #[get("/ttl/synset/{id}")]
 pub async fn synset_ttl(id: String) -> Result<Response<Body>> {
-    synset_serialized(id, RdfFormat::Turtle).await
+    synset_serialized(id, RdfFormat::Turtle, "ttl").await
 }
 
-async fn synset_serialized(id: String, format: RdfFormat) -> Result<Response<Body>> {
+async fn synset_serialized(id: String, format: RdfFormat, format_path: &str) -> Result<Response<Body>> {
     let id = SynsetId::new_owned(id);
+    if let Some(new_id) = resolve_deprecated_id(&id)? {
+        return Ok(Redirect::permanent(&format!("/{}/synset/{}", format_path, new_id.as_str())).into_response());
+    }
     let frames = resolve_frames()?;
     match resolve_synset(&id) {
         Ok(Some(ms)) => {
