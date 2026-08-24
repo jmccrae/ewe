@@ -3,7 +3,6 @@ wordnet_source = "/home/john-mccrae/p/globalwordnet/english-wordnet/src/yaml/"
 corpus_database = "semcor.db"
 corpus_source = "/home/john-mccrae/p/globalwordnet/semcor/semcor.yaml"
 logo = "assets/english.svg"
-theme = "assets/styling/theme.css"
 project_name = "Open English Wordnet"
 tagline = "The free, open lexical database of English"
 id_prefix = "oewn"
@@ -40,3 +39,7 @@ footer = """
     (<a href="http://elex.is/">ELEXIS</a>).
 </p>
 """
+
+[theme]
+primary = "#002868"
+accent = "#bf0a30"

@@ -78,20 +78,26 @@ enum Route {
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
+// The default palette/font custom properties (colours, fonts) that everything else in
+// `assets/styling/` reads via `var(--...)`. Per-project overrides of a handful of these are
+// applied at runtime via `document.documentElement.style.setProperty(...)` (see
+// `views::wn_layout::WNLayout`) rather than by swapping this stylesheet itself - this file is
+// linked once, statically, and never touched again after that.
+const THEME_CSS: Asset = asset!("/assets/styling/theme.css");
 
-// The app's own default `logo`/`theme` (`settings::default_logo`/`default_theme`) live under
-// `assets/`, not named individually via their own `asset!()` call like `FAVICON`/`MAIN_CSS` above -
-// `dx bundle` otherwise only ships whatever's explicitly named in an `asset!()` call, so they'd
-// silently be missing from an installed app even though they work fine in a `dx serve` checkout
+// The app's own default `logo` (`settings::default_logo`) lives under `assets/`, not named
+// individually via their own `asset!()` call like `FAVICON`/`MAIN_CSS`/`THEME_CSS` above -
+// `dx bundle` otherwise only ships whatever's explicitly named in an `asset!()` call, so it'd
+// silently be missing from an installed app even though it works fine in a `dx serve` checkout
 // (which just reads straight off the source tree). Bundling the whole folder as one asset (rather
 // than listing files individually, which `[bundle] resources` in `Dioxus.toml` doesn't do
 // recursively anyway) keeps every file's original name and relative layout intact
-// (`with_hash_suffix(false)`) - `settings::default_logo`/`default_theme` resolve their path
-// against `ASSETS_FOLDER.resolve()` (see their doc comments) rather than a bare relative string,
-// since the bundled copy doesn't land at the same path a relative `"assets/..."` string would
-// mean on a plain checkout (`Asset::resolve()` knows how to find it either way). Desktop-only:
-// `web`/`server` read `assets/` directly off disk from wherever the process is running, so
-// bundling it into the binary doesn't apply there.
+// (`with_hash_suffix(false)`) - `settings::default_logo` resolves its path against
+// `ASSETS_FOLDER.resolve()` (see its doc comment) rather than a bare relative string, since the
+// bundled copy doesn't land at the same path a relative `"assets/..."` string would mean on a
+// plain checkout (`Asset::resolve()` knows how to find it either way). Desktop-only: `web`/
+// `server` read `assets/` directly off disk from wherever the process is running, so bundling it
+// into the binary doesn't apply there.
 #[cfg(feature = "desktop")]
 #[used]
 pub(crate) static ASSETS_FOLDER: Asset =
@@ -334,6 +340,7 @@ fn App2() -> Element {
         // we are using the `document::Link` component to add a link to our favicon and main CSS file into the head of our app.
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "stylesheet", href: THEME_CSS }
 
         // The router component renders the route enum we defined above. It will handle synchronization of the URL and render
         // the layouts and components for the active route.

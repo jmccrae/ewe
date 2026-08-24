@@ -57,7 +57,7 @@ ewe_dioxus/
 
 The app looks for a `settings.toml` file in the current working directory when it starts. If the file is missing, it falls back to generic defaults described below. `settings.toml` is git-ignored, since it's environment-specific (absolute paths, per-deployment branding); [`english-wordnet-settings.toml`](./english-wordnet-settings.toml) is checked in as a copy-and-rename starting point for an Open English Wordnet deployment.
 
-Every path-valued key below (`database`, `wordnet_source`, `corpus_database`, `corpus_source`, `logo`, `theme`) is resolved relative to `settings.toml`'s own directory, not the process's working directory - so a project folder with its own `settings.toml` and relative paths (e.g. `wordnet_source = "src/yaml"`) works the same no matter where it's loaded from. This is what makes the desktop app's project-folder picker (below) work.
+Every path-valued key below (`database`, `wordnet_source`, `corpus_database`, `corpus_source`, `logo`) is resolved relative to `settings.toml`'s own directory, not the process's working directory - so a project folder with its own `settings.toml` and relative paths (e.g. `wordnet_source = "src/yaml"`) works the same no matter where it's loaded from. This is what makes the desktop app's project-folder picker (below) work.
 
 ```toml
 database = "wordnet.db"
@@ -65,7 +65,6 @@ wordnet_source = "/path/to/english-wordnet/src/yaml/"
 corpus_database = "corpus.db"
 corpus_source = "/path/to/corpus.yaml"
 logo = "assets/english.svg"
-theme = "assets/styling/theme.css"
 project_name = "My Wordnet"
 id_prefix = "oewn"
 contact_email = "me@example.org"
@@ -74,6 +73,10 @@ base_url = "https://example.org/"
 footer = """
 <p>...</p>
 """
+
+[theme]
+primary = "#002868"
+accent = "#bf0a30"
 ```
 
 | Key                 | Type             | Default | Description |
@@ -87,7 +90,7 @@ footer = """
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |
 | `base_url`          | string, optional | unset | This deployment's own public base URL (e.g. `https://en-word.net`), used to build absolute URLs in `/sitemap.xml` and the `Sitemap:` line in `/robots.txt`. Neither is served with real content while this is unset. |
 | `logo`              | string           | `"assets/gwa.svg"` | Path to an SVG logo file, read from disk and inlined directly into the page. |
-| `theme`             | string           | `"assets/styling/theme.css"` | Path to the theme stylesheet (colours and fonts as CSS custom properties — see [Styling](#styling) below), read from disk and inlined into a `<style>` tag in the page. |
+| `[theme]`           | table, optional  | all unset | CSS custom-property overrides applied on top of the bundled default `theme.css` — see [Styling](#styling) below. Every key is optional and independent; unset ones fall back to the compiled-in default via the normal CSS cascade. Color keys (`primary`, `accent`, `text`, `text_secondary`, `text_muted`, `text_dim`, `text_faint`, `text_mute`, `text_strong`, `text_on_dark`, `border`, `border_light`, `surface_light`, `surface_hover`, `surface_dark`) must be CSS hex colors (`#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`). Font keys (`font_body`, `font_heading`, `font_heading_weight`, `font_mono`) are CSS font-family/weight values. `settings.toml` fails to load with a descriptive error if any key doesn't match. |
 | `project_name`      | string           | `"EWE Wordnet Editor"` | Shown as the `<h1>` next to the logo, and as the exported XML's `<Lexicon label="...">`. |
 | `tagline`           | string           | a generic tagline | Short line shown centered on the home page, below the search box. |
 | `intro`             | string           | generic intro HTML | Introduction HTML shown centered on the home page, below the tagline. |
@@ -95,7 +98,7 @@ footer = """
 | `disable_auto_reload` | bool           | `false` | If true, never rebuild `database`/`corpus_database` just because a source file is newer — they're still built if missing. Useful to skip a slow source scan on startup with very large sources. |
 | `lexicon_cache_mb`  | integer          | `128` | Bounds the lexicon database's in-memory page cache (redb otherwise defaults to 1GiB regardless of file size). |
 
-Because `logo` and `theme` are read from disk (and inlined into the page) via the same server function that carries `project_name`/`footer` (`backend::api::get_branding`) rather than bundled at build time via Dioxus's `asset!` macro, you can rebrand a running deployment (swap the logo file, edit the theme file, or repoint either path in `settings.toml`) without rebuilding or restarting the app.
+`logo` is read from disk (and inlined into the page) via the same server function that carries `project_name`/`footer` (`backend::api::get_branding`) rather than bundled at build time via Dioxus's `asset!` macro, so you can rebrand a running deployment (swap the logo file, or repoint the path in `settings.toml`) without rebuilding or restarting the app. `[theme]` overrides ride along in that same struct and are applied at runtime via `document.documentElement.style.setProperty(...)` — see [Styling](#styling) below.
 
 `wordnet.db` and `corpus.db` are git-ignored — every developer builds their own copy locally.
 
@@ -155,7 +158,9 @@ dx build --platform web --release
 
 ## Styling
 
-Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`, `display_options.css`, `download_links.css`), bundled at build time and linked via `document::Link` in `src/main.rs`. None of it hardcodes colours or fonts directly — every rule references a CSS custom property (`var(--color-...)`, `var(--font-...)`) defined in the configurable `theme` stylesheet, which `src/views/wn_layout.rs` reads per-request and inlines into a `<style>` tag on every page (see [Configuration](#configuration-settingstoml) above). To restyle the site, either edit `theme.css` in place or point `theme` in `settings.toml` at a different file with the same custom properties defined. This project does not use Tailwind.
+Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`, `display_options.css`, `download_links.css`), bundled at build time and linked via `document::Link` in `src/main.rs`. None of it hardcodes colours or fonts directly — every rule references a CSS custom property (`var(--color-...)`, `var(--font-...)`) defined in `assets/styling/theme.css`, which is bundled and linked the same static way as `main.css` and never changes at runtime.
+
+Per-deployment restyling is a `[theme]` table in `settings.toml` (see [Configuration](#configuration-settingstoml) above) overriding a handful of those custom properties — not a whole replacement stylesheet. `src/views/wn_layout.rs` applies whichever ones are set via one `document.documentElement.style.setProperty(...)`/`removeProperty(...)` call (`document.documentElement`, not some element further down the page, because `main.css`'s own `body` rule reads `var(--font-body)`/`var(--color-accent)`/`var(--color-text)` directly, and `body` is an ancestor of everything else rendered — an override set any lower would never reach it). To restyle the site, add the properties you want to override under `[theme]` in `settings.toml`; anything left out keeps `theme.css`'s compiled-in default via the normal CSS cascade. This project does not use Tailwind.
 
 ## Routes
 
