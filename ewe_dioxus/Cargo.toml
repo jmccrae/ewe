@@ -63,3 +63,12 @@ edit = []
 # The feature that are only required for the server = ["dioxus/server"] build target should be optional and only enabled in the server = ["dioxus/server"] feature
 server = ["dioxus/server", "ewe_lib/rdf", "dep:quick-xml", "dep:chrono", "dep:tokio"]
 quick-xml = ["dep:quick-xml"]
+# Swaps the compile-time-bundled `THEME_CSS` asset (see `src/main.rs`) from `assets/styling/
+# theme.css` (this crate's generic GWA-coloured default) to `assets/styling/theme-oewn.css` (Open
+# English Wordnet's navy/red). Use this for an en-word.net build instead of relying on
+# `settings.toml`'s `[theme]` overrides for `primary`/`accent`: those are only applied once the
+# client's async `Branding` fetch resolves (`views::wn_layout::WNLayout`'s `document::eval`),
+# which visibly flickers from the compiled-in default to the override on a slow connection. Needs
+# to be passed to both the client and server binary on `web` (like `edit` above), since those
+# remain separate builds there.
+oewn = []
