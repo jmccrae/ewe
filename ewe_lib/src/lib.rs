@@ -13,3 +13,4 @@ pub mod validate;
 pub mod automaton;
 pub mod progress;
 pub mod source_mtime;
+pub mod stats;
