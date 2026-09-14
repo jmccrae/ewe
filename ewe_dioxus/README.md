@@ -31,7 +31,7 @@ It is one member of the `ewe` Cargo workspace:
 
 ```
 ewe_dioxus/
-├─ Cargo.toml         # Dependencies and platform feature flags (web/desktop/mobile/server/edit)
+├─ Cargo.toml         # Dependencies and platform feature flags (web/desktop/mobile/server/edit/oewn)
 ├─ Dioxus.toml        # Dioxus build/app configuration (title, web resources)
 ├─ settings.toml      # Runtime configuration for this app — see below (git-ignored)
 ├─ english-wordnet-settings.toml  # Example settings.toml for an Open English Wordnet deployment
@@ -150,6 +150,15 @@ dx serve --platform desktop --features edit
 
 (`mobile` is also defined as a Cargo feature but is not currently wired up as a first-class target here.)
 
+To bake Open English Wordnet's own navy/red in as the compiled-in default palette (instead of this crate's generic GWA colours), pass `--features oewn`:
+
+```bash
+dx serve --features oewn
+dx build --platform web --release --features oewn
+```
+
+This is for the en-word.net deployment specifically — see [Styling](#styling) below for why it exists.
+
 For a production build:
 
 ```bash
@@ -161,6 +170,8 @@ dx build --platform web --release
 Layout and component CSS lives under `assets/styling/` (`main.css`, `navbar.css`, `synset.css`, `display_options.css`, `download_links.css`), bundled at build time and linked via `document::Link` in `src/main.rs`. None of it hardcodes colours or fonts directly — every rule references a CSS custom property (`var(--color-...)`, `var(--font-...)`) defined in `assets/styling/theme.css`, which is bundled and linked the same static way as `main.css` and never changes at runtime.
 
 Per-deployment restyling is a `[theme]` table in `settings.toml` (see [Configuration](#configuration-settingstoml) above) overriding a handful of those custom properties — not a whole replacement stylesheet. `src/views/wn_layout.rs` applies whichever ones are set via one `document.documentElement.style.setProperty(...)`/`removeProperty(...)` call (`document.documentElement`, not some element further down the page, because `main.css`'s own `body` rule reads `var(--font-body)`/`var(--color-accent)`/`var(--color-text)` directly, and `body` is an ancestor of everything else rendered — an override set any lower would never reach it). To restyle the site, add the properties you want to override under `[theme]` in `settings.toml`; anything left out keeps `theme.css`'s compiled-in default via the normal CSS cascade. This project does not use Tailwind.
+
+That `[theme]` override only takes effect once the client's async `Branding` fetch resolves and runs its `document::eval`, so on a slow connection the page visibly flickers from `theme.css`'s compiled-in default to the override — noticeable on en-word.net, whose `english-wordnet-settings.toml` overrides `primary`/`accent` back to Open English Wordnet's navy/red. The `oewn` Cargo feature (`--features oewn`, see above) avoids this for that specific case by swapping which stylesheet `src/main.rs`'s `THEME_CSS` bundles at compile time: `assets/styling/theme-oewn.css` (OEWN's navy/red) instead of `assets/styling/theme.css` (this crate's generic GWA default). With the compiled-in default already correct, there's no visible flip — the runtime `[theme]` override in `settings.toml` becomes redundant (harmless to leave in place) rather than load-bearing. This only covers the palette in `theme-oewn.css`, not `logo`/`project_name`/etc., which still only ever come from `settings.toml`.
 
 ## Routes
 

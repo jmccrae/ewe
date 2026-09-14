@@ -83,6 +83,16 @@ const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 // applied at runtime via `document.documentElement.style.setProperty(...)` (see
 // `views::wn_layout::WNLayout`) rather than by swapping this stylesheet itself - this file is
 // linked once, statically, and never touched again after that.
+//
+// The `oewn` feature (`--features oewn`) swaps in `theme-oewn.css` (Open English Wordnet's own
+// navy/red) as the compiled-in default instead of this file's generic GWA colours, so an
+// en-word.net build shows the right colours from first paint rather than depending on
+// `settings.toml`'s `[theme]` override for `primary`/`accent` - that only lands after the
+// client's async `Branding` fetch resolves, which visibly flickers from the compiled-in default
+// to the override on a slow connection. See `assets/styling/theme-oewn.css`'s own doc comment.
+#[cfg(feature = "oewn")]
+const THEME_CSS: Asset = asset!("/assets/styling/theme-oewn.css");
+#[cfg(not(feature = "oewn"))]
 const THEME_CSS: Asset = asset!("/assets/styling/theme.css");
 
 // The app's own default `logo` (`settings::default_logo`) lives under `assets/`, not named

@@ -69,6 +69,34 @@ enum Command {
         #[arg(default_value = "./")]
         path: PathBuf,
     },
+    /// Print summary statistics about the wordnet (synsets, entries, senses, relations), plus
+    /// counts for the hypernym-hierarchy "test patterns" from Lohk, Fellbaum & Võhandu, "Tuning
+    /// Hierarchies in Princeton WordNet" (GWC 2016) - self-hypernymy, shortcut, dense
+    /// component and the compound pattern. Each `--<pattern>-instances` flag lists every
+    /// instance of that pattern instead of just its total count.
+    Stats {
+        /// List every self-hypernymy instance found (a word that appears twice along a
+        /// hypernym path - a synset member that is also a member of one of its own hypernym
+        /// ancestors), not just the total count that's reported by default.
+        #[arg(long)]
+        self_hypernymy_instances: bool,
+
+        /// List every shortcut instance found (a redundant direct hypernym edge whose target
+        /// is also reachable via another of the synset's hypernym parents).
+        #[arg(long)]
+        shortcut_instances: bool,
+
+        /// List every dense component instance found (synsets sharing the same two-or-more
+        /// hypernym parents via multiple inheritance).
+        #[arg(long)]
+        dense_component_instances: bool,
+
+        /// List every "compound" pattern instance found (a hypernym whose member word is a
+        /// suffix of two or more hyponyms' members, where at least one of those hyponyms also
+        /// has an unrelated extra hypernym).
+        #[arg(long)]
+        compound_pattern_instances: bool,
+    },
 }
 
 fn main() {
@@ -158,6 +186,20 @@ fn main() {
         }
         Some(Command::Init { ref path }) => {
             commands::init::run(path);
+        }
+        Some(Command::Stats {
+            self_hypernymy_instances,
+            shortcut_instances,
+            dense_component_instances,
+            compound_pattern_instances,
+        }) => {
+            commands::stats::run(
+                cli.wordnet,
+                *self_hypernymy_instances,
+                *shortcut_instances,
+                *dense_component_instances,
+                *compound_pattern_instances,
+            );
         }
         None => {
             commands::tui::run();
