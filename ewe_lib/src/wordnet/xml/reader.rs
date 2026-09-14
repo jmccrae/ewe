@@ -212,6 +212,19 @@ fn part_of_speech_from_str(s: &str) -> Option<PartOfSpeech> {
     }
 }
 
+/// `Synset/@lexfile` is an OEWN/ewe convention (used to split `entries.yaml` files by
+/// lexicographer file), not something the WN-LMF schema itself requires - so a synset without
+/// one is still a valid document. When it's missing, fall back to one lexfile per part of
+/// speech rather than failing the import.
+fn default_lexname(pos: &PartOfSpeech) -> &'static str {
+    match pos {
+        PartOfSpeech::n => "noun.all",
+        PartOfSpeech::v => "verb.all",
+        PartOfSpeech::a | PartOfSpeech::s => "adj.all",
+        PartOfSpeech::r => "adv.all",
+    }
+}
+
 fn warn_once(warned: &mut HashSet<String>, message: String) {
     if warned.insert(message.clone()) {
         eprintln!("{message} (further occurrences of this message are suppressed)");
@@ -400,7 +413,7 @@ fn build_synset(e: &BytesStart, prefix: &str, entry_id_lookup: &HashMap<String, 
     let pos_attr = require_attr(e, "partOfSpeech", "Synset")?;
     let pos = part_of_speech_from_str(&pos_attr)
         .ok_or_else(|| XmlImportError::Malformed(format!("Synset {id_attr}: unrecognized partOfSpeech {pos_attr:?}")))?;
-    let lexname = require_attr(e, "lexfile", "Synset")?;
+    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| default_lexname(&pos).to_string());
 
     let mut synset = Synset::new(pos);
     if let Some(ili) = attr(e, "ili")? {
@@ -580,6 +593,56 @@ mod tests {
         assert_eq!(
             dog_sense.domain_topic,
             vec![UnresolvedSenseOrSynsetId::Synset(SynsetId::new("00001741-n"))]
+        );
+    }
+
+    /// `Synset/@lexfile` isn't part of the WN-LMF schema itself (see `default_lexname`), so a
+    /// document that omits it must still import cleanly, landing each synset in a fallback
+    /// lexfile keyed by part of speech (including the noun/adjective-satellite split).
+    const FIXTURE_NO_LEXFILE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "http://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="test" label="Test Wordnet" language="en" email="test@example.com" license="https://creativecommons.org/licenses/by/4.0" version="1" url="https://example.com">
+    <LexicalEntry id="test-dog-n">
+      <Lemma writtenForm="dog" partOfSpeech="n"/>
+      <Sense id="test-dog__1.05.00.." synset="test-00001740-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="test-run-v">
+      <Lemma writtenForm="run" partOfSpeech="v"/>
+      <Sense id="test-run__2.38.00.." synset="test-00001741-v"/>
+    </LexicalEntry>
+    <LexicalEntry id="test-warm-s">
+      <Lemma writtenForm="warm" partOfSpeech="s"/>
+      <Sense id="test-warm__5.00.00.." synset="test-00001742-s"/>
+    </LexicalEntry>
+    <Synset id="test-00001740-n" ili="in" partOfSpeech="n" members="test-dog-n">
+      <Definition language="en">a domestic canine</Definition>
+    </Synset>
+    <Synset id="test-00001741-v" ili="in" partOfSpeech="v" members="test-run-v">
+      <Definition language="en">move fast</Definition>
+    </Synset>
+    <Synset id="test-00001742-s" ili="in" partOfSpeech="s" members="test-warm-s">
+      <Definition language="en">not cold</Definition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>
+"#;
+
+    #[test]
+    fn test_read_lexicon_xml_defaults_lexfile_by_part_of_speech_when_missing() {
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(), FIXTURE_NO_LEXFILE.as_bytes()).unwrap();
+
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001740-n")).unwrap().as_deref(),
+            Some("noun.all")
+        );
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001741-v")).unwrap().as_deref(),
+            Some("verb.all")
+        );
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001742-s")).unwrap().as_deref(),
+            Some("adj.all")
         );
     }
 
