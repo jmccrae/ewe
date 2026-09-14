@@ -74,6 +74,11 @@ struct Accumulator {
     sense_owner: HashMap<SenseId, (String, PosKey)>,
     entry_id_lookup: HashMap<String, (String, PosKey)>,
     homograph_counts: HashMap<(String, char), u32>,
+    /// Lemmas of every sense targeting each synset, in document order - a fallback for
+    /// `Synset/@members` on WN-LMF variants that don't use that attribute at all (it's not part
+    /// of the schema; membership is always independently derivable from `Sense/@synset`). See
+    /// `build_synset`.
+    synset_members: HashMap<SynsetId, Vec<String>>,
 
     synsets: Vec<(String, SynsetId, Synset)>,
     synset_index: HashMap<SynsetId, usize>,
@@ -118,13 +123,15 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
                 parse_lexical_entry(&mut xml, &mut buf, &prefix, entry_xml_id, &mut acc)?;
             }
             Event::Start(e) if e.name().as_ref() == b"Synset" => {
-                let (lexname, id, mut synset) = build_synset(&e, &prefix, &acc.entry_id_lookup)?;
+                let (lexname, id, mut synset) = build_synset(&e, &prefix, &acc.entry_id_lookup, &acc.synset_members)?;
                 parse_synset_children(&mut xml, &mut buf, &prefix, &id, &mut synset, &mut acc)?;
+                ensure_definition(&mut synset);
                 acc.synset_index.insert(id.clone(), acc.synsets.len());
                 acc.synsets.push((lexname, id, synset));
             }
             Event::Empty(e) if e.name().as_ref() == b"Synset" => {
-                let (lexname, id, synset) = build_synset(&e, &prefix, &acc.entry_id_lookup)?;
+                let (lexname, id, mut synset) = build_synset(&e, &prefix, &acc.entry_id_lookup, &acc.synset_members)?;
+                ensure_definition(&mut synset);
                 acc.synset_index.insert(id.clone(), acc.synsets.len());
                 acc.synsets.push((lexname, id, synset));
             }
@@ -212,6 +219,33 @@ fn part_of_speech_from_str(s: &str) -> Option<PartOfSpeech> {
     }
 }
 
+/// `Synset/@lexfile` is an OEWN/ewe convention (used to split `entries.yaml` files by
+/// lexicographer file), not something the WN-LMF schema itself requires - so a synset without
+/// one is still a valid document. When it's missing, fall back to one lexfile per part of
+/// speech rather than failing the import.
+fn default_lexname(pos: &PartOfSpeech) -> &'static str {
+    match pos {
+        PartOfSpeech::n => "noun.all",
+        PartOfSpeech::v => "verb.all",
+        PartOfSpeech::a | PartOfSpeech::s => "adj.all",
+        PartOfSpeech::r => "adv.all",
+    }
+}
+
+/// A `Synset` with zero definitions can't round-trip through YAML: `Synset::save` only emits
+/// the `definition:` key when the list is non-empty, but the field has no `#[serde(default)]`,
+/// so re-loading it fails with "missing field `definition`". A single empty string is already
+/// the codebase's recognized way to represent "no definition yet" (see
+/// `ValidationError::Definition`, which flags exactly this for a lexicographer to fill in), so
+/// default to that instead of leaving synsets from `<Synset>` elements with no `<Definition>`
+/// children (some WN-LMF resources - e.g. the Irish wordnet/LSG - have plenty of these)
+/// unloadable.
+fn ensure_definition(synset: &mut Synset) {
+    if synset.definition.is_empty() {
+        synset.definition.push(String::new());
+    }
+}
+
 fn warn_once(warned: &mut HashSet<String>, message: String) {
     if warned.insert(message.clone()) {
         eprintln!("{message} (further occurrences of this message are suppressed)");
@@ -277,6 +311,10 @@ fn parse_lexical_entry<R: Read>(
     acc.entry_id_lookup.insert(entry_xml_id, (lemma.clone(), poskey.clone()));
     for sense in &senses {
         acc.sense_owner.insert(sense.id.clone(), (lemma.clone(), poskey.clone()));
+        let members = acc.synset_members.entry(sense.synset.clone()).or_default();
+        if !members.contains(&lemma) {
+            members.push(lemma.clone());
+        }
     }
 
     let entry = Entry {
@@ -394,13 +432,18 @@ fn push_unique<T: PartialEq>(v: &mut Vec<T>, item: T) {
     }
 }
 
-fn build_synset(e: &BytesStart, prefix: &str, entry_id_lookup: &HashMap<String, (String, PosKey)>) -> Result<(String, SynsetId, Synset)> {
+fn build_synset(
+    e: &BytesStart,
+    prefix: &str,
+    entry_id_lookup: &HashMap<String, (String, PosKey)>,
+    synset_members: &HashMap<SynsetId, Vec<String>>,
+) -> Result<(String, SynsetId, Synset)> {
     let id_attr = require_attr(e, "id", "Synset")?;
     let id = SynsetId::new_owned(ids::strip_prefix_id(prefix, &id_attr));
     let pos_attr = require_attr(e, "partOfSpeech", "Synset")?;
     let pos = part_of_speech_from_str(&pos_attr)
         .ok_or_else(|| XmlImportError::Malformed(format!("Synset {id_attr}: unrecognized partOfSpeech {pos_attr:?}")))?;
-    let lexname = require_attr(e, "lexfile", "Synset")?;
+    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| default_lexname(&pos).to_string());
 
     let mut synset = Synset::new(pos);
     if let Some(ili) = attr(e, "ili")? {
@@ -417,6 +460,16 @@ fn build_synset(e: &BytesStart, prefix: &str, entry_id_lookup: &HashMap<String, 
                      (WN-LMF import assumes every LexicalEntry precedes every Synset in the document)"
                 ),
             }
+        }
+    }
+    // `@members` isn't part of the WN-LMF schema (some resources - e.g. the Irish
+    // wordnet/LSG - never emit it at all), and even when a document does emit it, resolution
+    // above can end up empty (e.g. every referenced id failed to match). Either way, synset
+    // membership is always independently recoverable from which senses target this synset -
+    // fall back to that rather than leaving `members` empty.
+    if synset.members.is_empty() {
+        if let Some(fallback) = synset_members.get(&id) {
+            synset.members = fallback.clone();
         }
     }
     synset.source = attr(e, "dc:source")?;
@@ -581,6 +634,109 @@ mod tests {
             dog_sense.domain_topic,
             vec![UnresolvedSenseOrSynsetId::Synset(SynsetId::new("00001741-n"))]
         );
+    }
+
+    /// `Synset/@lexfile` isn't part of the WN-LMF schema itself (see `default_lexname`), so a
+    /// document that omits it must still import cleanly, landing each synset in a fallback
+    /// lexfile keyed by part of speech (including the noun/adjective-satellite split).
+    const FIXTURE_NO_LEXFILE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "http://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="test" label="Test Wordnet" language="en" email="test@example.com" license="https://creativecommons.org/licenses/by/4.0" version="1" url="https://example.com">
+    <LexicalEntry id="test-dog-n">
+      <Lemma writtenForm="dog" partOfSpeech="n"/>
+      <Sense id="test-dog__1.05.00.." synset="test-00001740-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="test-run-v">
+      <Lemma writtenForm="run" partOfSpeech="v"/>
+      <Sense id="test-run__2.38.00.." synset="test-00001741-v"/>
+    </LexicalEntry>
+    <LexicalEntry id="test-warm-s">
+      <Lemma writtenForm="warm" partOfSpeech="s"/>
+      <Sense id="test-warm__5.00.00.." synset="test-00001742-s"/>
+    </LexicalEntry>
+    <Synset id="test-00001740-n" ili="in" partOfSpeech="n" members="test-dog-n">
+      <Definition language="en">a domestic canine</Definition>
+    </Synset>
+    <Synset id="test-00001741-v" ili="in" partOfSpeech="v" members="test-run-v">
+      <Definition language="en">move fast</Definition>
+    </Synset>
+    <Synset id="test-00001742-s" ili="in" partOfSpeech="s" members="test-warm-s">
+      <Definition language="en">not cold</Definition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>
+"#;
+
+    #[test]
+    fn test_read_lexicon_xml_defaults_lexfile_by_part_of_speech_when_missing() {
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(), FIXTURE_NO_LEXFILE.as_bytes()).unwrap();
+
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001740-n")).unwrap().as_deref(),
+            Some("noun.all")
+        );
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001741-v")).unwrap().as_deref(),
+            Some("verb.all")
+        );
+        assert_eq!(
+            wn.lex_name_for(&SynsetId::new("00001742-s")).unwrap().as_deref(),
+            Some("adj.all")
+        );
+    }
+
+    /// Some WN-LMF resources (e.g. the Irish wordnet/LSG) never emit `Synset/@members` or
+    /// `<Definition>` at all - neither is required by the schema, membership is always
+    /// independently derivable from `Sense/@synset`, and a missing definition is already the
+    /// codebase's recognized "not filled in yet" state (see `ensure_definition`).
+    const FIXTURE_NO_MEMBERS_OR_DEFINITION: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE LexicalResource SYSTEM "http://globalwordnet.github.io/schemas/WN-LMF-1.4.dtd">
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="test" label="Test Wordnet" language="en" email="test@example.com" license="https://creativecommons.org/licenses/by/4.0" version="1" url="https://example.com">
+    <LexicalEntry id="test-dog-n">
+      <Lemma writtenForm="dog" partOfSpeech="n"/>
+      <Sense id="test-dog__1.05.00.." synset="test-00001740-n"/>
+    </LexicalEntry>
+    <LexicalEntry id="test-hound-n">
+      <Lemma writtenForm="hound" partOfSpeech="n"/>
+      <Sense id="test-hound__1.05.00.." synset="test-00001740-n"/>
+    </LexicalEntry>
+    <Synset id="test-00001740-n" ili="in" partOfSpeech="n" lexfile="noun.animal"/>
+  </Lexicon>
+</LexicalResource>
+"#;
+
+    #[test]
+    fn test_read_lexicon_xml_derives_members_from_senses_when_members_attr_missing() {
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(), FIXTURE_NO_MEMBERS_OR_DEFINITION.as_bytes()).unwrap();
+
+        let synset = wn.synset_by_id(&SynsetId::new("00001740-n")).unwrap().unwrap();
+        assert_eq!(synset.members, vec!["dog".to_string(), "hound".to_string()]);
+    }
+
+    #[test]
+    fn test_read_lexicon_xml_defaults_definition_to_empty_string_when_missing() {
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(), FIXTURE_NO_MEMBERS_OR_DEFINITION.as_bytes()).unwrap();
+
+        let synset = wn.synset_by_id(&SynsetId::new("00001740-n")).unwrap().unwrap();
+        assert_eq!(synset.definition, vec!["".to_string()]);
+
+        // The actual bug report: a synset with zero definitions couldn't be saved and reloaded
+        // (`Synset::save` only emits the `definition:` key when non-empty, but the field has no
+        // `#[serde(default)]`) - so round-trip it through a real save+load to confirm the fix
+        // holds, not just that the in-memory value looks right.
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_xml_import_empty_definition_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut bar = crate::progress::NullProgress;
+        wn.save(&dir, &mut bar).unwrap();
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        let reloaded_synset = reloaded.synset_by_id(&SynsetId::new("00001740-n")).unwrap().unwrap();
+        assert_eq!(reloaded_synset.definition, vec!["".to_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
