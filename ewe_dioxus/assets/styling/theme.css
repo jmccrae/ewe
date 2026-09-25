@@ -73,3 +73,13 @@
     src: url(https://fonts.gstatic.com/s/scopeone/v14/WBLnrEXKYFlGHrOKmGDFXEXI.ttf)
         format("truetype");
 }
+/* Uncial script - the hand used to write Old Irish in manuscripts like the Book of Kells - has
+ * no bold cut, so a deployment overriding font_heading to this should also set
+ * font_heading_weight to "400" (see issue #12) to avoid synthetic/faux bold. */
+@font-face {
+    font-family: "Uncial Antiqua";
+    font-style: normal;
+    font-weight: 400;
+    src: url(https://fonts.gstatic.com/s/uncialantiqua/v22/N0bM2S5WOex4OUbESzoESK-i-PfR.ttf)
+        format("truetype");
+}
