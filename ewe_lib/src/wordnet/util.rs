@@ -16,11 +16,21 @@ lazy_static! {
 pub fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
 
     let s2 : String = if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
-        || s.starts_with("'") || s == "true" || s == "false" 
-        || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s) 
+        || s.starts_with("'") || s == "true" || s == "false"
+        || s == "yes" || s == "no" || s == "null" || NUMBERS.is_match(s)
         || s.ends_with(" ") || s.contains(": ")
-        || s == "No" || s == "off" || s == "on" 
-        || s.starts_with("`") || s.starts_with("...") {
+        || s == "No" || s == "off" || s == "on"
+        || s.starts_with("`") || s.starts_with("...")
+        // YAML plain scalars can't start with an indicator character - most
+        // notably '*' (alias) and '&' (anchor), which otherwise silently
+        // turn a string like "*foo" (a contributor's mark for a doubtful/
+        // unattested form) into an alias reference and corrupt the file.
+        || s.starts_with("*") || s.starts_with("&") || s.starts_with("!")
+        || s.starts_with("|") || s.starts_with(">") || s.starts_with("%")
+        || s.starts_with("@") || s.starts_with("#") || s.starts_with("[")
+        || s.starts_with("]") || s.starts_with("{") || s.starts_with("}")
+        || s.starts_with(",") || s.starts_with("- ") || s == "-"
+        || s.starts_with("? ") || s == "?" {
         format!("'{}'", str::replace(s, "'", "''"))
     } else {
         s.to_owned()
