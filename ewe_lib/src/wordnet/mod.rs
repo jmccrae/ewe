@@ -208,6 +208,15 @@ partOfSpeech: n";
     }
 
     #[test]
+    fn test_escape_leading_asterisk() {
+        // A leading '*' is the YAML alias indicator - left unquoted, "*foo"
+        // is parsed as a reference to an anchor named "foo", not the
+        // literal string "*foo".
+        assert_eq!("'*foo'", escape_yaml_string("*foo", 4, 4));
+        assert_eq!("'&foo'", escape_yaml_string("&foo", 4, 4));
+    }
+
+    #[test]
     fn test_split_line3() {
         let string = "\"the abaxial surface of a leaf is the underside or side facing away from the stem\"";
         assert_eq!("'\"the abaxial surface of a leaf is the underside or side facing away from the\n    stem\"'", escape_yaml_string(string, 4, 4));
