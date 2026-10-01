@@ -33,23 +33,40 @@ pub fn apply_automaton<L: Lexicon>(
     let mut last_sense_id: Option<SenseId> = None;
     let mut validation_report: Option<ValidationReport> = None;
     for action in actions {
+        // Reject a bad inline score before the action changes anything.
+        for c in action.inline_confidences() {
+            if !crate::validate::is_valid_confidence(c) {
+                return Err(format!("Confidence {} is not between 0.0 and 1.0", c));
+            }
+        }
         match action {
             Action::AddEntry {
                 synset,
                 lemma,
                 pos,
                 subcat,
+                confidence,
+                entry_confidence,
             } => {
+                let synset = synset.resolve(&last_synset_id)?;
                 last_sense_id = change_manager::add_entry(
                     wn,
-                    synset.resolve(&last_synset_id)?,
-                    lemma,
+                    synset.clone(),
+                    lemma.clone(),
                     pos,
                     subcat,
                     None,
                     changes,
                 )
                 .map_err(|e| e.to_string())?;
+                if let Some(c) = confidence {
+                    let sense = last_sense_id.clone()
+                        .ok_or(format!("No sense was added for {} to score", lemma))?;
+                    set_confidence(wn, &synset, ConfidenceTarget::Sense(sense), Some(c), changes)?;
+                }
+                if let Some(c) = entry_confidence {
+                    set_confidence(wn, &synset, ConfidenceTarget::Entry(lemma), Some(c), changes)?;
+                }
             }
             Action::DeleteEntry { synset, lemma } => {
                 match wn
@@ -111,6 +128,8 @@ pub fn apply_automaton<L: Lexicon>(
                 pos,
                 lemmas,
                 subcats,
+                confidence,
+                definition_confidence,
             } => {
                 let poses = wn.pos_for_lexfile(&lexfile).map_err(|e| e.to_string())?;
                 let pos = if let Some(pos) = pos {
@@ -170,6 +189,13 @@ pub fn apply_automaton<L: Lexicon>(
                                 .map_err(|e| e.to_string())?;
                             }
                         }
+                        if confidence.is_some() {
+                            set_confidence(wn, &new_id, ConfidenceTarget::Synset, confidence, changes)?;
+                        }
+                        if definition_confidence.is_some() {
+                            set_confidence(wn, &new_id, ConfidenceTarget::Definition(1),
+                                definition_confidence, changes)?;
+                        }
                         last_synset_id = Some(new_id);
                     }
                     Err(e) => return Err(e.to_string()),
@@ -193,43 +219,56 @@ pub fn apply_automaton<L: Lexicon>(
                 )
                 .map_err(|e| e.to_string())?;
             }
-            Action::Definition { synset, definition } => {
-                change_manager::update_def(
-                    wn,
-                    &synset.resolve(&last_synset_id)?,
-                    definition,
-                    false,
-                );
+            Action::Definition { synset, definition, confidence } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                change_manager::update_def(wn, &synset, definition, false);
+                if confidence.is_some() {
+                    set_confidence(wn, &synset, ConfidenceTarget::Definition(1), confidence, changes)?;
+                }
             }
             Action::AddExample {
                 synset,
                 example,
                 source,
+                confidence,
             } => {
+                let synset = synset.resolve(&last_synset_id)?;
                 change_manager::add_ex(
                     wn,
-                    &synset.resolve(&last_synset_id)?,
+                    &synset,
                     example,
                     // An empty source is not a valid value - treat it the same as omitting
                     // `source` entirely.
                     source.filter(|s| !s.is_empty()),
                     changes,
                 );
+                if confidence.is_some() {
+                    // `add_ex` appends, so the new example is the last one.
+                    let number = wn.synset_by_id(&synset).map_err(|e| e.to_string())?
+                        .map(|ss| ss.example.len())
+                        .unwrap_or(0);
+                    set_confidence(wn, &synset, ConfidenceTarget::Example(number), confidence, changes)?;
+                }
             }
             Action::UpdateExample {
                 synset,
                 number,
                 example,
                 source,
+                confidence,
             } => {
+                let synset = synset.resolve(&last_synset_id)?;
                 change_manager::update_ex(
                     wn,
-                    &synset.resolve(&last_synset_id)?,
+                    &synset,
                     number - 1,
                     example,
                     source.filter(|s| !s.is_empty()),
                     changes,
                 );
+                if confidence.is_some() {
+                    set_confidence(wn, &synset, ConfidenceTarget::Example(number), confidence, changes)?;
+                }
             }
             Action::DeleteExample { synset, number } => {
                 change_manager::delete_ex(
@@ -247,6 +286,7 @@ pub fn apply_automaton<L: Lexicon>(
                 target_sense,
                 source_lemma,
                 target_lemma,
+                confidence,
             } => {
                 let source = source.resolve(&last_synset_id)?;
                 let source_sense = if let Some(source_sense) = source_sense {
@@ -306,22 +346,23 @@ pub fn apply_automaton<L: Lexicon>(
                         change_manager::insert_sense_relation(
                             wn,
                             sense.clone(),
-                            rel,
-                            target_sense,
+                            rel.clone(),
+                            target_sense.clone(),
                             changes,
                         )
                         .map_err(|e| e.to_string())?;
+                        if confidence.is_some() {
+                            score_sense_relation(wn, &sense, &rel, &target_sense, confidence)?;
+                        }
                     }
                     None => {
-                        change_manager::insert_rel(
-                            wn,
-                            &source,
-                            &SynsetRelType::from(&relation)
-                                .ok_or(format!("Bad relation {}.", relation))?,
-                            &target,
-                            changes,
-                        )
-                        .map_err(|e| e.to_string())?;
+                        let rel = SynsetRelType::from(&relation)
+                            .ok_or(format!("Bad relation {}.", relation))?;
+                        change_manager::insert_rel(wn, &source, &rel, &target, changes)
+                            .map_err(|e| e.to_string())?;
+                        if confidence.is_some() {
+                            score_synset_relation(wn, &source, &rel, &target, confidence)?;
+                        }
                     }
                 }
             }
@@ -439,11 +480,30 @@ pub fn apply_automaton<L: Lexicon>(
             Action::UpdateRelations { synset, relations } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 let mut relations2 = Vec::new();
+                // Explicit item scores, applied after `update_rels` (which otherwise keeps each
+                // re-added relation's previous score).
+                let mut synset_scores = Vec::new();
+                let mut sense_scores = Vec::new();
                 for item in relations.iter() {
-                    relations2.push(item.resolve(wn, &synset, &last_synset_id, &last_sense_id)?);
+                    let update = item.resolve(wn, &synset, &last_synset_id, &last_sense_id)?;
+                    if item.confidence.is_some() {
+                        match &update {
+                            RelationUpdate::Synset(s, r, t) =>
+                                synset_scores.push((s.clone(), r.clone(), t.clone(), item.confidence)),
+                            RelationUpdate::Sense(s, r, t) =>
+                                sense_scores.push((s.clone(), r.clone(), t.clone(), item.confidence)),
+                        }
+                    }
+                    relations2.push(update);
                 }
                 change_manager::update_rels(wn, &synset, relations2, changes)
                     .map_err(|e| e.to_string())?;
+                for (s, r, t, c) in synset_scores {
+                    score_synset_relation(wn, &s, &r, &t, c)?;
+                }
+                for (s, r, t, c) in sense_scores {
+                    score_sense_relation(wn, &s, &r, &t, c)?;
+                }
             }
             Action::Validate => {
                 let mut progress = NullProgress;
@@ -636,6 +696,42 @@ fn set_confidence<L: Lexicon>(
     Ok(())
 }
 
+/// Score a just-added synset relation - and, for a symmetric one (which `insert_rel` stores in
+/// both directions), its reverse too.
+fn score_synset_relation<L: Lexicon>(
+    wn: &mut L,
+    source: &SynsetId,
+    rel: &SynsetRelType,
+    target: &SynsetId,
+    confidence: Option<f64>,
+) -> Result<(), String> {
+    let e = |e: crate::wordnet::LexiconError| e.to_string();
+    wn.set_synset_rel_confidence(source, rel, target, confidence).map_err(e)?;
+    if rel.is_symmetric() {
+        wn.set_synset_rel_confidence(target, rel, source, confidence).map_err(e)?;
+    }
+    Ok(())
+}
+
+/// Sense-relation counterpart of [`score_synset_relation`].
+fn score_sense_relation<L: Lexicon>(
+    wn: &mut L,
+    source: &SenseId,
+    rel: &SenseRelType,
+    target: &SenseOrSynsetId,
+    confidence: Option<f64>,
+) -> Result<(), String> {
+    let e = |e: crate::wordnet::LexiconError| e.to_string();
+    wn.set_sense_rel_confidence(source, rel, target, confidence).map_err(e)?;
+    if rel.is_symmetric() {
+        if let SenseOrSynsetId::Sense(target_sense) = target {
+            wn.set_sense_rel_confidence(target_sense, rel, &SenseOrSynsetId::Sense(source.clone()), confidence)
+                .map_err(e)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum SynsetRef {
     Id(SynsetId),
@@ -810,6 +906,14 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Vec::is_empty")]
         subcat: Vec<String>,
+        /// Confidence score (0.0-1.0) for the new sense. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
+        /// Confidence score (0.0-1.0) for the lexical entry (re-scores it if the lemma already had one). Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        entry_confidence: Option<f64>,
     },
     #[serde(rename = "delete_entry")]
     DeleteEntry { synset: SynsetRef, lemma: String },
@@ -835,6 +939,14 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Vec::is_empty")]
         subcats: Vec<Vec<String>>,
+        /// Confidence score (0.0-1.0) for the new synset. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
+        /// Confidence score (0.0-1.0) for its definition. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        definition_confidence: Option<f64>,
     },
     #[serde(rename = "delete_synset")]
     DeleteSynset {
@@ -852,6 +964,10 @@ pub enum Action {
     Definition {
         synset: SynsetRef,
         definition: String,
+        /// Confidence score (0.0-1.0) for the definition; omit to keep its current score. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
     },
     #[serde(rename = "change_ili")]
     ChangeILI { synset: SynsetRef, ili: String },
@@ -870,6 +986,10 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        /// Confidence score (0.0-1.0) for the new example. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
     },
     #[serde(rename = "update_example")]
     UpdateExample {
@@ -880,6 +1000,10 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         source: Option<String>,
+        /// Confidence score (0.0-1.0) for the example; omit to keep its current score. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
     },
     #[serde(rename = "delete_example")]
     DeleteExample { synset: SynsetRef, number: usize },
@@ -900,6 +1024,10 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         target_lemma: Option<String>,
+        /// Confidence score (0.0-1.0) for the new relation (both directions, for a symmetric relation). Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
     },
     #[serde(rename = "delete_relation")]
     DeleteRelation {
@@ -982,8 +1110,52 @@ pub enum Action {
 }
 
 impl Action {
+    /// Every inline `confidence`-style score this action carries (not `set_confidence`'s, which
+    /// validates its own).
+    fn inline_confidences(&self) -> Vec<f64> {
+        let scores: Vec<Option<f64>> = match self {
+            Action::AddEntry { confidence, entry_confidence, .. } => vec![*confidence, *entry_confidence],
+            Action::AddSynset { confidence, definition_confidence, .. } =>
+                vec![*confidence, *definition_confidence],
+            Action::Definition { confidence, .. }
+            | Action::AddExample { confidence, .. }
+            | Action::UpdateExample { confidence, .. }
+            | Action::AddRelation { confidence, .. } => vec![*confidence],
+            Action::UpdateRelations { relations, .. } => relations.iter().map(|r| r.confidence).collect(),
+            _ => vec![],
+        };
+        scores.into_iter().flatten().collect()
+    }
+
     /// A short, human-readable one-line description of this action, for the change log UI.
     pub fn summary(&self) -> String {
+        let mut notes = Vec::new();
+        match self {
+            Action::AddEntry { confidence, entry_confidence, .. } => {
+                notes.extend(confidence.map(|c| format!("confidence {}", c)));
+                notes.extend(entry_confidence.map(|c| format!("entry confidence {}", c)));
+            }
+            Action::AddSynset { confidence, definition_confidence, .. } => {
+                notes.extend(confidence.map(|c| format!("confidence {}", c)));
+                notes.extend(definition_confidence.map(|c| format!("definition confidence {}", c)));
+            }
+            Action::Definition { confidence, .. }
+            | Action::AddExample { confidence, .. }
+            | Action::UpdateExample { confidence, .. }
+            | Action::AddRelation { confidence, .. } => {
+                notes.extend(confidence.map(|c| format!("confidence {}", c)));
+            }
+            _ => {}
+        }
+        let base = self.base_summary();
+        if notes.is_empty() {
+            base
+        } else {
+            format!("{} ({})", base, notes.join(", "))
+        }
+    }
+
+    fn base_summary(&self) -> String {
         fn sense_ref(r: &SenseRef) -> String {
             match r {
                 SenseRef::Id(id) => id.as_str().to_string(),
@@ -1037,7 +1209,7 @@ impl Action {
                     reason
                 ),
             },
-            Action::Definition { synset, definition } => {
+            Action::Definition { synset, definition, .. } => {
                 format!("Changed definition of {} to \"{}\"", synset.as_str(), definition)
             }
             Action::ChangeILI { synset, ili } => {
@@ -1194,6 +1366,11 @@ pub struct UpdateRelationItem {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     target_lemma: Option<String>,
+    /// Confidence score (0.0-1.0) for this relation. Omit to keep the score it already had,
+    /// if it already existed.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence: Option<f64>,
 }
 
 impl UpdateRelationItem {
@@ -1299,6 +1476,7 @@ mod tests {
         // Round-trip a representative action through JSON (not YAML) to confirm the wire
         // format an MCP client would actually send matches what the schema describes.
         let action = Action::AddRelation {
+            confidence: None,
             source: SynsetRef::id("00001740-n"),
             source_sense: Some(SenseRef::lemma("bar")),
             relation: "antonym".to_string(),
@@ -1322,6 +1500,8 @@ mod tests {
         let test_str = "- add_entry:\n    synset: 00001740-n\n    lemma: bar\n    pos: n\n- delete_entry:\n    synset: 00001740-n\n    lemma: bar\n- move_entry:\n    synset: 00001740-n\n    lemma: bar\n    target_synset: 00001741-n\n- add_synset:\n    definition: something or someone\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bar\n- delete_synset:\n    synset: last\n    reason: Duplicate (#123)\n    superseded_by: 00001741-n\n- change_definition:\n    synset: 00001740-n\n    definition: This is a definition\n- add_example:\n    synset: 00001740-n\n    example: This is an example\n    source: This is a source\n- update_example:\n    synset: 00001740-n\n    number: 1\n    example: This is an updated example\n- delete_example:\n    synset: 00001740-n\n    number: 1\n- add_relation:\n    source: 00001740-n\n    relation: hypernym\n    target: 00001741-n\n- delete_relation:\n    source: 00001740-n\n    source_sense: 'example%1:09:00::'\n    target: 00001741-n\n    target_sense: target%1:10:00::'\n- reverse_relation:\n    source: 00001740-n\n    target: 00001741-n\n- validate\n";
         let data = vec![
             Action::AddEntry {
+                confidence: None,
+                entry_confidence: None,
                 synset: SynsetRef::id("00001740-n"),
                 lemma: "bar".to_string(),
                 pos: PosKey::new("n".to_string()),
@@ -1337,6 +1517,8 @@ mod tests {
                 target_synset: SynsetRef::id("00001741-n"),
             },
             Action::AddSynset {
+                confidence: None,
+                definition_confidence: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1349,15 +1531,18 @@ mod tests {
                 superseded_by: Some(SynsetRef::id("00001741-n")),
             },
             Action::Definition {
+                confidence: None,
                 synset: SynsetRef::id("00001740-n"),
                 definition: "This is a definition".to_string(),
             },
             Action::AddExample {
+                confidence: None,
                 synset: SynsetRef::id("00001740-n"),
                 example: "This is an example".to_string(),
                 source: Some("This is a source".to_string()),
             },
             Action::UpdateExample {
+                confidence: None,
                 synset: SynsetRef::id("00001740-n"),
                 number: 1,
                 example: "This is an updated example".to_string(),
@@ -1368,6 +1553,7 @@ mod tests {
                 number: 1,
             },
             Action::AddRelation {
+                confidence: None,
                 source: SynsetRef::id("00001740-n"),
                 source_sense: None,
                 relation: "hypernym".to_string(),
@@ -1408,6 +1594,8 @@ mod tests {
     fn test_last() {
         let actions = vec![
             Action::AddSynset {
+                confidence: None,
+                definition_confidence: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1415,6 +1603,7 @@ mod tests {
                 subcats: vec![],
             },
             Action::AddRelation {
+                confidence: None,
                 source: SynsetRef::Last,
                 source_sense: None,
                 relation: "hypernym".to_string(),
@@ -1473,6 +1662,7 @@ mod tests {
         )
         .unwrap();
         let actions = vec![Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(ssid1),
             target: SynsetRef::Id(ssid2),
             relation: "antonym".to_string(),
@@ -1558,6 +1748,91 @@ mod tests {
     }
 
     #[test]
+    fn test_inline_confidence_on_creating_actions() {
+        let (mut wn, dog, animal, cat) = confidence_fixture();
+        let yaml = format!(
+            "- add_synset:\n    definition: a feathered animal\n    lexfile: noun.animal\n    pos: n\n    lemmas:\n    - bird\n    confidence: 0.7\n    definition_confidence: 0.6\n\
+             - add_entry:\n    synset: last\n    lemma: fowl\n    pos: n\n    confidence: 0.8\n    entry_confidence: 0.9\n\
+             - add_example:\n    synset: last\n    example: the bird sang\n    confidence: 0.5\n\
+             - add_relation:\n    source: last\n    relation: hypernym\n    target: {animal}\n    confidence: 0.4\n\
+             - add_relation:\n    source: last\n    relation: also\n    target: {dog}\n    confidence: 0.35\n\
+             - add_relation:\n    source: last\n    source_sense: lemma=bird\n    relation: antonym\n    target: {cat}\n    target_sense: lemma=cat\n    confidence: 0.3\n"
+        );
+        let actions = parse_actions(&yaml);
+        // The fields survive a serialize/parse round trip, and show up in the change log.
+        let reparsed: Vec<Action> = serde_yaml::from_str::<Vec<ActionWrapper>>(
+            &serde_yaml::to_string(&actions.iter().cloned().map(ActionWrapper).collect::<Vec<_>>()).unwrap(),
+        ).unwrap().into_iter().map(|w| w.0).collect();
+        assert_eq!(reparsed, actions);
+        assert!(actions[0].summary().ends_with("(confidence 0.7, definition confidence 0.6)"),
+            "{}", actions[0].summary());
+        let (bird, _) = apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+        let bird = bird.unwrap();
+
+        let ss = wn.synset_by_id(&bird).unwrap().unwrap();
+        assert_eq!(ss.confidence, Some(0.7));
+        assert_eq!(ss.definition.confidence("a feathered animal"), Some(0.6));
+        assert_eq!(ss.example[0].confidence, Some(0.5));
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.4));
+        // `also` is symmetric: both stored directions get the score.
+        assert_eq!(ss.also.confidence(dog.as_str()), Some(0.35));
+        assert_eq!(wn.synset_by_id(&dog).unwrap().unwrap().also.confidence(bird.as_str()), Some(0.35));
+        let fowl = wn.get_sense_id2("fowl", &bird).unwrap().unwrap();
+        let (_, _, fowl_sense) = wn.get_sense_by_id(&fowl).unwrap().unwrap();
+        assert_eq!(fowl_sense.confidence, Some(0.8));
+        assert_eq!(wn.entry_by_lemma("fowl").unwrap()[0].confidence, Some(0.9));
+        // So is antonym, at the sense level.
+        let bird_sense = wn.get_sense_id2("bird", &bird).unwrap().unwrap();
+        let cat_sense = wn.get_sense_id2("cat", &cat).unwrap().unwrap();
+        let (_, _, s) = wn.get_sense_by_id(&bird_sense).unwrap().unwrap();
+        assert_eq!(s.antonym.confidence(cat_sense.as_str()), Some(0.3));
+        let (_, _, s) = wn.get_sense_by_id(&cat_sense).unwrap().unwrap();
+        assert_eq!(s.antonym.confidence(bird_sense.as_str()), Some(0.3));
+        // Nothing unasked-for got a score.
+        assert_eq!(wn.get_sense_by_id(&bird_sense).unwrap().unwrap().2.confidence, None);
+    }
+
+    #[test]
+    fn test_inline_confidence_on_modifying_actions() {
+        let (mut wn, dog, animal, _) = confidence_fixture();
+        let yaml = format!(
+            "- add_example:\n    synset: {dog}\n    example: woof\n    confidence: 0.5\n\
+             - change_definition:\n    synset: {dog}\n    definition: a domestic dog\n    confidence: 0.6\n\
+             - update_example:\n    synset: {dog}\n    number: 1\n    example: woof woof\n\
+             - update_relations:\n    synset: {dog}\n    relations:\n    - relation: hypernym\n      target: {animal}\n      confidence: 0.4\n"
+        );
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let ss = wn.synset_by_id(&dog).unwrap().unwrap();
+        assert_eq!(ss.definition.confidence("a domestic dog"), Some(0.6));
+        // `update_example` without `confidence` keeps the existing score.
+        assert_eq!(ss.example[0].confidence, Some(0.5));
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.4));
+
+        // ... and with one, replaces it; a second `update_relations` without item scores keeps
+        // the relation's score.
+        let yaml = format!(
+            "- update_example:\n    synset: {dog}\n    number: 1\n    example: woof woof\n    confidence: 0.25\n\
+             - update_relations:\n    synset: {dog}\n    relations:\n    - relation: hypernym\n      target: {animal}\n"
+        );
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let ss = wn.synset_by_id(&dog).unwrap().unwrap();
+        assert_eq!(ss.example[0].confidence, Some(0.25));
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.4));
+    }
+
+    #[test]
+    fn test_inline_confidence_out_of_range_creates_nothing() {
+        let (mut wn, dog, _, _) = confidence_fixture();
+        let yaml = format!("- add_example:\n    synset: {dog}\n    example: woof\n    confidence: 2.0\n");
+        assert!(apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).is_err());
+        assert!(wn.synset_by_id(&dog).unwrap().unwrap().example.is_empty());
+        let n = wn.n_synsets().unwrap();
+        let yaml = "- add_synset:\n    definition: x\n    lexfile: noun.animal\n    lemmas: [x]\n    definition_confidence: -1\n";
+        assert!(apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).is_err());
+        assert_eq!(wn.n_synsets().unwrap(), n);
+    }
+
+    #[test]
     fn test_set_confidence_errors() {
         let (mut wn, dog, animal, _) = confidence_fixture();
         for yaml in [
@@ -1616,16 +1891,19 @@ mod tests {
 
         let actions = vec![
             Action::AddExample {
+                confidence: None,
                 synset: SynsetRef::Id(ssid.clone()),
                 example: "first".to_string(),
                 source: None,
             },
             Action::AddExample {
+                confidence: None,
                 synset: SynsetRef::Id(ssid.clone()),
                 example: "second".to_string(),
                 source: None,
             },
             Action::UpdateExample {
+                confidence: None,
                 synset: SynsetRef::Id(ssid.clone()),
                 number: 1,
                 example: "first, edited".to_string(),
@@ -1690,6 +1968,7 @@ mod tests {
         // as the canonical inverse "bar exemplifies foo", not stored directly - and
         // must not recurse/overflow doing it.
         let actions = vec![Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(ssid1.clone()),
             target: SynsetRef::Id(ssid2.clone()),
             relation: "is_exemplified_by_sense".to_string(),
@@ -1755,6 +2034,7 @@ mod tests {
         // domain_topic allows a synset target: a missing target_sense should
         // succeed and store "foo domain_topic ssid2" (the whole synset), not error.
         let actions = vec![Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(ssid1.clone()),
             target: SynsetRef::Id(ssid2.clone()),
             relation: "domain_topic".to_string(),
@@ -1780,6 +2060,7 @@ mod tests {
         // antonym does not allow a synset target: a missing target_sense must
         // still be an error, same as before this change.
         let actions = vec![Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(ssid1.clone()),
             target: SynsetRef::Id(ssid2.clone()),
             relation: "antonym".to_string(),
@@ -1820,6 +2101,7 @@ mod tests {
 
         // "general hyponym specific" means specific's hypernym is general.
         let actions = vec![Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(general.clone()),
             target: SynsetRef::Id(specific.clone()),
             relation: "hyponym".to_string(),
@@ -1893,6 +2175,8 @@ mod tests {
         lexicon.add_lexfile("noun.animal").unwrap();
 
         let actions = vec![Action::AddSynset {
+            confidence: None,
+            definition_confidence: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
@@ -1927,6 +2211,8 @@ mod tests {
         assert!(!has_unsaved_changes(&lexicon).unwrap(), "a fresh lexicon has nothing to save");
 
         let actions = vec![Action::AddSynset {
+            confidence: None,
+            definition_confidence: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),

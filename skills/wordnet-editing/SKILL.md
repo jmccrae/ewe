@@ -85,12 +85,17 @@ repeated here. Two conventions worth knowing:
 
 ## Confidence scores
 
-`set_confidence` records how sure the wordnet is of a synset, sense, entry, definition,
+A confidence score records how sure the wordnet is of a synset, sense, entry, definition,
 example or relation (WN-LMF `confidenceScore`, 0.0-1.0; no score means 1.0). Set one only
 when you have an actual reason to doubt the item - e.g. an automatically generated or
-unverified addition - not as routine annotation of your own edits. Rewording a definition or
-example keeps its existing score; if your edit resolves the doubt, clear the score by sending
-`set_confidence` without `confidence`.
+unverified addition - not as routine annotation of your own edits.
+
+- When creating something, give the score inline: `confidence` on `add_synset`, `add_entry`,
+  `add_example` and `add_relation`; `definition_confidence` on `add_synset`; `entry_confidence`
+  on `add_entry`.
+- To re-score something that already exists, use `set_confidence`.
+- Rewording a definition or example keeps its existing score. If your edit resolves the doubt,
+  clear the score by sending `set_confidence` without `confidence`.
 
 ## Check before you commit
 
