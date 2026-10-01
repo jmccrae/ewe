@@ -21,6 +21,7 @@
 
 use super::ids;
 use super::{LexiconMetadata, XmlExportError, WN_LMF_DOCTYPE};
+use crate::wordnet::util::format_confidence;
 use crate::wordnet::entry::Entries;
 use crate::wordnet::synset_members::Member;
 use crate::wordnet::{Lexicon, MemberSynset, PosKey, Pronunciation, SenseId, SynsetId, Synsets};
@@ -140,6 +141,7 @@ pub fn write_lexicon_xml_subset(
     lexicon.push_attribute(("license", metadata.license.as_str()));
     lexicon.push_attribute(("version", metadata.version.as_str()));
     lexicon.push_attribute(("url", metadata.url.as_deref().unwrap_or("")));
+    push_confidence(&mut lexicon, metadata.confidence);
     writer.write_event(Event::Start(lexicon))?;
 
     for (_, (lemma, poskey), acc) in &entries_sorted {
@@ -173,6 +175,7 @@ fn write_lexical_entry<W: std::io::Write>(
 ) -> Result<()> {
     let mut entry = BytesStart::new("LexicalEntry");
     entry.push_attribute(("id", ids::entry_xml_id(prefix, lemma, poskey).as_str()));
+    push_confidence(&mut entry, acc.representative.entry_confidence);
     writer.write_event(Event::Start(entry))?;
 
     let pos = poskey.to_part_of_speech().map(|p| p.value()).unwrap_or("n");
@@ -231,16 +234,18 @@ fn write_sense<W: std::io::Write>(
         sense.push_attribute(("subcat", subcat.as_str()));
     }
     sense.push_attribute(("synset", ids::synset_xml_id(prefix, &synset.id).as_str()));
+    push_confidence(&mut sense, member.sense.confidence);
 
     let relations = sense_relations_xml(prefix, synset, &member.lemma, sense_id_lookup);
     if relations.is_empty() {
         writer.write_event(Event::Empty(sense))?;
     } else {
         writer.write_event(Event::Start(sense))?;
-        for (rel_type, target) in relations {
+        for (rel_type, target, confidence) in relations {
             let mut rel_el = BytesStart::new("SenseRelation");
             rel_el.push_attribute(("relType", rel_type));
             rel_el.push_attribute(("target", target.as_str()));
+            push_confidence(&mut rel_el, confidence);
             writer.write_event(Event::Empty(rel_el))?;
         }
         writer.write_event(Event::End(BytesEnd::new("Sense")))?;
@@ -257,7 +262,7 @@ fn sense_relations_xml(
     synset: &MemberSynset,
     lemma: &str,
     sense_id_lookup: &SenseKeyLookup,
-) -> Vec<(&'static str, String)> {
+) -> Vec<(&'static str, String, Option<f64>)> {
     let mut out = Vec::new();
     macro_rules! rel {
         ($field:ident, $rel_type:expr) => {
@@ -278,7 +283,7 @@ fn sense_relations_xml(
                 // its `Sense/@id` from (see the module doc comment) - skip it rather than emit
                 // an unresolvable IDREF.
                 if let Some(target_sense_id) = sense_id_lookup.get(&key) {
-                    out.push(($rel_type, ids::sense_xml_id(prefix, target_sense_id)));
+                    out.push(($rel_type, ids::sense_xml_id(prefix, target_sense_id), rel.confidence));
                 }
             }
         };
@@ -338,12 +343,14 @@ fn write_synset<W: std::io::Write>(
     if let Some(source) = &synset.source {
         el.push_attribute(("dc:source", source.as_str()));
     }
+    push_confidence(&mut el, synset.confidence);
     writer.write_event(Event::Start(el))?;
 
-    for defn in &synset.definition {
+    for (defn, confidence) in synset.definition.iter_scored() {
         // No `language` attribute: it's inherited from `Lexicon/@language` when absent (the
         // real release never sets it explicitly either).
-        let def_el = BytesStart::new("Definition");
+        let mut def_el = BytesStart::new("Definition");
+        push_confidence(&mut def_el, confidence);
         writer.write_event(Event::Start(def_el))?;
         writer.write_event(Event::Text(BytesText::new(defn)))?;
         writer.write_event(Event::End(BytesEnd::new("Definition")))?;
@@ -372,10 +379,11 @@ fn write_synset<W: std::io::Write>(
         }
     }
 
-    for (rel_type, target) in synset_relations_xml(prefix, synset) {
+    for (rel_type, target, confidence) in synset_relations_xml(prefix, synset) {
         let mut rel_el = BytesStart::new("SynsetRelation");
         rel_el.push_attribute(("relType", rel_type));
         rel_el.push_attribute(("target", target.as_str()));
+        push_confidence(&mut rel_el, confidence);
         writer.write_event(Event::Empty(rel_el))?;
     }
 
@@ -385,6 +393,7 @@ fn write_synset<W: std::io::Write>(
         if let Some(source) = &example.source {
             ex_el.push_attribute(("dc:source", source.as_str()));
         }
+        push_confidence(&mut ex_el, example.confidence);
         writer.write_event(Event::Start(ex_el))?;
         writer.write_event(Event::Text(BytesText::new(&example.text)))?;
         writer.write_event(Event::End(BytesEnd::new("Example")))?;
@@ -394,12 +403,19 @@ fn write_synset<W: std::io::Write>(
     Ok(())
 }
 
-fn synset_relations_xml(prefix: &str, synset: &MemberSynset) -> Vec<(&'static str, String)> {
+/// `@confidenceScore`, written only when the model actually carries a score.
+fn push_confidence(el: &mut BytesStart, confidence: Option<f64>) {
+    if let Some(c) = confidence {
+        el.push_attribute(("confidenceScore", format_confidence(c).as_str()));
+    }
+}
+
+fn synset_relations_xml(prefix: &str, synset: &MemberSynset) -> Vec<(&'static str, String, Option<f64>)> {
     let mut out = Vec::new();
     macro_rules! rel {
         ($field:ident, $rel_type:expr) => {
-            for target in &synset.$field {
-                out.push(($rel_type, ids::synset_xml_id(prefix, target)));
+            for (target, confidence) in synset.$field.iter_scored() {
+                out.push(($rel_type, ids::synset_xml_id(prefix, target), confidence));
             }
         };
     }
@@ -462,6 +478,7 @@ mod tests {
 
     fn metadata() -> LexiconMetadata {
         LexiconMetadata {
+            confidence: None,
             id_prefix: "oewn".to_string(),
             label: "Test Wordnet".to_string(),
             language: "en".to_string(),

@@ -13,6 +13,12 @@ lazy_static! {
     static ref NUMBERS: Regex = Regex::new("^(\\.)?\\d+$").unwrap();
 }
 
+/// How a confidence score is written in YAML (and WN-LMF XML): `Debug` rather than `Display`,
+/// so 1.0 is written `1.0`, not `1`, and stays a float when read back.
+pub fn format_confidence(c : f64) -> String {
+    format!("{:?}", c)
+}
+
 pub fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> String {
 
     let s2 : String = if s.starts_with("\"") || s.ends_with(":")  || s.contains(": ")
@@ -114,22 +120,23 @@ pub fn escape_yaml_string(s : &str, indent : usize, initial_indent : usize) -> S
 }
 
 
-pub fn write_prop_sense<W : Write, T : AsRef<str>>(w : &mut W, senses : &Vec<T>, name : &str, first : bool) -> std::io::Result<bool> {
+pub fn write_prop_sense<W : Write, T : AsRef<str>>(w : &mut W, senses : &ScoredVec<T>, name : &str, first : bool) -> std::io::Result<bool> {
     if senses.is_empty() {
-        Ok(first)
-    } else if !first {
-        write!(w, "\n      {}:", name)?;
-        for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_ref(), 8, 8))?;
-        }
-        Ok(false)
-    } else {
-        write!(w, "{}:", name)?;
-        for sense_id in senses.iter() {
-            write!(w, "\n      - {}", escape_yaml_string(sense_id.as_ref(), 8, 8))?;
-        }
-        Ok(false)
+        return Ok(first);
     }
+    if first {
+        write!(w, "{}:", name)?;
+    } else {
+        write!(w, "\n      {}:", name)?;
+    }
+    for (sense_id, confidence) in senses.iter_scored() {
+        match confidence {
+            None => write!(w, "\n      - {}", escape_yaml_string(sense_id.as_ref(), 8, 8))?,
+            Some(c) => write!(w, "\n      - confidence: {}\n        target: {}",
+                format_confidence(c), escape_yaml_string(sense_id.as_ref(), 10, 10))?,
+        }
+    }
+    Ok(false)
 }
 
 
@@ -176,6 +183,11 @@ pub enum LexiconError {
     #[cfg(feature="redb")]
     #[error("Speedy error: {0}")]
     SpeedyError(#[from] speedy::Error),
+    #[cfg(feature="redb")]
+    #[error("The database {path} uses storage format version {found}, but this version of ewe \
+             needs version {expected}. If it has unsaved edits, save them with the ewe version \
+             that created it first; then delete the database file so it is rebuilt from source.")]
+    SchemaVersionMismatch { path: String, found: u32, expected: u32 },
 }
 
 #[derive(Error,Debug)]

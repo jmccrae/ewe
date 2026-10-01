@@ -4,7 +4,7 @@ use std::fmt;
 use std::io::Write;
 use crate::rels::{YamlSynsetRelType,SynsetRelType};
 use crate::wordnet::*;
-use crate::wordnet::util::{escape_yaml_string, string_or_vec};
+use crate::wordnet::util::{escape_yaml_string, format_confidence, string_or_vec};
 use std::borrow::Cow;
 use std::result;
 
@@ -82,7 +82,7 @@ impl Synsets for BTSynsets {
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
 #[cfg_attr(feature="redb", derive(speedy::Readable, speedy::Writable))]
 pub struct Synset {
-    pub definition : Vec<String>,
+    pub definition : ScoredVec<String>,
     #[serde(default)]
     pub example : Vec<Example>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,78 +91,81 @@ pub struct Synset {
     pub wikidata : Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source : Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence : Option<f64>,
     pub members : Vec<String>,
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
-    pub also : Vec<SynsetId>,
+    pub also : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub attribute : Vec<SynsetId>,
+    pub attribute : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub causes : Vec<SynsetId>,
+    pub causes : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub domain_region : Vec<SynsetId>,
+    pub domain_region : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub domain_topic : Vec<SynsetId>,
+    pub domain_topic : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub exemplifies : Vec<SynsetId>,
+    pub exemplifies : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub entails : Vec<SynsetId>,
+    pub entails : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub hypernym : Vec<SynsetId>,
+    pub hypernym : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub instance_hypernym : Vec<SynsetId>,
+    pub instance_hypernym : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub mero_location : Vec<SynsetId>,
+    pub mero_location : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub mero_member : Vec<SynsetId>,
+    pub mero_member : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub mero_part : Vec<SynsetId>,
+    pub mero_part : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub mero_portion : Vec<SynsetId>,
+    pub mero_portion : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub mero_substance : Vec<SynsetId>,
+    pub mero_substance : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub meronym : Vec<SynsetId>,
+    pub meronym : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub similar : Vec<SynsetId>,
+    pub similar : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub feminine : Vec<SynsetId>,
+    pub feminine : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub masculine : Vec<SynsetId>,
+    pub masculine : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub other : Vec<SynsetId>
+    pub other : ScoredVec<SynsetId>
 }
 
 impl Synset {
     pub fn new(part_of_speech : PartOfSpeech) -> Synset {
         Synset {
-            definition : Vec::new(),
+            definition : Vec::new().into(),
             example : Vec::new(),
             ili : None,
             wikidata : Vec::new(),
             source : None,
+            confidence : None,
             members : Vec::new(),
             part_of_speech,
-            also : Vec::new(),
-            attribute : Vec::new(),
-            causes : Vec::new(),
-            domain_region : Vec::new(),
-            domain_topic : Vec::new(),
-            exemplifies : Vec::new(),
-            entails : Vec::new(),
-            hypernym : Vec::new(),
-            instance_hypernym : Vec::new(),
-            mero_location : Vec::new(),
-            mero_member : Vec::new(),
-            mero_part : Vec::new(),
-            mero_portion : Vec::new(),
-            mero_substance : Vec::new(),
-            meronym : Vec::new(),
-            similar : Vec::new(),
-            feminine : Vec::new(),
-            masculine : Vec::new(),
-            other : Vec::new()
+            also : Vec::new().into(),
+            attribute : Vec::new().into(),
+            causes : Vec::new().into(),
+            domain_region : Vec::new().into(),
+            domain_topic : Vec::new().into(),
+            exemplifies : Vec::new().into(),
+            entails : Vec::new().into(),
+            hypernym : Vec::new().into(),
+            instance_hypernym : Vec::new().into(),
+            mero_location : Vec::new().into(),
+            mero_member : Vec::new().into(),
+            mero_part : Vec::new().into(),
+            mero_portion : Vec::new().into(),
+            mero_substance : Vec::new().into(),
+            meronym : Vec::new().into(),
+            similar : Vec::new().into(),
+            feminine : Vec::new().into(),
+            masculine : Vec::new().into(),
+            other : Vec::new().into()
         }
     }
 
@@ -193,99 +196,173 @@ impl Synset {
         match rel_type {
             YamlSynsetRelType::Also => {
                 if !self.also.iter().any(|id| id == target_id) {
-                    self.also.push(target_id.clone());
+                    self.also.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Attribute => {
                 if !self.attribute.iter().any(|id| id == target_id) {
-                    self.attribute.push(target_id.clone());
+                    self.attribute.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Causes => {
                 if !self.causes.iter().any(|id| id == target_id) {
-                    self.causes.push(target_id.clone());
+                    self.causes.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::DomainRegion => {
                 if !self.domain_region.iter().any(|id| id == target_id) {
-                    self.domain_region.push(target_id.clone());
+                    self.domain_region.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::DomainTopic => {
                 if !self.domain_topic.iter().any(|id| id == target_id) {
-                    self.domain_topic.push(target_id.clone());
+                    self.domain_topic.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Exemplifies => {
                 if !self.exemplifies.iter().any(|id| id == target_id) {
-                    self.exemplifies.push(target_id.clone());
+                    self.exemplifies.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Entails => {
                 if !self.entails.iter().any(|id| id == target_id) {
-                    self.entails.push(target_id.clone());
+                    self.entails.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Hypernym => {
                 if !self.hypernym.iter().any(|id| id == target_id) {
-                    self.hypernym.push(target_id.clone());
+                    self.hypernym.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::InstanceHypernym => {
                 if !self.instance_hypernym.iter().any(|id| id == target_id) {
-                    self.instance_hypernym.push(target_id.clone());
+                    self.instance_hypernym.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::MeroLocation => {
                 if !self.mero_location.iter().any(|id| id == target_id) {
-                    self.mero_location.push(target_id.clone());
+                    self.mero_location.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::MeroMember => {
                 if !self.mero_member.iter().any(|id| id == target_id) {
-                    self.mero_member.push(target_id.clone());
+                    self.mero_member.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::MeroPart => {
                 if !self.mero_part.iter().any(|id| id == target_id) {
-                    self.mero_part.push(target_id.clone());
+                    self.mero_part.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::MeroPortion => {
                 if !self.mero_portion.iter().any(|id| id == target_id) {
-                    self.mero_portion.push(target_id.clone());
+                    self.mero_portion.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::MeroSubstance => {
                 if !self.mero_substance.iter().any(|id| id == target_id) {
-                    self.mero_substance.push(target_id.clone());
+                    self.mero_substance.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Meronym => {
                 if !self.meronym.iter().any(|id| id == target_id) {
-                    self.meronym.push(target_id.clone());
+                    self.meronym.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Similar => {
                 if !self.similar.iter().any(|id| id == target_id) {
-                    self.similar.push(target_id.clone());
+                    self.similar.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Feminine => {
                 if !self.feminine.iter().any(|id| id == target_id) {
-                    self.feminine.push(target_id.clone());
+                    self.feminine.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Masculine => {
                 if !self.masculine.iter().any(|id| id == target_id) {
-                    self.masculine.push(target_id.clone());
+                    self.masculine.push_scored(target_id.clone(), None);
                 }
             },
             YamlSynsetRelType::Other => {
                 if !self.other.iter().any(|id| id == target_id) {
-                    self.other.push(target_id.clone());
+                    self.other.push_scored(target_id.clone(), None);
                 }
             }
+        }
+    }
+
+    /// `insert_rel`, then set the new (or existing) relation's confidence.
+    pub(crate) fn insert_rel_scored(&mut self, rel_type : &YamlSynsetRelType,
+                      target_id : &SynsetId, confidence : Option<f64>) {
+        self.insert_rel(rel_type, target_id);
+        self.set_rel_confidence(&rel_type.to_synset_rel(), target_id, confidence);
+    }
+
+    /// The stored target list for `rel`, or `None` for an inverse-only type (e.g. `Hyponym`)
+    /// that is never stored on this side.
+    pub fn rel_targets(&self, rel : &SynsetRelType) -> Option<&ScoredVec<SynsetId>> {
+        match rel {
+            SynsetRelType::Also => Some(&self.also),
+            SynsetRelType::Attribute => Some(&self.attribute),
+            SynsetRelType::Causes => Some(&self.causes),
+            SynsetRelType::DomainRegion => Some(&self.domain_region),
+            SynsetRelType::DomainTopic => Some(&self.domain_topic),
+            SynsetRelType::Exemplifies => Some(&self.exemplifies),
+            SynsetRelType::Entails => Some(&self.entails),
+            SynsetRelType::Hypernym => Some(&self.hypernym),
+            SynsetRelType::InstanceHypernym => Some(&self.instance_hypernym),
+            SynsetRelType::MeroLocation => Some(&self.mero_location),
+            SynsetRelType::MeroMember => Some(&self.mero_member),
+            SynsetRelType::MeroPart => Some(&self.mero_part),
+            SynsetRelType::MeroPortion => Some(&self.mero_portion),
+            SynsetRelType::MeroSubstance => Some(&self.mero_substance),
+            SynsetRelType::Meronym => Some(&self.meronym),
+            SynsetRelType::Similar => Some(&self.similar),
+            SynsetRelType::Feminine => Some(&self.feminine),
+            SynsetRelType::Masculine => Some(&self.masculine),
+            SynsetRelType::Other => Some(&self.other),
+            _ => None
+        }
+    }
+
+    pub fn rel_targets_mut(&mut self, rel : &SynsetRelType) -> Option<&mut ScoredVec<SynsetId>> {
+        match rel {
+            SynsetRelType::Also => Some(&mut self.also),
+            SynsetRelType::Attribute => Some(&mut self.attribute),
+            SynsetRelType::Causes => Some(&mut self.causes),
+            SynsetRelType::DomainRegion => Some(&mut self.domain_region),
+            SynsetRelType::DomainTopic => Some(&mut self.domain_topic),
+            SynsetRelType::Exemplifies => Some(&mut self.exemplifies),
+            SynsetRelType::Entails => Some(&mut self.entails),
+            SynsetRelType::Hypernym => Some(&mut self.hypernym),
+            SynsetRelType::InstanceHypernym => Some(&mut self.instance_hypernym),
+            SynsetRelType::MeroLocation => Some(&mut self.mero_location),
+            SynsetRelType::MeroMember => Some(&mut self.mero_member),
+            SynsetRelType::MeroPart => Some(&mut self.mero_part),
+            SynsetRelType::MeroPortion => Some(&mut self.mero_portion),
+            SynsetRelType::MeroSubstance => Some(&mut self.mero_substance),
+            SynsetRelType::Meronym => Some(&mut self.meronym),
+            SynsetRelType::Similar => Some(&mut self.similar),
+            SynsetRelType::Feminine => Some(&mut self.feminine),
+            SynsetRelType::Masculine => Some(&mut self.masculine),
+            SynsetRelType::Other => Some(&mut self.other),
+            _ => None
+        }
+    }
+
+    /// The confidence of the stored `rel` relation to `target`, if it has one.
+    pub fn rel_confidence(&self, rel : &SynsetRelType, target : &SynsetId) -> Option<f64> {
+        self.rel_targets(rel).and_then(|ts| ts.confidence(target.as_str()))
+    }
+
+    /// Set (or clear) the confidence of the stored `rel` relation to `target`. Returns false
+    /// if there is no such stored relation.
+    pub fn set_rel_confidence(&mut self, rel : &SynsetRelType, target : &SynsetId,
+                              confidence : Option<f64>) -> bool {
+        match self.rel_targets_mut(rel) {
+            Some(ts) => ts.set_confidence(target.as_str(), confidence),
+            None => false
         }
     }
 
@@ -293,10 +370,17 @@ impl Synset {
         write_prop_synset(w, &self.also, "also")?;
         write_prop_synset(w, &self.attribute, "attribute")?;
         write_prop_synset(w, &self.causes, "causes")?;
+        if let Some(c) = self.confidence {
+            write!(w, "\n  confidence: {}", format_confidence(c))?;
+        }
         if !self.definition.is_empty() {
             write!(w, "\n  definition:")?;
-            for defn in self.definition.iter() {
-                write!(w, "\n  - {}", escape_yaml_string(defn,4,4))?;
+            for (defn, confidence) in self.definition.iter_scored() {
+                match confidence {
+                    None => write!(w, "\n  - {}", escape_yaml_string(defn,4,4))?,
+                    Some(c) => write!(w, "\n  - confidence: {}\n    text: {}",
+                        format_confidence(c), escape_yaml_string(defn, 6, 10))?,
+                }
             }
         }
         write_prop_synset(w, &self.domain_region, "domain_region")?;
@@ -417,13 +501,17 @@ impl Synset {
 
 }
 
-fn write_prop_synset<W : Write>(w : &mut W, synsets : &Vec<SynsetId>, name : &str) -> std::io::Result<()> {
+fn write_prop_synset<W : Write>(w : &mut W, synsets : &ScoredVec<SynsetId>, name : &str) -> std::io::Result<()> {
     if synsets.is_empty() {
         Ok(())
     } else {
         write!(w, "\n  {}:", name)?;
-        for sense_id in synsets.iter() {
-            write!(w, "\n  - {}", sense_id.as_str())?;
+        for (synset_id, confidence) in synsets.iter_scored() {
+            match confidence {
+                None => write!(w, "\n  - {}", synset_id.as_str())?,
+                Some(c) => write!(w, "\n  - confidence: {}\n    target: {}",
+                    format_confidence(c), synset_id.as_str())?,
+            }
         }
         Ok(())
     }
@@ -454,6 +542,19 @@ impl SynsetId {
     pub fn new(s : &str) -> SynsetId { SynsetId(s.to_string()) }
     pub fn new_owned(s : String) -> SynsetId { SynsetId(s) }
     pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl AsRef<str> for SynsetId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl ScoredItem for SynsetId {
+    const MAP_KEY: &'static str = "target";
+    fn from_string(s: String) -> Self {
+        SynsetId(s)
+    }
 }
 
 impl fmt::Display for SynsetId {

@@ -29,6 +29,7 @@ fn rdf_export_options(format: RdfFormat) -> RdfExportOptions {
             license: "https://creativecommons.org/licenses/by/4.0/".to_owned(),
             version: String::new(),
             url: Some("https://en-word.net/".to_owned()),
+            confidence: None,
         },
     }
 }

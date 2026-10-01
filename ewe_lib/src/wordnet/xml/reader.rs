@@ -32,6 +32,7 @@ use super::ids;
 use super::{LexiconMetadata, XmlImportError};
 use crate::rels::{SenseRelType, SynsetRelType, YamlSynsetRelType};
 use crate::wordnet::lexicon::finalize_bulk_load;
+use crate::wordnet::ScoredVec;
 use crate::wordnet::{
     Entry, Example, Lexicon, PartOfSpeech, PosKey, Pronunciation, Sense, SenseId, SenseOrSynsetId,
     Synset, SynsetId, UnresolvedSenseOrSynsetId, ILIID,
@@ -51,6 +52,7 @@ struct PendingSynsetRel {
     rel: YamlSynsetRelType,
     /// The synset the canonical relation points *at*.
     target: SynsetId,
+    confidence: Option<f64>,
 }
 
 /// A sense relation collected while parsing whose canonical direction differs from how it was
@@ -63,6 +65,7 @@ struct PendingSenseRel {
     rel: SenseRelType,
     /// The sense the canonical relation points *at* (the written relation's *source*).
     target: SenseId,
+    confidence: Option<f64>,
 }
 
 /// Everything accumulated during stage 1 that stage 2/3 needs. Bundled into one struct so the
@@ -120,7 +123,8 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
             }
             Event::Start(e) if e.name().as_ref() == b"LexicalEntry" => {
                 let entry_xml_id = require_attr(&e, "id", "LexicalEntry")?;
-                parse_lexical_entry(&mut xml, &mut buf, &prefix, entry_xml_id, &mut acc)?;
+                let confidence = confidence_attr(&e)?;
+                parse_lexical_entry(&mut xml, &mut buf, &prefix, entry_xml_id, confidence, &mut acc)?;
             }
             Event::Start(e) if e.name().as_ref() == b"Synset" => {
                 let (lexname, id, mut synset) = build_synset(&e, &prefix, &acc.entry_id_lookup, &acc.synset_members)?;
@@ -153,14 +157,15 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
     // as `validate()` would report for a YAML source with a broken reference.
     for pending in acc.pending_synset_rels {
         if let Some(&idx) = acc.synset_index.get(&pending.apply_to) {
-            acc.synsets[idx].2.insert_rel(&pending.rel, &pending.target);
+            acc.synsets[idx].2.insert_rel_scored(&pending.rel, &pending.target, pending.confidence);
         }
     }
     for pending in acc.pending_sense_rels {
         if let Some((lemma, pos)) = acc.sense_owner.get(&pending.apply_to).cloned() {
             if let Some(&idx) = acc.entry_index.get(&(lemma, pos)) {
                 if let Some(sense) = acc.entries[idx].2.sense.iter_mut().find(|s| s.id == pending.apply_to) {
-                    sense.add_rel(pending.rel, SenseOrSynsetId::Sense(pending.target));
+                    sense.add_rel(pending.rel.clone(), SenseOrSynsetId::Sense(pending.target.clone()));
+                    sense.set_rel_confidence(&pending.rel, pending.target.as_str(), pending.confidence);
                 }
             }
         }
@@ -196,6 +201,20 @@ fn require_attr(e: &BytesStart, name: &str, elem: &str) -> Result<String> {
     attr(e, name)?.ok_or_else(|| XmlImportError::Malformed(format!("<{elem}> missing required @{name}")))
 }
 
+/// `@confidenceScore`, if present. A value that isn't a number is a malformed document rather
+/// than something to silently drop.
+fn confidence_attr(e: &BytesStart) -> Result<Option<f64>> {
+    match attr(e, "confidenceScore")? {
+        Some(s) => s.trim().parse::<f64>().map(Some).map_err(|_| {
+            XmlImportError::Malformed(format!(
+                "<{}> has a non-numeric @confidenceScore {s:?}",
+                String::from_utf8_lossy(e.name().as_ref())
+            ))
+        }),
+        None => Ok(None),
+    }
+}
+
 fn parse_lexicon_metadata(e: &BytesStart) -> Result<LexiconMetadata> {
     Ok(LexiconMetadata {
         id_prefix: require_attr(e, "id", "Lexicon")?,
@@ -205,6 +224,7 @@ fn parse_lexicon_metadata(e: &BytesStart) -> Result<LexiconMetadata> {
         license: attr(e, "license")?.unwrap_or_default(),
         version: attr(e, "version")?.unwrap_or_default(),
         url: attr(e, "url")?.filter(|s| !s.is_empty()),
+        confidence: confidence_attr(e)?,
     })
 }
 
@@ -257,6 +277,7 @@ fn parse_lexical_entry<R: Read>(
     buf: &mut Vec<u8>,
     prefix: &str,
     entry_xml_id: String,
+    confidence: Option<f64>,
     acc: &mut Accumulator,
 ) -> Result<()> {
     let mut lemma: Option<String> = None;
@@ -321,6 +342,7 @@ fn parse_lexical_entry<R: Read>(
         sense: senses,
         form: forms,
         pronunciation: pronunciations,
+        confidence,
     };
     acc.entry_index.insert((lemma.clone(), poskey.clone()), acc.entries.len());
     acc.entries.push((lemma, poskey, entry));
@@ -363,6 +385,7 @@ fn build_sense(e: &BytesStart, prefix: &str) -> Result<Sense> {
         sense.subcat = subcat.split_whitespace().map(str::to_string).collect();
     }
     sense.adjposition = attr(e, "adjposition")?;
+    sense.confidence = confidence_attr(e)?;
     Ok(sense)
 }
 
@@ -387,13 +410,15 @@ fn parse_sense_relations<R: Read>(
                     continue;
                 };
                 let target_raw = ids::unmap_sense_key(&target_attr, prefix);
+                let confidence = confidence_attr(&e)?;
                 let allows_synset_target = rel.allows_synset_target();
                 let (canonical_direction, canonical_rel) = rel.to_canonical();
                 if canonical_direction {
                     if allows_synset_target {
-                        add_ambiguous_sense_rel(sense, canonical_rel, target_raw);
+                        add_ambiguous_sense_rel(sense, canonical_rel, target_raw, confidence);
                     } else {
-                        sense.add_rel(canonical_rel, SenseOrSynsetId::Sense(SenseId::new(target_raw)));
+                        sense.add_rel(canonical_rel.clone(), SenseOrSynsetId::Sense(SenseId::new(target_raw.clone())));
+                        sense.set_rel_confidence(&canonical_rel, &target_raw, confidence);
                     }
                 } else {
                     // The written relation's target becomes the canonical relation's source -
@@ -402,6 +427,7 @@ fn parse_sense_relations<R: Read>(
                         apply_to: SenseId::new(target_raw),
                         rel: canonical_rel,
                         target: own_sense_id.clone(),
+                        confidence,
                     });
                 }
             }
@@ -416,19 +442,21 @@ fn parse_sense_relations<R: Read>(
 /// synset - store as `Unresolved` exactly like a YAML-sourced sense does, so
 /// `finalize_bulk_load`'s existing resolution pass classifies it against the fully-loaded
 /// lexicon.
-fn add_ambiguous_sense_rel(sense: &mut Sense, rel: SenseRelType, target_raw: String) {
+fn add_ambiguous_sense_rel(sense: &mut Sense, rel: SenseRelType, target_raw: String, confidence: Option<f64>) {
     let target = UnresolvedSenseOrSynsetId::Unresolved(target_raw);
     match rel {
-        SenseRelType::DomainTopic => push_unique(&mut sense.domain_topic, target),
-        SenseRelType::DomainRegion => push_unique(&mut sense.domain_region, target),
-        SenseRelType::Exemplifies => push_unique(&mut sense.exemplifies, target),
-        _ => push_unique(&mut sense.other, target),
+        SenseRelType::DomainTopic => push_unique(&mut sense.domain_topic, target, confidence),
+        SenseRelType::DomainRegion => push_unique(&mut sense.domain_region, target, confidence),
+        SenseRelType::Exemplifies => push_unique(&mut sense.exemplifies, target, confidence),
+        _ => push_unique(&mut sense.other, target, confidence),
     }
 }
 
-fn push_unique<T: PartialEq>(v: &mut Vec<T>, item: T) {
-    if !v.contains(&item) {
-        v.push(item);
+fn push_unique<T: PartialEq + AsRef<str>>(v: &mut ScoredVec<T>, item: T, confidence: Option<f64>) {
+    if v.contains(&item) {
+        v.set_confidence(item.as_ref(), confidence);
+    } else {
+        v.push_scored(item, confidence);
     }
 }
 
@@ -473,6 +501,7 @@ fn build_synset(
         }
     }
     synset.source = attr(e, "dc:source")?;
+    synset.confidence = confidence_attr(e)?;
     Ok((lexname, id, synset))
 }
 
@@ -489,13 +518,17 @@ fn parse_synset_children<R: Read>(
             Event::End(e) if e.name().as_ref() == b"Synset" => break,
             Event::Eof => return Err(XmlImportError::Malformed("unexpected EOF inside <Synset>".to_string())),
             Event::Start(e) if e.name().as_ref() == b"Definition" => {
+                let confidence = confidence_attr(&e)?;
                 let text = read_text_until_end(xml, buf, b"Definition")?;
-                synset.definition.push(text);
+                synset.definition.push_scored(text, confidence);
             }
             Event::Start(e) if e.name().as_ref() == b"Example" => {
                 let source = attr(&e, "dc:source")?;
+                let confidence = confidence_attr(&e)?;
                 let text = read_text_until_end(xml, buf, b"Example")?;
-                synset.example.push(Example::new(text, source));
+                let mut example = Example::new(text, source);
+                example.confidence = confidence;
+                synset.example.push(example);
             }
             Event::Empty(e) if e.name().as_ref() == b"SynsetRelation" => {
                 let rel_type_str = require_attr(&e, "relType", "SynsetRelation")?;
@@ -506,14 +539,16 @@ fn parse_synset_children<R: Read>(
                     continue;
                 };
                 let target_id = SynsetId::new_owned(ids::strip_prefix_id(prefix, &target_attr));
+                let confidence = confidence_attr(&e)?;
                 let (canonical_direction, canonical_rel) = rel.to_yaml();
                 if canonical_direction {
-                    synset.insert_rel(&canonical_rel, &target_id);
+                    synset.insert_rel_scored(&canonical_rel, &target_id, confidence);
                 } else {
                     acc.pending_synset_rels.push(PendingSynsetRel {
                         apply_to: target_id,
                         rel: canonical_rel,
                         target: own_id.clone(),
+                        confidence,
                     });
                 }
             }
@@ -771,6 +806,7 @@ mod tests {
         wn.insert_entry("animal".to_string(), PosKey::new("n"), animal_entry).unwrap();
 
         let metadata = Meta {
+            confidence: None,
             id_prefix: "test".to_string(),
             label: "Test".to_string(),
             language: "en".to_string(),
@@ -799,6 +835,137 @@ mod tests {
         // after the round trip.
         let cat_entry = entry_for(&reimported, "cat", &PosKey::new("n"));
         assert!(cat_entry.sense[0].antonym.is_empty());
+    }
+
+    /// A lexicon with a confidence on every element type that carries one, for the round-trip
+    /// tests below.
+    fn confidence_lexicon() -> LexiconHashMapBackend {
+        use crate::wordnet::{Entry, Example, PartOfSpeech, Sense};
+
+        let mut wn = LexiconHashMapBackend::new();
+        let mut dog = Synset::new(PartOfSpeech::n);
+        dog.confidence = Some(0.7);
+        dog.definition.push_scored("a domestic canine".to_string(), Some(0.6));
+        let mut example = Example::new("the dog barked".to_string(), Some("src".to_string()));
+        example.confidence = Some(0.5);
+        dog.example.push(example);
+        dog.members.push("dog".to_string());
+        dog.hypernym.push_scored(SynsetId::new("00001741-n"), Some(0.4));
+        wn.insert_synset("noun.animal".to_string(), SynsetId::new("00001740-n"), dog).unwrap();
+        let mut animal = Synset::new(PartOfSpeech::n);
+        animal.definition.push("a living creature".to_string());
+        animal.members.push("animal".to_string());
+        wn.insert_synset("noun.animal".to_string(), SynsetId::new("00001741-n"), animal).unwrap();
+        let mut cat_ss = Synset::new(PartOfSpeech::n);
+        cat_ss.definition.push("a domestic feline".to_string());
+        cat_ss.members.push("cat".to_string());
+        wn.insert_synset("noun.animal".to_string(), SynsetId::new("00001742-n"), cat_ss).unwrap();
+
+        let mut dog_entry = Entry::new();
+        dog_entry.confidence = Some(0.9);
+        let mut dog_sense = Sense::new(SenseId::new("dog%1:05:00::"), SynsetId::new("00001740-n"));
+        dog_sense.confidence = Some(0.8);
+        dog_sense.antonym.push_scored(SenseId::new("cat%1:05:00::"), Some(0.3));
+        dog_entry.sense.push(dog_sense);
+        wn.insert_entry("dog".to_string(), PosKey::new("n"), dog_entry).unwrap();
+        let mut cat_entry = Entry::new();
+        cat_entry.sense.push(Sense::new(SenseId::new("cat%1:05:00::"), SynsetId::new("00001742-n")));
+        wn.insert_entry("cat".to_string(), PosKey::new("n"), cat_entry).unwrap();
+        let mut animal_entry = Entry::new();
+        animal_entry.sense.push(Sense::new(SenseId::new("animal%1:03:00::"), SynsetId::new("00001741-n")));
+        wn.insert_entry("animal".to_string(), PosKey::new("n"), animal_entry).unwrap();
+        crate::wordnet::lexicon::finalize_bulk_load(&mut wn).unwrap();
+        wn
+    }
+
+    fn assert_confidences<L: Lexicon>(wn: &L) {
+        let dog_ss = wn.synset_by_id(&SynsetId::new("00001740-n")).unwrap().unwrap();
+        assert_eq!(dog_ss.confidence, Some(0.7));
+        assert_eq!(dog_ss.definition.confidence("a domestic canine"), Some(0.6));
+        assert_eq!(dog_ss.example[0].confidence, Some(0.5));
+        assert_eq!(dog_ss.example[0].source.as_deref(), Some("src"));
+        assert_eq!(dog_ss.hypernym.confidence("00001741-n"), Some(0.4));
+        let dog_entry = entry_for(wn, "dog", &PosKey::new("n"));
+        assert_eq!(dog_entry.confidence, Some(0.9));
+        assert_eq!(dog_entry.sense[0].confidence, Some(0.8));
+        assert_eq!(dog_entry.sense[0].antonym.confidence("cat%1:05:00::"), Some(0.3));
+        // Unscored things stay unscored.
+        let animal_ss = wn.synset_by_id(&SynsetId::new("00001741-n")).unwrap().unwrap();
+        assert_eq!(animal_ss.confidence, None);
+        assert_eq!(animal_ss.definition.confidence("a living creature"), None);
+        assert_eq!(entry_for(wn, "cat", &PosKey::new("n")).confidence, None);
+    }
+
+    #[test]
+    fn test_confidence_round_trips_through_xml() {
+        use crate::wordnet::LexiconMetadata as Meta;
+
+        let wn = confidence_lexicon();
+        assert_confidences(&wn);
+        let metadata = Meta {
+            id_prefix: "test".to_string(),
+            label: "Test".to_string(),
+            language: "en".to_string(),
+            email: None,
+            license: "https://creativecommons.org/licenses/by/4.0".to_string(),
+            version: "1".to_string(),
+            url: None,
+            confidence: Some(0.95),
+        };
+        let xml = String::from_utf8(write_lexicon_xml(&wn, &metadata).unwrap()).unwrap();
+        for attr in ["0.95", "0.9", "0.8", "0.7", "0.6", "0.5", "0.4", "0.3"] {
+            assert!(xml.contains(&format!(r#"confidenceScore="{attr}""#)), "{attr} missing from:\n{xml}");
+        }
+        // The exported inverse (hyponym) carries the score of the hypernym it's derived from.
+        assert!(xml.contains(r#"relType="hyponym" target="test-00001740-n" confidenceScore="0.4""#), "{xml}");
+
+        let (reimported, reimported_metadata) =
+            read_lexicon_xml(LexiconHashMapBackend::new(), xml.as_bytes()).unwrap();
+        assert_eq!(reimported_metadata.confidence, Some(0.95));
+        assert_confidences(&reimported);
+    }
+
+    #[test]
+    fn test_confidence_round_trips_through_yaml() {
+        let wn = confidence_lexicon();
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_confidence_yaml_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut bar = crate::progress::NullProgress;
+        wn.save(&dir, &mut bar).unwrap();
+        let synsets_yaml = std::fs::read_to_string(dir.join("noun.animal.yaml")).unwrap();
+        assert!(synsets_yaml.contains("  confidence: 0.7\n  definition:\n  - confidence: 0.6\n    text: a domestic canine"),
+            "{synsets_yaml}");
+        assert!(synsets_yaml.contains("  hypernym:\n  - confidence: 0.4\n    target: 00001741-n"), "{synsets_yaml}");
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        assert_confidences(&reloaded);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_confidence_round_trips_through_redb() {
+        use crate::wordnet::ReDBLexicon;
+
+        let wn = confidence_lexicon();
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_confidence_redb_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut bar = crate::progress::NullProgress;
+        wn.save(&dir, &mut bar).unwrap();
+        let db_path = dir.join("test.redb");
+        {
+            let db = ReDBLexicon::create(&db_path, 1024 * 1024).unwrap();
+            let db = db.load(&dir, &mut bar).unwrap();
+            assert_confidences(&db);
+        }
+        let reopened = ReDBLexicon::open(&db_path, 1024 * 1024).unwrap();
+        assert_confidences(&reopened);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Imports the real, locally-decompressed OEWN release XML and sanity-checks the result -
@@ -939,6 +1106,7 @@ mod tests {
         let ground_truth = LexiconHashMapBackend::new().load(yaml_path, &mut NullProgress).unwrap();
 
         let metadata = LexiconMetadata {
+            confidence: None,
             id_prefix: "oewn".to_string(),
             label: "Open English Wordnet".to_string(),
             language: "en".to_string(),

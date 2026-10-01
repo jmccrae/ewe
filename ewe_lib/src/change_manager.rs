@@ -94,6 +94,28 @@ pub fn update_rels<L : Lexicon>(wn : &mut L,
     source : &SynsetId,
     relations : Vec<RelationUpdate>,
     change_list : &mut ChangeList) -> Result<()> {
+    // Relations that survive the rewrite below keep their confidence: snapshot every score
+    // first, keyed by the (source, rel, target) triple as the caller will re-add it.
+    let mut synset_scores = Vec::new();
+    for (rel, target_id) in wn.links_from(source)? {
+        if let Some(c) = wn.synset_rel_confidence(source, &rel, &target_id)? {
+            synset_scores.push((source.clone(), rel, target_id, c));
+        }
+    }
+    for (rel, source_id) in wn.links_to(source)? {
+        if let Some(c) = wn.synset_rel_confidence(&source_id, &rel, source)? {
+            synset_scores.push((source_id, rel, source.clone(), c));
+        }
+    }
+    let mut sense_scores = Vec::new();
+    for (source_id, rel, target_id) in wn.all_sense_links(source)? {
+        if let Ok(target_id) = target_id.resolve(wn) {
+            if let Some(c) = wn.sense_rel_confidence(&source_id, &rel, &target_id)? {
+                sense_scores.push((source_id, rel, target_id, c));
+            }
+        }
+    }
+
     // First remove all links referring to and from this synset
     for (_, target_id) in wn.links_from(source)? {
         delete_rel(wn, source, &target_id, change_list);
@@ -118,6 +140,13 @@ pub fn update_rels<L : Lexicon>(wn : &mut L,
                 insert_sense_relation(wn, source_id, rel_type, target_id, change_list)?;
             }
         }
+    }
+    // Restore scores - a no-op (returns false) for any relation the caller didn't re-add.
+    for (source_id, rel, target_id, c) in synset_scores {
+        wn.set_synset_rel_confidence(&source_id, &rel, &target_id, Some(c))?;
+    }
+    for (source_id, rel, target_id, c) in sense_scores {
+        wn.set_sense_rel_confidence(&source_id, &rel, &target_id, Some(c))?;
     }
     Ok(())
 }
@@ -344,25 +373,34 @@ pub fn delete_synset<L : Lexicon>(wn : &mut L,
             match wn.synset_by_id(synset_id)? {
                 Some(ss) => {
                     let mut hyp_targets = Vec::new();
-                    for (rel, target) in ss.links_from() {
+                    // A moved relation keeps its confidence.
+                    let links_from : Vec<_> = ss.links_from().into_iter()
+                        .map(|(rel, target)| {
+                            let confidence = ss.rel_confidence(&rel, &target);
+                            (rel, target, confidence)
+                        }).collect();
+                    for (rel, target, confidence) in links_from {
                         delete_rel(wn, synset_id, &target, change_list);
                         if rel == SynsetRelType::Hypernym {
                             hyp_targets.push(target.clone());
                         } else {
-                            wn.add_rel(supersede_id, rel, &target).unwrap_or_else(|_| {
+                            wn.add_rel(supersede_id, rel.clone(), &target).unwrap_or_else(|_| {
                                 eprintln!("Adding relation to non-existant synset");
                             });
+                            wn.set_synset_rel_confidence(supersede_id, &rel, &target, confidence)?;
                         }
                     }
                     let mut hyp_sources = Vec::new();
                     for (rel, source) in wn.links_to(synset_id)? {
+                        let confidence = wn.synset_rel_confidence(&source, &rel, synset_id)?;
                         delete_rel(wn, &source, synset_id, change_list);
                         if rel == SynsetRelType::Hypernym {
                             hyp_sources.push(source.clone());
                         } else {
-                            wn.add_rel(&source, rel, supersede_id).unwrap_or_else(|_| {
+                            wn.add_rel(&source, rel.clone(), supersede_id).unwrap_or_else(|_| {
                                 eprintln!("Adding relation to non-existant synset");
                             });
+                            wn.set_synset_rel_confidence(&source, &rel, supersede_id, confidence)?;
                         }
                     }
                     for source in hyp_sources {
@@ -522,9 +560,14 @@ pub fn update_def<L : Lexicon>(wn : &mut L,
               add : bool) {
     wn.update_synset(synset_id, |synset| {
         if add {
-            synset.definition.push(defn.to_string())
+            synset.definition.push_scored(defn.to_string(), None)
         } else {
-            synset.definition = vec![defn.to_string()]
+            // Rewording keeps the (first) definition's confidence; `SetConfidence` changes that.
+            let confidence = synset.definition.first()
+                .and_then(|d| synset.definition.confidence(d));
+            let mut definition = ScoredVec::new();
+            definition.push_scored(defn.to_string(), confidence);
+            synset.definition = definition
         }
     }).unwrap_or_else(|_| {
         eprintln!("Changing definition of non-existant synset {}", synset_id.as_str());
@@ -568,7 +611,10 @@ pub fn update_ex<L : Lexicon>(wn : &mut L,
     wn.update_synset(synset_id, |ss| {
         match ss.example.get_mut(idx) {
             Some(ex) => {
+                // Rewording an example keeps its confidence; `SetConfidence` changes that.
+                let confidence = ex.confidence;
                 *ex = Example::new(example, source);
+                ex.confidence = confidence;
                 change_list.mark();
             }
             None => {

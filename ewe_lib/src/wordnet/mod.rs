@@ -13,6 +13,9 @@ pub use sense::{Sense,SenseId,SenseOrSynsetId,UnresolvedSenseOrSynsetId};
 pub mod synset;
 pub use synset::{Synset,Synsets,SynsetId, ILIID,BTSynsets};
 
+pub mod scored;
+pub use scored::{ScoredItem, ScoredVec};
+
 pub mod example;
 pub use example::Example;
 
@@ -65,6 +68,7 @@ mod tests {
 ";
         assert_eq!(serde_yaml::from_str::<Entry>(&entry_str).unwrap(),
             Entry {
+                confidence: None,
                 sense: vec![Sense::new(
                     SenseId::new("foo%1:01:00::".to_string()),
                     SynsetId::new("00001740-n")
@@ -83,6 +87,7 @@ mod tests {
         let mut gen_str : Vec<u8> = Vec::new();
 
         Entry {
+            confidence: None,
             sense: vec![Sense::new(
                 SenseId::new("foo%1:01:00::".to_string()),
                 SynsetId::new("00001740-n")
@@ -115,6 +120,7 @@ mod tests {
         sense.add_rel(SenseRelType::DomainTopic, SenseOrSynsetId::Synset(SynsetId::new("00001740-n")));
 
         Entry {
+            confidence: None,
             sense: vec![sense],
             form: Vec::new(),
             pronunciation: Vec::new()
@@ -241,6 +247,7 @@ partOfSpeech: n";
         sense.derivation.push(SenseId::new("foo%1:01:00::".to_owned()));
 
         Entry {
+            confidence: None,
             sense: vec![sense],
             form: Vec::new(),
             pronunciation: Vec::new()

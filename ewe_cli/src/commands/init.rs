@@ -33,6 +33,7 @@ pub(crate) fn run(path: &Path) {
         version: input_with_default("Version", "1"),
         email: input_optional("Contact email"),
         url: input_optional("Source/homepage URL"),
+        confidence: None,
     };
 
     write_project_structure(&LexiconHashMapBackend::new(), &metadata, path);

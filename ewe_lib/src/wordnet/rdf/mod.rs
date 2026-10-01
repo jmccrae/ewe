@@ -27,7 +27,7 @@ use super::xml::LexiconMetadata;
 /// <https://globalwordnet.github.io/schemas/#rdf> for the exact properties each maps to)
 /// rather than duplicating those fields - `id_prefix` is carried but unused here, since RDF
 /// URIs are built from bare lemma/synset ids, not a `Lexicon/@id` prefix.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RdfExportOptions {
     pub format: RdfFormat,
     /// Base URI resources (`{site}synset/...`, `{site}lemma/...`) are built under, and the

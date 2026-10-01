@@ -507,350 +507,350 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         if !synset.hypernym.is_empty() {
                                             synset_rels {
                                                 name: "Hypernyms",
-                                                rels: synset.hypernym.clone(),
+                                                rels: synset.hypernym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.hyponym.is_empty() {
                                             synset_rels {
                                                 name: "Hyponyms",
-                                                rels: synset.hyponym.clone(),
+                                                rels: synset.hyponym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.instance_hypernym.is_empty() {
                                              synset_rels {
                                                 name: "Instance Of",
-                                                rels: synset.instance_hypernym.clone(),
+                                                rels: synset.instance_hypernym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.instance_hyponym.is_empty() {
                                              synset_rels {
                                                 name: "Has Instance",
-                                                rels: synset.instance_hyponym.clone(),
+                                                rels: synset.instance_hyponym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.attribute.is_empty() {
                                              synset_rels {
                                                 name: "Attributes",
-                                                rels: synset.attribute.clone(),
+                                                rels: synset.attribute.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.causes.is_empty() {
                                              synset_rels {
                                                 name: "Causes",
-                                                rels: synset.causes.clone(),
+                                                rels: synset.causes.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.is_caused_by.is_empty() {
                                              synset_rels {
                                                 name: "Is Caused By",
-                                                rels: synset.is_caused_by.clone(),
+                                                rels: synset.is_caused_by.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.domain_region.is_empty() {
                                              synset_rels {
                                                 name: "Used in Region",
-                                                rels: synset.domain_region.clone(),
+                                                rels: synset.domain_region.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.has_domain_region.is_empty() {
                                              synset_rels {
                                                 name: "Used in this Region",
-                                                rels: synset.has_domain_region.clone(),
+                                                rels: synset.has_domain_region.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.domain_topic.is_empty() {
                                              synset_rels {
                                                 name: "Subject",
-                                                rels: synset.domain_topic.clone(),
+                                                rels: synset.domain_topic.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.has_domain_topic.is_empty() {
                                              synset_rels {
                                                 name: "Is a Subject of",
-                                                rels: synset.has_domain_topic.clone(),
+                                                rels: synset.has_domain_topic.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.exemplifies.is_empty() {
                                              synset_rels {
                                                 name: "Is an Example Of",
-                                                rels: synset.exemplifies.clone(),
+                                                rels: synset.exemplifies.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.is_exemplified_by.is_empty() {
                                              synset_rels {
                                                 name: "Has Example",
-                                                rels: synset.is_exemplified_by.clone(),
+                                                rels: synset.is_exemplified_by.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.entails.is_empty() {
                                              synset_rels {
                                                 name: "Entails",
-                                                rels: synset.entails.clone(),
+                                                rels: synset.entails.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.is_entailed_by.is_empty() {
                                              synset_rels {
                                                 name: "Is Entailed By",
-                                                rels: synset.is_entailed_by.clone(),
+                                                rels: synset.is_entailed_by.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.mero_location.is_empty() {
                                              synset_rels {
                                                 name: "Is Located At",
-                                                rels: synset.mero_location.clone(),
+                                                rels: synset.mero_location.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.holo_location.is_empty() {
                                              synset_rels {
                                                 name: "Location Of",
-                                                rels: synset.holo_location.clone(),
+                                                rels: synset.holo_location.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.holo_member.is_empty() {
                                              synset_rels {
                                                 name: "Is Member Of",
-                                                rels: synset.holo_member.clone(),
+                                                rels: synset.holo_member.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.mero_member.is_empty() {
                                              synset_rels {
                                                 name: "Has Member",
-                                                rels: synset.mero_member.clone(),
+                                                rels: synset.mero_member.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.holo_part.is_empty() {
                                              synset_rels {
                                                 name: "Is Part Of",
-                                                rels: synset.holo_part.clone(),
+                                                rels: synset.holo_part.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.mero_part.is_empty() {
                                              synset_rels {
                                                 name: "Has Part",
-                                                rels: synset.mero_part.clone(),
+                                                rels: synset.mero_part.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.holo_substance.is_empty() {
                                              synset_rels {
                                                 name: "Is Made Of",
-                                                rels: synset.holo_substance.clone(),
+                                                rels: synset.holo_substance.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.mero_substance.is_empty() {
                                              synset_rels {
                                                 name: "Makes",
-                                                rels: synset.mero_substance.clone(),
+                                                rels: synset.mero_substance.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.meronym.is_empty() {
                                              synset_rels {
                                                 name: "Meronyms",
-                                                rels: synset.meronym.clone(),
+                                                rels: synset.meronym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.holonym.is_empty() {
                                              synset_rels {
                                                 name: "Holonyms",
-                                                rels: synset.holonym.clone(),
+                                                rels: synset.holonym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.similar.is_empty() {
                                              synset_rels {
                                                 name: "Similar To",
-                                                rels: synset.similar.clone(),
+                                                rels: synset.similar.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.feminine.is_empty() {
                                              synset_rels {
                                                 name: "Feminine Form",
-                                                rels: synset.feminine.clone(),
+                                                rels: synset.feminine.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.masculine.is_empty() {
                                              synset_rels {
                                                 name: "Masculine Form",
-                                                rels: synset.masculine.clone(),
+                                                rels: synset.masculine.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.also.is_empty() {
                                             synset_rels {
                                                 name: "See Also",
-                                                rels: synset.also.clone(),
+                                                rels: synset.also.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.other.is_empty() {
                                              synset_rels {
                                                 name: "Other Related Synsets",
-                                                rels: synset.other.clone(),
+                                                rels: synset.other.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.antonym.is_empty() {
                                              sense_rels {
                                                 name: "Antonyms",
-                                                rels: synset.antonym.clone(),
+                                                rels: synset.antonym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.participle.is_empty() {
                                              sense_rels {
                                                 name: "Participles",
-                                                rels: synset.participle.clone(),
+                                                rels: synset.participle.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.pertainym.is_empty() {
                                              sense_rels {
                                                 name: "Of or Pertaining To",
-                                                rels: synset.pertainym.clone(),
+                                                rels: synset.pertainym.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.derivation.is_empty() {
                                              sense_rels {
                                                 name: "Derived From",
-                                                rels: synset.derivation.clone(),
+                                                rels: synset.derivation.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.exemplifies_sense.is_empty() {
                                              sense_rels {
                                                 name: "Is an Example Of",
-                                                rels: synset.exemplifies_sense.clone(),
+                                                rels: synset.exemplifies_sense.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.is_exemplified_by_sense.is_empty() {
                                              sense_rels {
                                                 name: "Has Example",
-                                                rels: synset.is_exemplified_by_sense.clone(),
+                                                rels: synset.is_exemplified_by_sense.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.agent.is_empty() {
                                              sense_rels {
                                                 name: "Agent",
-                                                rels: synset.agent.clone(),
+                                                rels: synset.agent.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.material.is_empty() {
                                              sense_rels {
                                                 name: "Material",
-                                                rels: synset.material.clone(),
+                                                rels: synset.material.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.event.is_empty() {
                                              sense_rels {
                                                 name: "Event",
-                                                rels: synset.event.clone(),
+                                                rels: synset.event.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.instrument.is_empty() {
                                              sense_rels {
                                                 name: "Instrument",
-                                                rels: synset.instrument.clone(),
+                                                rels: synset.instrument.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.location.is_empty() {
                                              sense_rels {
                                                 name: "Location",
-                                                rels: synset.location.clone(),
+                                                rels: synset.location.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.by_means_of.is_empty() {
                                              sense_rels {
                                                 name: "By Means Of",
-                                                rels: synset.by_means_of.clone(),
+                                                rels: synset.by_means_of.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.undergoer.is_empty() {
                                              sense_rels {
                                                 name: "Undergoer",
-                                                rels: synset.undergoer.clone(),
+                                                rels: synset.undergoer.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.property.is_empty() {
                                              sense_rels {
                                                 name: "Property",
-                                                rels: synset.property.clone(),
+                                                rels: synset.property.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.result.is_empty() {
                                              sense_rels {
                                                 name: "Result",
-                                                rels: synset.result.clone(),
+                                                rels: synset.result.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.state.is_empty() {
                                              sense_rels {
                                                 name: "State",
-                                                rels: synset.state.clone(),
+                                                rels: synset.state.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.uses.is_empty() {
                                              sense_rels {
                                                 name: "Uses",
-                                                rels: synset.uses.clone(),
+                                                rels: synset.uses.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.destination.is_empty() {
                                              sense_rels {
                                                 name: "Destination",
-                                                rels: synset.destination.clone(),
+                                                rels: synset.destination.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.body_part.is_empty() {
                                              sense_rels {
                                                 name: "Body Part",
-                                                rels: synset.body_part.clone(),
+                                                rels: synset.body_part.to_vec(),
                                                 props: props.clone()
                                             }
                                         },
                                         if !synset.vehicle.is_empty() {
                                              sense_rels {
                                                 name: "Vehicle",
-                                                rels: synset.vehicle.clone(),
+                                                rels: synset.vehicle.to_vec(),
                                                 props: props.clone()
                                             }
                                         },

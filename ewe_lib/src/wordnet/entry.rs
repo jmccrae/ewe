@@ -4,7 +4,7 @@ use std::io::Write;
 use crate::rels::SenseRelType;
 use crate::wordnet::*;
 use std::borrow::Cow;
-use crate::wordnet::util::escape_yaml_string;
+use crate::wordnet::util::{escape_yaml_string, format_confidence};
 use std::result;
 
 pub trait Entries : Sized {
@@ -296,13 +296,19 @@ pub struct Entry {
     pub form : Vec<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub pronunciation : Vec<Pronunciation>
+    pub pronunciation : Vec<Pronunciation>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence : Option<f64>
 }
 
 impl Entry {
     pub fn new() -> Entry { Entry::default() }
 
     pub(crate) fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
+        if let Some(c) = self.confidence {
+            write!(w, "    confidence: {}\n", format_confidence(c))?;
+        }
         if !self.form.is_empty() {
             write!(w,"    form:")?;
             for f in self.form.iter() {
