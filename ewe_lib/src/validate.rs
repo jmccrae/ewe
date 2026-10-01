@@ -139,6 +139,15 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                }
            }
         }
+        check_confidence(&mut errors, || format!("Entry {} ({})", lemma, poskey.as_str()), entry.confidence);
+        for sense in entry.sense.iter() {
+            check_confidence(&mut errors, || format!("Sense {}", sense.id.as_str()), sense.confidence);
+            for (rel, target) in sense.sense_links_from() {
+                check_confidence(&mut errors,
+                    || format!("Relation {} ={}=> {}", sense.id.as_str(), rel.value(), target.as_str()),
+                    sense.rel_confidence(&rel, target.as_str()));
+            }
+        }
         if entry.sense.is_empty() {
             errors.push(ValidationError::NoSenses {
                 lemma: lemma.clone(),
@@ -150,6 +159,18 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
         let (synset_id, synset) = synset?;
         bar.inc(1);
         let ssid = synset_id.as_str();
+        check_confidence(&mut errors, || format!("Synset {}", ssid), synset.confidence);
+        for (i, (_, c)) in synset.definition.iter_scored().enumerate() {
+            check_confidence(&mut errors, || format!("Definition {} of {}", i + 1, ssid), c);
+        }
+        for (i, example) in synset.example.iter().enumerate() {
+            check_confidence(&mut errors, || format!("Example {} of {}", i + 1, ssid), example.confidence);
+        }
+        for (rel, target) in synset.links_from() {
+            check_confidence(&mut errors,
+                || format!("Relation {} ={}=> {}", ssid, rel.value(), target.as_str()),
+                synset.rel_confidence(&rel, &target));
+        }
         if ssid[(ssid.len() - 1)..ssid.len()] != *synset.part_of_speech.value() {
             errors.push(ValidationError::SynsetIdPos {
                 id: synset_id.clone(),
@@ -551,7 +572,10 @@ pub enum ValidationError {
     DuplicateDefinition { id1: SynsetId, id2: SynsetId },
     DuplicateILI { id1: SynsetId, id2: SynsetId, ili: ILIID },
     InvalidWikidataId { id: SynsetId, qid: String },
-    DuplicateWikidataId { id1: SynsetId, id2: SynsetId, qid: String }
+    DuplicateWikidataId { id1: SynsetId, id2: SynsetId, qid: String },
+    /// A confidence score that isn't a finite number in `[0.0, 1.0]`. `element` describes
+    /// where it is (e.g. "Sense foo%1:01:00::").
+    InvalidConfidence { element: String, value: f64 }
 }
 
 impl fmt::Display for ValidationError {
@@ -656,7 +680,23 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidWikidataId { id, qid } =>
                 write!(f, "{} has an invalid Wikidata id {}", id.as_str(), qid),
             ValidationError::DuplicateWikidataId { id1, id2, qid } =>
-                write!(f, "{} and {} both use Wikidata id {}", id1.as_str(), id2.as_str(), qid)
+                write!(f, "{} and {} both use Wikidata id {}", id1.as_str(), id2.as_str(), qid),
+            ValidationError::InvalidConfidence { element, value } =>
+                write!(f, "{} has confidence {}, which is not between 0.0 and 1.0", element, value)
+        }
+    }
+}
+
+/// Whether `c` is a valid confidence score: a finite number in `[0.0, 1.0]`.
+pub fn is_valid_confidence(c: f64) -> bool {
+    c.is_finite() && (0.0..=1.0).contains(&c)
+}
+
+fn check_confidence(errors: &mut Vec<ValidationError>, element: impl FnOnce() -> String,
+                    confidence: Option<f64>) {
+    if let Some(c) = confidence {
+        if !is_valid_confidence(c) {
+            errors.push(ValidationError::InvalidConfidence { element: element(), value: c });
         }
     }
 }
@@ -754,6 +794,7 @@ pub fn fix<L : Lexicon>(wn : &mut L,
         ValidationError::DuplicateILI { .. } => false,
         ValidationError::InvalidWikidataId { .. } => false,
         ValidationError::DuplicateWikidataId { .. } => false,
+        ValidationError::InvalidConfidence { .. } => false,
     })
 }
 
@@ -864,6 +905,27 @@ mod tests {
         let errors = validate_errors(&wn);
         assert!(errors.iter().any(|e| matches!(e,
             ValidationError::InvalidWikidataId { id, qid } if *id == a && qid == "not-a-qid")));
+    }
+
+    #[test]
+    fn test_invalid_confidence() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000062-n", "confidence synset a", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000063-n", "confidence synset b", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.confidence = Some(1.5); }).unwrap();
+        wn.update_synset(&b, |ss| { ss.confidence = Some(0.5); }).unwrap();
+        change_manager::insert_rel(&mut wn, &a, &SynsetRelType::Hypernym, &b, &mut change_list).unwrap();
+        assert!(wn.set_synset_rel_confidence(&a, &SynsetRelType::Hypernym, &b, Some(f64::NAN)).unwrap());
+
+        let errors = validate_errors(&wn);
+        let invalid : Vec<_> = errors.iter().filter_map(|e| match e {
+            ValidationError::InvalidConfidence { element, .. } => Some(element.clone()),
+            _ => None
+        }).collect();
+        assert_eq!(invalid.len(), 2, "{:?}", invalid);
+        assert!(invalid.contains(&"Synset 00000062-n".to_string()));
+        assert!(invalid.iter().any(|e| e.starts_with("Relation 00000062-n =hypernym=> 00000063-n")));
     }
 
     #[test]

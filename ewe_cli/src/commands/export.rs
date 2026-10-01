@@ -37,6 +37,10 @@ pub(crate) enum ExportFormat {
         /// The `Lexicon/@url` project homepage
         #[arg(long)]
         url: Option<String>,
+        /// The `Lexicon/@confidenceScore` (0.0-1.0). Omitted from the document if not given,
+        /// which WN-LMF treats as 1.0
+        #[arg(long, value_parser = parse_confidence)]
+        confidence: Option<f64>,
     },
     /// Export as the classic WNDB (Princeton WordNet database) file set
     /// (data.*/index.*/index.sense/*.exc)
@@ -128,6 +132,15 @@ fn wordnet_root(wordnet: &Option<PathBuf>) -> PathBuf {
 /// Auto-detects `WNDB_License.txt` at the WordNet's root (issue #41) - the layout
 /// https://github.com/globalwordnet/english-wordnet ships, and the real OEWN release's source of
 /// this file. Only consulted when `--license-file` isn't given explicitly.
+fn parse_confidence(s: &str) -> Result<f64, String> {
+    let c: f64 = s.parse().map_err(|_| format!("{s:?} is not a number"))?;
+    if ewe_lib::validate::is_valid_confidence(c) {
+        Ok(c)
+    } else {
+        Err(format!("{c} is not between 0.0 and 1.0"))
+    }
+}
+
 fn default_license_file(wordnet: &Option<PathBuf>) -> Option<PathBuf> {
     let candidate = wordnet_root(wordnet).join("WNDB_License.txt");
     candidate.is_file().then_some(candidate)

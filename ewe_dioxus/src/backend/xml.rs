@@ -58,6 +58,8 @@ fn metadata(settings: &EweSettings) -> LexiconMetadata {
         license: "https://creativecommons.org/licenses/by/4.0".to_string(),
         version: "2024".to_string(),
         url: settings.source_url.clone(),
+        // Not configurable either; absent means the WN-LMF default of 1.0.
+        confidence: None,
     }
 }
 

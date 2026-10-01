@@ -49,6 +49,16 @@ const LAST_SAVED_CHANGELOG_ID_KEY: &'static str = "last_saved_changelog_id";
 /// so `ili_by_prefix` can do a direct sorted-range scan instead of building
 /// an in-memory index by scanning (and fully deserializing) every synset.
 const ILI_TO_SYNSET_ID: TableDefinition<String, String> = TableDefinition::new("ili_to_synset_id");
+/// SCHEMA_VERSION_KEY -> the `SCHEMA_VERSION` the database was created with.
+const SCHEMA: TableDefinition<&'static str, u32> = TableDefinition::new("schema");
+const SCHEMA_VERSION_KEY: &'static str = "version";
+/// The on-disk layout version. The speedy encoding of `Entry`/`Sense`/`Synset`/... has no
+/// notion of optional or added fields, so a database written before a change to any
+/// speedy-encoded struct can't be decoded after it: **bump this whenever such a struct
+/// changes**, so `open` reports a clear "rebuild" error rather than garbled data.
+///
+/// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48).
+pub const SCHEMA_VERSION: u32 = 1;
 
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
@@ -66,9 +76,25 @@ impl ReDBLexicon {
         let db = Arc::new(
             Database::builder()
                 .set_cache_size(cache_size_bytes)
-                .open(path)?,
+                .open(path.as_ref())?,
         );
         let txn_manager = Arc::new(Mutex::new(TransactionManager::new(db.clone())));
+        {
+            let mut manager = txn_manager.lock().unwrap();
+            let txn = manager.begin_read()?;
+            let found = match txn.open_table(SCHEMA) {
+                Ok(table) => table.get(SCHEMA_VERSION_KEY)?.map(|v| v.value()).unwrap_or(0),
+                Err(TableError::TableDoesNotExist(_)) => 0,
+                Err(e) => return Err(e.into()),
+            };
+            if found != SCHEMA_VERSION {
+                return Err(LexiconError::SchemaVersionMismatch {
+                    path: path.as_ref().display().to_string(),
+                    found,
+                    expected: SCHEMA_VERSION,
+                });
+            }
+        }
         // Intialize entries as '0' and 'a'..'z'
         //
         let mut entries = HashMap::new();
@@ -148,6 +174,7 @@ impl ReDBLexicon {
             txn.open_table(FRAMES)?;
             txn.open_table(CHANGE_LOG)?;
             txn.open_table(SAVE_STATE)?;
+            txn.open_table(SCHEMA)?.insert(SCHEMA_VERSION_KEY, SCHEMA_VERSION)?;
         }
 
 
@@ -1205,6 +1232,38 @@ mod tests {
             .map(|(pos, _)| pos.as_str().to_string())
             .collect();
         assert_eq!(pos_order, vec!["a".to_string(), "n".to_string(), "s".to_string()]);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_open_rejects_other_schema_versions() {
+        let dir = std::env::temp_dir().join(format!(
+            "ewe_test_redb_schema_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.redb");
+
+        drop(ReDBLexicon::create(&db_path, 1024 * 1024).unwrap());
+        drop(ReDBLexicon::open(&db_path, 1024 * 1024).unwrap());
+
+        // Simulate a database from before versioning existed: no `schema` table at all.
+        {
+            let db = Database::create(&db_path).unwrap();
+            let txn = db.begin_write().unwrap();
+            txn.delete_table(SCHEMA).unwrap();
+            txn.commit().unwrap();
+        }
+        match ReDBLexicon::open(&db_path, 1024 * 1024) {
+            Err(LexiconError::SchemaVersionMismatch { found: 0, expected: SCHEMA_VERSION, .. }) => {}
+            Err(e) => panic!("unexpected error {e}"),
+            Ok(_) => panic!("opened a database with no schema version"),
+        }
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

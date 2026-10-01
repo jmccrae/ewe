@@ -846,6 +846,106 @@ pub trait Lexicon: Sized {
         Ok(())
     }
 
+    /// Apply `f` to the entry for `lemma`/`pos`.
+    fn update_entry<X>(&mut self, lemma: &str, pos: &PosKey, f: impl FnOnce(&mut Entry) -> X) -> Result<X> {
+        self.entries_update(entry_key(lemma), |e| e.update_entry(lemma, pos, f))?
+    }
+
+    /// Apply `f` to the sense with this id, wherever it is stored. Returns `None` (and doesn't
+    /// call `f`) if there is no such sense.
+    fn update_sense<X>(&mut self, sense_id: &SenseId, f: impl FnOnce(&mut Sense) -> X) -> Result<Option<X>> {
+        let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id)? else {
+            return Ok(None);
+        };
+        self.entries_update(entry_key(&lemma), |e| {
+            e.update_entry(&lemma, &pos, |entry| {
+                entry.sense.iter_mut().find(|s| s.id == *sense_id).map(f)
+            })
+        })?
+    }
+
+    /// The confidence of the synset relation `source --rel--> target`, wherever it is actually
+    /// stored (an inverse type like `Hyponym` is stored as the forward relation on `target`).
+    fn synset_rel_confidence(&self, source: &SynsetId, rel: &SynsetRelType, target: &SynsetId) -> Result<Option<f64>> {
+        let (s2t, yaml_rel) = rel.clone().to_yaml();
+        let (on, other) = if s2t { (source, target) } else { (target, source) };
+        Ok(self
+            .synset_by_id(on)?
+            .and_then(|ss| ss.rel_confidence(&yaml_rel.to_synset_rel(), other)))
+    }
+
+    /// Set (or clear) the confidence of the synset relation `source --rel--> target`. Returns
+    /// false if no such relation is stored.
+    fn set_synset_rel_confidence(
+        &mut self,
+        source: &SynsetId,
+        rel: &SynsetRelType,
+        target: &SynsetId,
+        confidence: Option<f64>,
+    ) -> Result<bool> {
+        let (s2t, yaml_rel) = rel.clone().to_yaml();
+        let (on, other) = if s2t { (source, target) } else { (target, source) };
+        if self.synset_by_id(on)?.is_none() {
+            return Ok(false);
+        }
+        let mut found = false;
+        self.update_synset(on, |ss| {
+            found = ss.set_rel_confidence(&yaml_rel.to_synset_rel(), other, confidence);
+        })?;
+        Ok(found)
+    }
+
+    /// The sense a sense relation is actually stored on, the relation type it's stored as,
+    /// and the stored target - see `add_sense_rel`. `None` for an unrepresentable combination.
+    #[doc(hidden)]
+    fn canonical_sense_rel(
+        source: &SenseId,
+        rel: &SenseRelType,
+        target: &SenseOrSynsetId,
+    ) -> Option<(SenseId, SenseRelType, String)> {
+        let (s2t, rel) = rel.clone().to_canonical();
+        if s2t {
+            Some((source.clone(), rel, target.as_str().to_string()))
+        } else {
+            match target {
+                SenseOrSynsetId::Sense(t) => Some((t.clone(), rel, source.as_str().to_string())),
+                SenseOrSynsetId::Synset(_) => None,
+            }
+        }
+    }
+
+    /// The confidence of the sense relation `source --rel--> target`, wherever it is stored.
+    fn sense_rel_confidence(
+        &self,
+        source: &SenseId,
+        rel: &SenseRelType,
+        target: &SenseOrSynsetId,
+    ) -> Result<Option<f64>> {
+        let Some((on, rel, other)) = Self::canonical_sense_rel(source, rel, target) else {
+            return Ok(None);
+        };
+        Ok(self
+            .get_sense_by_id(&on)?
+            .and_then(|(_, _, sense)| sense.rel_confidence(&rel, &other)))
+    }
+
+    /// Set (or clear) the confidence of the sense relation `source --rel--> target`. Returns
+    /// false if no such relation is stored.
+    fn set_sense_rel_confidence(
+        &mut self,
+        source: &SenseId,
+        rel: &SenseRelType,
+        target: &SenseOrSynsetId,
+        confidence: Option<f64>,
+    ) -> Result<bool> {
+        let Some((on, rel, other)) = Self::canonical_sense_rel(source, rel, target) else {
+            return Ok(false);
+        };
+        Ok(self
+            .update_sense(&on, |sense| sense.set_rel_confidence(&rel, &other, confidence))?
+            .unwrap_or(false))
+    }
+
     /// Get the list of variant forms of an entry
     fn get_forms(&self, lemma: &str, pos: &PosKey) -> Result<Vec<String>> {
         Ok(match self.entries_get(entry_key(&lemma))? {
@@ -964,8 +1064,10 @@ pub trait Lexicon: Sized {
             Some(links_to) => {
                 let old_key_target = SenseOrSynsetId::Sense(old_key.clone());
                 for (rel, source) in links_to.into_owned() {
+                    let confidence = self.sense_rel_confidence(&source, &rel, &old_key_target)?;
                     self.remove_sense_rel(&source, &old_key_target)?;
                     self.add_sense_rel(&source, rel.clone(), &old_key_target)?;
+                    self.set_sense_rel_confidence(&source, &rel, &old_key_target, confidence)?;
                 }
             }
             None => {}

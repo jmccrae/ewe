@@ -447,6 +447,33 @@ pub enum YamlSynsetRelType {
     //Antonym
 }
 
+impl YamlSynsetRelType {
+    /// The (canonical-direction) `SynsetRelType` this stored relation type corresponds to.
+    pub fn to_synset_rel(&self) -> SynsetRelType {
+        match self {
+            YamlSynsetRelType::Also => SynsetRelType::Also,
+            YamlSynsetRelType::Attribute => SynsetRelType::Attribute,
+            YamlSynsetRelType::Causes => SynsetRelType::Causes,
+            YamlSynsetRelType::DomainRegion => SynsetRelType::DomainRegion,
+            YamlSynsetRelType::DomainTopic => SynsetRelType::DomainTopic,
+            YamlSynsetRelType::Exemplifies => SynsetRelType::Exemplifies,
+            YamlSynsetRelType::Entails => SynsetRelType::Entails,
+            YamlSynsetRelType::Hypernym => SynsetRelType::Hypernym,
+            YamlSynsetRelType::InstanceHypernym => SynsetRelType::InstanceHypernym,
+            YamlSynsetRelType::MeroLocation => SynsetRelType::MeroLocation,
+            YamlSynsetRelType::MeroMember => SynsetRelType::MeroMember,
+            YamlSynsetRelType::MeroPart => SynsetRelType::MeroPart,
+            YamlSynsetRelType::MeroPortion => SynsetRelType::MeroPortion,
+            YamlSynsetRelType::MeroSubstance => SynsetRelType::MeroSubstance,
+            YamlSynsetRelType::Meronym => SynsetRelType::Meronym,
+            YamlSynsetRelType::Similar => SynsetRelType::Similar,
+            YamlSynsetRelType::Feminine => SynsetRelType::Feminine,
+            YamlSynsetRelType::Masculine => SynsetRelType::Masculine,
+            YamlSynsetRelType::Other => SynsetRelType::Other,
+        }
+    }
+}
+
 //lazy_static! {
 //    static ref INVERSE_SYNSET_RELS : HashMap<SynsetRelType, SynsetRelType> = {
 //        let mut map = HashMap::new();

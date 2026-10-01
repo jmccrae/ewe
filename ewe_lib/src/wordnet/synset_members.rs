@@ -17,7 +17,7 @@ pub struct MemberSynset {
     pub members : Vec<Member>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub definition : Vec<String>,
+    pub definition : ScoredVec<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub example : Vec<Example>,
@@ -28,106 +28,108 @@ pub struct MemberSynset {
     pub wikidata : Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source : Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence : Option<f64>,
     #[serde(rename="partOfSpeech")]
     pub part_of_speech : PartOfSpeech,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub also : Vec<SynsetId>,
+    pub also : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub attribute : Vec<SynsetId>,
+    pub attribute : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub causes : Vec<SynsetId>,
+    pub causes : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub domain_region : Vec<SynsetId>,
+    pub domain_region : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub domain_topic : Vec<SynsetId>,
+    pub domain_topic : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub exemplifies : Vec<SynsetId>,
+    pub exemplifies : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub entails : Vec<SynsetId>,
+    pub entails : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub hypernym : Vec<SynsetId>,
+    pub hypernym : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub instance_hypernym : Vec<SynsetId>,
+    pub instance_hypernym : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub mero_location : Vec<SynsetId>,
+    pub mero_location : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub mero_member : Vec<SynsetId>,
+    pub mero_member : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub mero_part : Vec<SynsetId>,
+    pub mero_part : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub mero_portion : Vec<SynsetId>,
+    pub mero_portion : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub mero_substance : Vec<SynsetId>,
+    pub mero_substance : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub meronym : Vec<SynsetId>,
+    pub meronym : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub similar : Vec<SynsetId>,
+    pub similar : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub feminine : Vec<SynsetId>,
+    pub feminine : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub masculine : Vec<SynsetId>,
+    pub masculine : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub other : Vec<SynsetId>,
+    pub other : ScoredVec<SynsetId>,
 
     // Inverse fields
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub hyponym : Vec<SynsetId>,
+    pub hyponym : ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_caused_by: Vec<SynsetId>,
+    pub is_caused_by: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub has_domain_region: Vec<SynsetId>,
+    pub has_domain_region: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub has_domain_topic: Vec<SynsetId>,
+    pub has_domain_topic: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_exemplified_by: Vec<SynsetId>,
+    pub is_exemplified_by: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub is_entailed_by: Vec<SynsetId>,
+    pub is_entailed_by: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub instance_hyponym: Vec<SynsetId>,
+    pub instance_hyponym: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holo_location: Vec<SynsetId>,
+    pub holo_location: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holo_member: Vec<SynsetId>,
+    pub holo_member: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holo_part: Vec<SynsetId>,
+    pub holo_part: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holo_portion: Vec<SynsetId>,
+    pub holo_portion: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holo_substance: Vec<SynsetId>,
+    pub holo_substance: ScoredVec<SynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub holonym: Vec<SynsetId>,
+    pub holonym: ScoredVec<SynsetId>,
 
     // Sense Relations
     #[serde(default)]
@@ -271,7 +273,10 @@ pub struct Member {
     pub pronunciation : Vec<Pronunciation>,
     pub poskey : PosKey,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub entry_no : Option<u32>
+    pub entry_no : Option<u32>,
+    /// The confidence of the whole lexical entry (as opposed to `sense.confidence`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_confidence : Option<f64>
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
@@ -284,6 +289,9 @@ pub struct MemberSense {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adjposition: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
  
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
@@ -295,7 +303,12 @@ pub struct SenseRelation {
     /// (only possible for the sense-synset relations: domain_topic,
     /// domain_region, exemplifies, other).
     pub target_lemma: Option<String>,
-    pub target_poskey: Option<PosKey>
+    pub target_poskey: Option<PosKey>,
+    /// The relation's confidence. For an inverse relation (e.g. `is_agent_of`) this is the
+    /// score stored on the forward relation it was derived from.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>
 }
 
 impl MemberSynset {
@@ -315,16 +328,18 @@ impl MemberSynset {
                         sense: MemberSense {
                             id: sense.id.clone(),
                             subcat: sense.subcat.clone(),
-                            adjposition: sense.adjposition.clone()
+                            adjposition: sense.adjposition.clone(),
+                            confidence: sense.confidence
                         },
                         form: entry.form.clone(),
                         pronunciation: entry.pronunciation.clone(),
                         poskey: poskey.clone(),
-                        entry_no: poskey.entry_no()
+                        entry_no: poskey.entry_no(),
+                        entry_confidence: entry.confidence
                     });
                     macro_rules! extract_sense_rel {
                         ($rel:ident,$name:ident) => {
-                            for target in sense.$rel.iter() {
+                            for (target, confidence) in sense.$rel.iter_scored() {
                                 if let Some((target_lemma, target_poskey, target_sense)) = lexicon.get_sense_by_id(target)? {
                                     sense_links.entry(SenseRelType::$name)
                                         .or_insert_with(|| Vec::new())
@@ -332,7 +347,8 @@ impl MemberSynset {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
                                             target_lemma: Some(target_lemma.clone()),
-                                            target_poskey: Some(target_poskey.clone())
+                                            target_poskey: Some(target_poskey.clone()),
+                                            confidence
                                         });
                                 }
                             }
@@ -344,7 +360,7 @@ impl MemberSynset {
                     // is skipped here, since validate() is what reports it.
                     macro_rules! extract_sense_or_synset_rel {
                         ($rel:ident,$name:ident) => {
-                            for target in sense.$rel.iter() {
+                            for (target, confidence) in sense.$rel.iter_scored() {
                                 match target.resolve(lexicon) {
                                     Ok(SenseOrSynsetId::Sense(target_sense_id)) => {
                                         if let Some((target_lemma, target_poskey, target_sense)) = lexicon.get_sense_by_id(&target_sense_id)? {
@@ -354,7 +370,8 @@ impl MemberSynset {
                                                     target_synset: target_sense.synset.clone(),
                                                     source_lemma: m.clone(),
                                                     target_lemma: Some(target_lemma.clone()),
-                                                    target_poskey: Some(target_poskey.clone())
+                                                    target_poskey: Some(target_poskey.clone()),
+                                                    confidence
                                                 });
                                         }
                                     }
@@ -365,7 +382,8 @@ impl MemberSynset {
                                                 target_synset: target_synset_id.clone(),
                                                 source_lemma: m.clone(),
                                                 target_lemma: None,
-                                                target_poskey: None
+                                                target_poskey: None,
+                                                confidence
                                             });
                                     }
                                     Err(_) => {}
@@ -408,7 +426,8 @@ impl MemberSynset {
                                             target_synset: target_sense.synset.clone(),
                                             source_lemma: m.clone(),
                                             target_lemma: Some(target_lemma.clone()),
-                                            target_poskey: Some(target_poskey.clone())
+                                            target_poskey: Some(target_poskey.clone()),
+                                            confidence: target_sense.rel_confidence(rel, sense.id.as_str())
                                         });
                                 }
                             }
@@ -422,7 +441,13 @@ impl MemberSynset {
         if let Some(links_to) = links_to {
             for (rel, target) in links_to.into_owned().into_iter() {
                 if let Some(inv_rel) = rel.inverse() {
-                    links.entry(inv_rel).or_insert_with(|| Vec::new()).push(target.clone());
+                    // The score lives on the forward relation, i.e. on the source synset.
+                    let confidence = match lexicon.synset_by_id(&target)? {
+                        Some(source) => source.rel_confidence(&rel, synset_id),
+                        None => None
+                    };
+                    links.entry(inv_rel).or_insert_with(|| ScoredVec::new())
+                        .push_scored(target.clone(), confidence);
                 }
             }
         }
@@ -436,6 +461,7 @@ impl MemberSynset {
             ili: synset.ili,
             wikidata: synset.wikidata,
             source: synset.source,
+            confidence: synset.confidence,
             part_of_speech: synset.part_of_speech,
             also: synset.also,
             attribute: synset.attribute,
@@ -456,19 +482,19 @@ impl MemberSynset {
             feminine: synset.feminine,
             masculine: synset.masculine,
             other: synset.other,
-            hyponym: links.remove(&SynsetRelType::Hyponym).unwrap_or_else(|| Vec::new()),
-            is_caused_by: links.remove(&SynsetRelType::IsCausedBy).unwrap_or_else(|| Vec::new()),
-            has_domain_region: links.remove(&SynsetRelType::HasDomainRegion).unwrap_or_else(|| Vec::new()),
-            has_domain_topic: links.remove(&SynsetRelType::HasDomainTopic).unwrap_or_else(|| Vec::new()),
-            is_exemplified_by: links.remove(&SynsetRelType::IsExemplifiedBy).unwrap_or_else(|| Vec::new()),
-            is_entailed_by: links.remove(&SynsetRelType::IsEntailedBy).unwrap_or_else(|| Vec::new()),
-            instance_hyponym: links.remove(&SynsetRelType::InstanceHyponym).unwrap_or_else(|| Vec::new()),
-            holo_location: links.remove(&SynsetRelType::HoloLocation).unwrap_or_else(|| Vec::new()),
-            holo_member: links.remove(&SynsetRelType::HoloMember).unwrap_or_else(|| Vec::new()),
-            holo_part: links.remove(&SynsetRelType::HoloPart).unwrap_or_else(|| Vec::new()),
-            holo_portion: links.remove(&SynsetRelType::HoloPortion).unwrap_or_else(|| Vec::new()),
-            holo_substance: links.remove(&SynsetRelType::HoloSubstance).unwrap_or_else(|| Vec::new()),
-            holonym: links.remove(&SynsetRelType::Holonym).unwrap_or_else(|| Vec::new()),
+            hyponym: links.remove(&SynsetRelType::Hyponym).unwrap_or_else(|| ScoredVec::new()),
+            is_caused_by: links.remove(&SynsetRelType::IsCausedBy).unwrap_or_else(|| ScoredVec::new()),
+            has_domain_region: links.remove(&SynsetRelType::HasDomainRegion).unwrap_or_else(|| ScoredVec::new()),
+            has_domain_topic: links.remove(&SynsetRelType::HasDomainTopic).unwrap_or_else(|| ScoredVec::new()),
+            is_exemplified_by: links.remove(&SynsetRelType::IsExemplifiedBy).unwrap_or_else(|| ScoredVec::new()),
+            is_entailed_by: links.remove(&SynsetRelType::IsEntailedBy).unwrap_or_else(|| ScoredVec::new()),
+            instance_hyponym: links.remove(&SynsetRelType::InstanceHyponym).unwrap_or_else(|| ScoredVec::new()),
+            holo_location: links.remove(&SynsetRelType::HoloLocation).unwrap_or_else(|| ScoredVec::new()),
+            holo_member: links.remove(&SynsetRelType::HoloMember).unwrap_or_else(|| ScoredVec::new()),
+            holo_part: links.remove(&SynsetRelType::HoloPart).unwrap_or_else(|| ScoredVec::new()),
+            holo_portion: links.remove(&SynsetRelType::HoloPortion).unwrap_or_else(|| ScoredVec::new()),
+            holo_substance: links.remove(&SynsetRelType::HoloSubstance).unwrap_or_else(|| ScoredVec::new()),
+            holonym: links.remove(&SynsetRelType::Holonym).unwrap_or_else(|| ScoredVec::new()),
             antonym: sense_links.remove(&SenseRelType::Antonym).unwrap_or_else(|| Vec::new()),
             also_sense: sense_links.remove(&SenseRelType::Also).unwrap_or_else(|| Vec::new()),
             similar_sense: sense_links.remove(&SenseRelType::Similar).unwrap_or_else(|| Vec::new()),
@@ -524,6 +550,7 @@ impl MemberSynset {
             ili: self.ili,
             wikidata: self.wikidata,
             source: self.source,
+            confidence: self.confidence,
             part_of_speech: self.part_of_speech,
             also: self.also,
             attribute: self.attribute,

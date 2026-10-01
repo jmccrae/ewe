@@ -19,7 +19,7 @@ pub const WN_LMF_DOCTYPE: &str =
 /// Lexicon-level metadata written to/read from the `Lexicon` element's attributes. Standalone
 /// from any particular host application's settings (unlike the `EweSettings` this replaces in
 /// `ewe_dioxus`'s exporter), since `ewe_lib` has no notion of a running app's configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LexiconMetadata {
     pub id_prefix: String,
     pub label: String,
@@ -28,6 +28,8 @@ pub struct LexiconMetadata {
     pub license: String,
     pub version: String,
     pub url: Option<String>,
+    /// `Lexicon/@confidenceScore`. `None` leaves the attribute out (the DTD defaults it to 1.0).
+    pub confidence: Option<f64>,
 }
 
 #[derive(Error, Debug)]

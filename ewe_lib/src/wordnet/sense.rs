@@ -1,5 +1,5 @@
 use crate::rels::SenseRelType;
-use crate::wordnet::util::{escape_yaml_string, write_prop_sense};
+use crate::wordnet::util::{escape_yaml_string, format_confidence, write_prop_sense};
 use crate::wordnet::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -15,80 +15,83 @@ pub struct Sense {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adjposition: Option<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subcat: Vec<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub antonym: Vec<SenseId>,
+    pub antonym: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub also: Vec<SenseId>,
+    pub also: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub participle: Vec<SenseId>,
+    pub participle: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub pertainym: Vec<SenseId>,
+    pub pertainym: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub derivation: Vec<SenseId>,
+    pub derivation: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub domain_topic: Vec<UnresolvedSenseOrSynsetId>,
+    pub domain_topic: ScoredVec<UnresolvedSenseOrSynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub domain_region: Vec<UnresolvedSenseOrSynsetId>,
+    pub domain_region: ScoredVec<UnresolvedSenseOrSynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub exemplifies: Vec<UnresolvedSenseOrSynsetId>,
+    pub exemplifies: ScoredVec<UnresolvedSenseOrSynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub similar: Vec<SenseId>,
+    pub similar: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub other: Vec<UnresolvedSenseOrSynsetId>,
+    pub other: ScoredVec<UnresolvedSenseOrSynsetId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub agent: Vec<SenseId>,
+    pub agent: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub material: Vec<SenseId>,
+    pub material: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub event: Vec<SenseId>,
+    pub event: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub instrument: Vec<SenseId>,
+    pub instrument: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub location: Vec<SenseId>,
+    pub location: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub by_means_of: Vec<SenseId>,
+    pub by_means_of: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub undergoer: Vec<SenseId>,
+    pub undergoer: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub property: Vec<SenseId>,
+    pub property: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub result: Vec<SenseId>,
+    pub result: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub state: Vec<SenseId>,
+    pub state: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub uses: Vec<SenseId>,
+    pub uses: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub destination: Vec<SenseId>,
+    pub destination: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub body_part: Vec<SenseId>,
+    pub body_part: ScoredVec<SenseId>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub vehicle: Vec<SenseId>,
+    pub vehicle: ScoredVec<SenseId>,
 
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -101,31 +104,32 @@ impl Sense {
             id,
             synset,
             subcat: Vec::new(),
-            antonym: Vec::new(),
-            also: Vec::new(),
-            participle: Vec::new(),
-            pertainym: Vec::new(),
-            derivation: Vec::new(),
-            domain_topic: Vec::new(),
-            domain_region: Vec::new(),
-            exemplifies: Vec::new(),
-            similar: Vec::new(),
-            other: Vec::new(),
-            agent: Vec::new(),
-            material: Vec::new(),
-            event: Vec::new(),
-            instrument: Vec::new(),
-            location: Vec::new(),
-            by_means_of: Vec::new(),
-            undergoer: Vec::new(),
-            property: Vec::new(),
-            result: Vec::new(),
-            state: Vec::new(),
-            uses: Vec::new(),
-            destination: Vec::new(),
-            body_part: Vec::new(),
-            vehicle: Vec::new(),
+            antonym: Vec::new().into(),
+            also: Vec::new().into(),
+            participle: Vec::new().into(),
+            pertainym: Vec::new().into(),
+            derivation: Vec::new().into(),
+            domain_topic: Vec::new().into(),
+            domain_region: Vec::new().into(),
+            exemplifies: Vec::new().into(),
+            similar: Vec::new().into(),
+            other: Vec::new().into(),
+            agent: Vec::new().into(),
+            material: Vec::new().into(),
+            event: Vec::new().into(),
+            instrument: Vec::new().into(),
+            location: Vec::new().into(),
+            by_means_of: Vec::new().into(),
+            undergoer: Vec::new().into(),
+            property: Vec::new().into(),
+            result: Vec::new().into(),
+            state: Vec::new().into(),
+            uses: Vec::new().into(),
+            destination: Vec::new().into(),
+            body_part: Vec::new().into(),
+            vehicle: Vec::new().into(),
             adjposition: None,
+            confidence: None,
             sent: Vec::new(),
         }
     }
@@ -175,6 +179,14 @@ impl Sense {
         first = write_prop_sense(w, &self.antonym, "antonym", first)?;
         first = write_prop_sense(w, &self.body_part, "body_part", first)?;
         first = write_prop_sense(w, &self.by_means_of, "by_means_of", first)?;
+        if let Some(c) = self.confidence {
+            if first {
+                write!(w, "confidence: {}", format_confidence(c))?;
+                first = false;
+            } else {
+                write!(w, "\n      confidence: {}", format_confidence(c))?;
+            }
+        }
         first = write_prop_sense(w, &self.derivation, "derivation", first)?;
         first = write_prop_sense(w, &self.destination, "destination", first)?;
         first = write_prop_sense(w, &self.domain_region, "domain_region", first)?;
@@ -255,47 +267,111 @@ impl Sense {
     /// support a sense target, a `Synset` target is a caller bug and is
     /// silently ignored (mirrors the existing no-op treatment of the
     /// not-directly-storable `Has*`/`Is*` arms below).
+    /// The confidence of the stored `rel` relation to `target` (a sense or synset id), if it
+    /// has one. Always `None` for an inverse-only type that is never stored on this side.
+    pub fn rel_confidence(&self, rel: &SenseRelType, target: &str) -> Option<f64> {
+        match rel {
+            SenseRelType::Antonym => self.antonym.confidence(target),
+            SenseRelType::Also => self.also.confidence(target),
+            SenseRelType::Participle => self.participle.confidence(target),
+            SenseRelType::Pertainym => self.pertainym.confidence(target),
+            SenseRelType::Derivation => self.derivation.confidence(target),
+            SenseRelType::DomainTopic => self.domain_topic.confidence(target),
+            SenseRelType::DomainRegion => self.domain_region.confidence(target),
+            SenseRelType::Exemplifies => self.exemplifies.confidence(target),
+            SenseRelType::Similar => self.similar.confidence(target),
+            SenseRelType::Other => self.other.confidence(target),
+            SenseRelType::Agent => self.agent.confidence(target),
+            SenseRelType::Material => self.material.confidence(target),
+            SenseRelType::Event => self.event.confidence(target),
+            SenseRelType::Instrument => self.instrument.confidence(target),
+            SenseRelType::Location => self.location.confidence(target),
+            SenseRelType::ByMeansOf => self.by_means_of.confidence(target),
+            SenseRelType::Undergoer => self.undergoer.confidence(target),
+            SenseRelType::Property => self.property.confidence(target),
+            SenseRelType::Result => self.result.confidence(target),
+            SenseRelType::State => self.state.confidence(target),
+            SenseRelType::Uses => self.uses.confidence(target),
+            SenseRelType::Destination => self.destination.confidence(target),
+            SenseRelType::BodyPart => self.body_part.confidence(target),
+            SenseRelType::Vehicle => self.vehicle.confidence(target),
+            _ => None,
+        }
+    }
+
+    /// Set (or clear) the confidence of the stored `rel` relation to `target`. Returns false if
+    /// there is no such stored relation.
+    pub fn set_rel_confidence(&mut self, rel: &SenseRelType, target: &str, confidence: Option<f64>) -> bool {
+        match rel {
+            SenseRelType::Antonym => self.antonym.set_confidence(target, confidence),
+            SenseRelType::Also => self.also.set_confidence(target, confidence),
+            SenseRelType::Participle => self.participle.set_confidence(target, confidence),
+            SenseRelType::Pertainym => self.pertainym.set_confidence(target, confidence),
+            SenseRelType::Derivation => self.derivation.set_confidence(target, confidence),
+            SenseRelType::DomainTopic => self.domain_topic.set_confidence(target, confidence),
+            SenseRelType::DomainRegion => self.domain_region.set_confidence(target, confidence),
+            SenseRelType::Exemplifies => self.exemplifies.set_confidence(target, confidence),
+            SenseRelType::Similar => self.similar.set_confidence(target, confidence),
+            SenseRelType::Other => self.other.set_confidence(target, confidence),
+            SenseRelType::Agent => self.agent.set_confidence(target, confidence),
+            SenseRelType::Material => self.material.set_confidence(target, confidence),
+            SenseRelType::Event => self.event.set_confidence(target, confidence),
+            SenseRelType::Instrument => self.instrument.set_confidence(target, confidence),
+            SenseRelType::Location => self.location.set_confidence(target, confidence),
+            SenseRelType::ByMeansOf => self.by_means_of.set_confidence(target, confidence),
+            SenseRelType::Undergoer => self.undergoer.set_confidence(target, confidence),
+            SenseRelType::Property => self.property.set_confidence(target, confidence),
+            SenseRelType::Result => self.result.set_confidence(target, confidence),
+            SenseRelType::State => self.state.set_confidence(target, confidence),
+            SenseRelType::Uses => self.uses.set_confidence(target, confidence),
+            SenseRelType::Destination => self.destination.set_confidence(target, confidence),
+            SenseRelType::BodyPart => self.body_part.set_confidence(target, confidence),
+            SenseRelType::Vehicle => self.vehicle.set_confidence(target, confidence),
+            _ => false,
+        }
+    }
+
     pub(crate) fn add_rel(&mut self, rel: SenseRelType, target: SenseOrSynsetId) {
         match rel {
             SenseRelType::Antonym => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.antonym.iter().any(|x| *x == target) {
-                        self.antonym.push(target)
+                        self.antonym.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Also => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.also.iter().any(|x| *x == target) {
-                        self.also.push(target)
+                        self.also.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Participle => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.participle.iter().any(|x| *x == target) {
-                        self.participle.push(target)
+                        self.participle.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Pertainym => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.pertainym.iter().any(|x| *x == target) {
-                        self.pertainym.push(target)
+                        self.pertainym.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Derivation => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.derivation.iter().any(|x| *x == target) {
-                        self.derivation.push(target)
+                        self.derivation.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::DomainTopic => {
                 let target = UnresolvedSenseOrSynsetId::from(target);
                 if !self.domain_topic.iter().any(|x| *x == target) {
-                    self.domain_topic.push(target)
+                    self.domain_topic.push_scored(target, None)
                 }
             }
             // Not directly storable - the OEWN format only persists the canonical
@@ -305,119 +381,119 @@ impl Sense {
             SenseRelType::DomainRegion => {
                 let target = UnresolvedSenseOrSynsetId::from(target);
                 if !self.domain_region.iter().any(|x| *x == target) {
-                    self.domain_region.push(target)
+                    self.domain_region.push_scored(target, None)
                 }
             }
             SenseRelType::HasDomainRegion => {}
             SenseRelType::Exemplifies => {
                 let target = UnresolvedSenseOrSynsetId::from(target);
                 if !self.exemplifies.iter().any(|x| *x == target) {
-                    self.exemplifies.push(target)
+                    self.exemplifies.push_scored(target, None)
                 }
             }
             SenseRelType::IsExemplifiedBy => {}
             SenseRelType::Similar => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.similar.iter().any(|x| *x == target) {
-                        self.similar.push(target)
+                        self.similar.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Agent => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.agent.iter().any(|x| *x == target) {
-                        self.agent.push(target)
+                        self.agent.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Material => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.material.iter().any(|x| *x == target) {
-                        self.material.push(target)
+                        self.material.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Event => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.event.iter().any(|x| *x == target) {
-                        self.event.push(target)
+                        self.event.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Instrument => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.instrument.iter().any(|x| *x == target) {
-                        self.instrument.push(target)
+                        self.instrument.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Location => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.location.iter().any(|x| *x == target) {
-                        self.location.push(target)
+                        self.location.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::ByMeansOf => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.by_means_of.iter().any(|x| *x == target) {
-                        self.by_means_of.push(target)
+                        self.by_means_of.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Undergoer => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.undergoer.iter().any(|x| *x == target) {
-                        self.undergoer.push(target)
+                        self.undergoer.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Property => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.property.iter().any(|x| *x == target) {
-                        self.property.push(target)
+                        self.property.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Result => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.result.iter().any(|x| *x == target) {
-                        self.result.push(target)
+                        self.result.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::State => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.state.iter().any(|x| *x == target) {
-                        self.state.push(target)
+                        self.state.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Uses => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.uses.iter().any(|x| *x == target) {
-                        self.uses.push(target)
+                        self.uses.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Destination => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.destination.iter().any(|x| *x == target) {
-                        self.destination.push(target)
+                        self.destination.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::BodyPart => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.body_part.iter().any(|x| *x == target) {
-                        self.body_part.push(target)
+                        self.body_part.push_scored(target, None)
                     }
                 }
             }
             SenseRelType::Vehicle => {
                 if let SenseOrSynsetId::Sense(target) = target {
                     if !self.vehicle.iter().any(|x| *x == target) {
-                        self.vehicle.push(target)
+                        self.vehicle.push_scored(target, None)
                     }
                 }
             }
@@ -425,7 +501,7 @@ impl Sense {
             SenseRelType::Other => {
                 let target = UnresolvedSenseOrSynsetId::from(target);
                 if !self.other.iter().any(|x| *x == target) {
-                    self.other.push(target)
+                    self.other.push_scored(target, None)
                 }
             }
         };
@@ -442,6 +518,13 @@ impl SenseId {
     }
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl ScoredItem for SenseId {
+    const MAP_KEY: &'static str = "target";
+    fn from_string(s: String) -> Self {
+        SenseId(s)
     }
 }
 
@@ -557,6 +640,13 @@ impl From<SenseOrSynsetId> for UnresolvedSenseOrSynsetId {
             SenseOrSynsetId::Sense(id) => UnresolvedSenseOrSynsetId::Sense(id),
             SenseOrSynsetId::Synset(id) => UnresolvedSenseOrSynsetId::Synset(id),
         }
+    }
+}
+
+impl ScoredItem for UnresolvedSenseOrSynsetId {
+    const MAP_KEY: &'static str = "target";
+    fn from_string(s: String) -> Self {
+        UnresolvedSenseOrSynsetId::Unresolved(s)
     }
 }
 
