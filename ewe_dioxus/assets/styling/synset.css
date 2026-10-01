@@ -668,3 +668,38 @@
     background: none;
     color: var(--color-accent);
 }
+
+/* A WN-LMF confidence score below 1.0 (see `components::confidence`) - secondary metadata like
+   `.sense_key`, but a small pill so it reads as an annotation on whatever precedes it rather
+   than as part of the text. */
+.confidence {
+    display: inline-block;
+    margin-left: 0.3em;
+    padding: 0 0.45em;
+    border-radius: 999px;
+    background: var(--color-surface-light);
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.75em;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.confidence-input {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    width: 5em;
+    margin-left: 0.3em;
+}
+
+.sense-confidence-editing {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.sense-confidence-editing-item {
+    display: inline-flex;
+    align-items: center;
+}

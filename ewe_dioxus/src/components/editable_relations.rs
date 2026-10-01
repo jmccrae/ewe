@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
-use ewe_lib::wordnet::{MemberSynset, SenseRelation, SynsetId};
+use ewe_lib::wordnet::{MemberSynset, ScoredVec, SenseRelation, SynsetId};
+#[allow(unused_imports)]
+use crate::components::{confidence_draft, ConfidenceInput};
 
 #[allow(unused_imports)]
 use crate::components::relation_types::{RelationTypeInfo, SENSE_RELATION_TYPES, SYNSET_RELATION_TYPES};
@@ -36,10 +38,36 @@ pub struct EditableRelationsProps {
     pub pending_adds: Vec<PendingRelation>,
     pub on_pending_deletes_changed: EventHandler<Vec<RelationKey>>,
     pub on_pending_adds_changed: EventHandler<Vec<PendingRelation>>,
+    /// Draft confidence scores for existing relations - only the ones the user has touched;
+    /// anything not in here still shows (and keeps) its saved score.
+    pub confidence_drafts: Vec<(RelationKey, String)>,
+    pub on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
+}
+
+/// The draft (if touched) or saved score of one existing relation, as input text.
+#[allow(dead_code)]
+fn relation_confidence_value(drafts: &[(RelationKey, String)], key: &RelationKey, saved: Option<f64>) -> String {
+    drafts
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| confidence_draft(saved))
 }
 
 #[allow(dead_code)]
-fn synset_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a [SynsetId] {
+fn upsert_confidence_draft(drafts: &[(RelationKey, String)], key: RelationKey, value: String) -> Vec<(RelationKey, String)> {
+    let mut drafts = drafts.to_vec();
+    match drafts.iter_mut().find(|(k, _)| *k == key) {
+        Some(entry) => entry.1 = value,
+        None => drafts.push((key, value)),
+    }
+    drafts
+}
+
+static NO_SYNSET_RELS: ScoredVec<SynsetId> = ScoredVec::new();
+
+#[allow(dead_code)]
+pub(crate) fn synset_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a ScoredVec<SynsetId> {
     match key {
         "hypernym" => &synset.hypernym,
         "hyponym" => &synset.hyponym,
@@ -71,12 +99,12 @@ fn synset_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a [SynsetId] 
         "masculine" => &synset.masculine,
         "also" => &synset.also,
         "other" => &synset.other,
-        _ => &[],
+        _ => &NO_SYNSET_RELS,
     }
 }
 
 #[allow(dead_code)]
-fn sense_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a [SenseRelation] {
+pub(crate) fn sense_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a [SenseRelation] {
     match key {
         "antonym" => &synset.antonym,
         "participle" => &synset.participle,
@@ -116,11 +144,13 @@ fn find_relation_type(encoded: &str) -> Option<RelationTypeInfo> {
 #[cfg(feature = "edit")]
 fn render_synset_relation_group(
     info: &RelationTypeInfo,
-    existing: &[SynsetId],
+    existing: &ScoredVec<SynsetId>,
     pending_deletes: &[RelationKey],
     pending_adds: &[PendingRelation],
     on_pending_deletes_changed: EventHandler<Vec<RelationKey>>,
     on_pending_adds_changed: EventHandler<Vec<PendingRelation>>,
+    confidence_drafts: &[(RelationKey, String)],
+    on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
 ) -> Element {
     let visible_existing: Vec<SynsetId> = existing
         .iter()
@@ -151,6 +181,23 @@ fn render_synset_relation_group(
                     Link {
                         to: Route::BySynset { synset: id.as_str().to_string() },
                         "{id.as_str()}"
+                    }
+                    {
+                        let key = RelationKey {
+                            key: info.key,
+                            target: id.clone(),
+                            source_lemma: None,
+                            target_lemma: None,
+                        };
+                        let value = relation_confidence_value(confidence_drafts, &key, existing.confidence(id.as_str()));
+                        let drafts = confidence_drafts.to_vec();
+                        rsx! {
+                            ConfidenceInput {
+                                value,
+                                on_input: move |v: String| on_confidence_drafts_changed
+                                    .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                            }
+                        }
                     }
                     button {
                         class: "edit-delete",
@@ -203,6 +250,8 @@ fn render_sense_relation_group(
     pending_adds: &[PendingRelation],
     on_pending_deletes_changed: EventHandler<Vec<RelationKey>>,
     on_pending_adds_changed: EventHandler<Vec<PendingRelation>>,
+    confidence_drafts: &[(RelationKey, String)],
+    on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
 ) -> Element {
     let visible_existing: Vec<SenseRelation> = existing
         .iter()
@@ -240,6 +289,23 @@ fn render_sense_relation_group(
                     Link {
                         to: Route::BySynset { synset: r.target_synset.as_str().to_string() },
                         "({r.target_synset.as_str()})"
+                    }
+                    {
+                        let key = RelationKey {
+                            key: info.key,
+                            target: r.target_synset.clone(),
+                            source_lemma: Some(r.source_lemma.clone()),
+                            target_lemma: r.target_lemma.clone(),
+                        };
+                        let value = relation_confidence_value(confidence_drafts, &key, r.confidence);
+                        let drafts = confidence_drafts.to_vec();
+                        rsx! {
+                            ConfidenceInput {
+                                value,
+                                on_input: move |v: String| on_confidence_drafts_changed
+                                    .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                            }
+                        }
                     }
                     button {
                         class: "edit-delete",
@@ -301,6 +367,8 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
     let pending_adds = props.pending_adds;
     let on_pending_deletes_changed = props.on_pending_deletes_changed;
     let on_pending_adds_changed = props.on_pending_adds_changed;
+    let confidence_drafts = props.confidence_drafts;
+    let on_confidence_drafts_changed = props.on_confidence_drafts_changed;
 
     let mut selected_key = use_signal(|| "syn:hypernym".to_string());
     let mut search_query = use_signal(String::new);
@@ -330,6 +398,8 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                     &pending_adds,
                     on_pending_deletes_changed,
                     on_pending_adds_changed,
+                    &confidence_drafts,
+                    on_confidence_drafts_changed,
                 )}
             }
             for info in SENSE_RELATION_TYPES.iter() {
@@ -340,6 +410,8 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                     &pending_adds,
                     on_pending_deletes_changed,
                     on_pending_adds_changed,
+                    &confidence_drafts,
+                    on_confidence_drafts_changed,
                 )}
             }
 
