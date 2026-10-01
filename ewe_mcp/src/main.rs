@@ -336,7 +336,7 @@ impl EweMcpServer {
 
     #[tool(
         description = "Apply a batch of automaton actions (add/delete/change synsets, entries, \
-        relations, examples, ...) to the loaded wordnet. Rejects batches containing a `validate` \
+        relations, examples, confidence scores, ...) to the loaded wordnet. Rejects batches containing a `validate` \
         action - call the `validate` tool instead. On success (with dry_run false), saves \
         automatically if the result validates cleanly; otherwise leaves the change applied in \
         memory but unsaved and reports the validation errors, letting the caller fix-and-reapply \

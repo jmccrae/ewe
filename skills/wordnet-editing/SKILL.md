@@ -83,6 +83,15 @@ repeated here. Two conventions worth knowing:
 - Examples should use Unicode curly quotes (‘ ’), not straight quotes.
 - An example's `source` is optional - omit it rather than inventing one.
 
+## Confidence scores
+
+`set_confidence` records how sure the wordnet is of a synset, sense, entry, definition,
+example or relation (WN-LMF `confidenceScore`, 0.0-1.0; no score means 1.0). Set one only
+when you have an actual reason to doubt the item - e.g. an automatically generated or
+unverified addition - not as routine annotation of your own edits. Rewording a definition or
+example keeps its existing score; if your edit resolves the doubt, clear the score by sending
+`set_confidence` without `confidence`.
+
 ## Check before you commit
 
 For anything beyond a single trivial action, call `apply_automaton` with

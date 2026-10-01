@@ -114,5 +114,28 @@ An example of the usage of the automaton file is given below
           target: 00001742-n
           source_lemma: test
           target_lemma: test
+- set_confidence:            # WN-LMF confidenceScore, 0.0-1.0, of the synset itself
+    synset: 00001740-n
+    confidence: 0.8
+- set_confidence:            # ... or one thing inside it: `sense`, `entry`, `definition`,
+    synset: 00001740-n       # `example` (1-indexed), or a `relation` to a `target`
+    relation: hypernym
+    target: 00001741-n
+    confidence: 0.6
+- set_confidence:            # a sense relation: `sense` is its source (`target_sense` can
+    synset: 00001740-n       # be omitted for domain_topic/domain_region/exemplifies/other
+    sense: "lemma=bar"       # targeting the synset itself)
+    relation: antonym
+    target: 00001742-n
+    target_sense: "lemma=baz"
+    confidence: 0.5
+- set_confidence:            # omitting `confidence` clears it (i.e. back to 1.0)
+    synset: 00001740-n
+    example: 1
 - validate
 ```
+
+Confidence scores appear in the YAML source as a `confidence:` key on a synset, sense,
+entry or example, and on definitions and relation targets by writing the list item as a map,
+e.g. `hypernym: [{target: 00001741-n, confidence: 0.6}]`. Items without a score keep the plain
+form, so a wordnet with no scores is unchanged.

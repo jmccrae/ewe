@@ -453,6 +453,58 @@ pub fn apply_automaton<L: Lexicon>(
             Action::FixTransitivity => {
                 change_manager::fix_indirect_relations(wn, changes).map_err(|e| e.to_string())?;
             }
+            Action::SetConfidence {
+                synset,
+                confidence,
+                sense,
+                entry,
+                definition,
+                example,
+                relation,
+                target,
+                target_sense,
+            } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                let target = match target {
+                    Some(target) => Some(target.resolve(&last_synset_id)?),
+                    None => None,
+                };
+                let what = match (relation, sense, entry, definition, example) {
+                    (Some(relation), sense, None, None, None) => {
+                        let target = target.ok_or("set_confidence: `relation` needs a `target`")?;
+                        match sense {
+                            Some(sense) => {
+                                let rel = SenseRelType::from(&relation)
+                                    .ok_or(format!("Bad relation {}.", relation))?;
+                                let target = match target_sense {
+                                    Some(t) => SenseOrSynsetId::Sense(t.resolve(&last_sense_id, wn, &target)?),
+                                    None if rel.allows_synset_target() => SenseOrSynsetId::Synset(target),
+                                    None => return Err(format!(
+                                        "set_confidence: relation {} needs a `target_sense`", relation)),
+                                };
+                                ConfidenceTarget::SenseRelation(
+                                    sense.resolve(&last_sense_id, wn, &synset)?, rel, target)
+                            }
+                            None => ConfidenceTarget::SynsetRelation(
+                                synset.clone(),
+                                SynsetRelType::from(&relation)
+                                    .ok_or(format!("Bad relation {}.", relation))?,
+                                target),
+                        }
+                    }
+                    (None, Some(sense), None, None, None) =>
+                        ConfidenceTarget::Sense(sense.resolve(&last_sense_id, wn, &synset)?),
+                    (None, None, Some(lemma), None, None) => ConfidenceTarget::Entry(lemma),
+                    (None, None, None, Some(n), None) => ConfidenceTarget::Definition(n),
+                    (None, None, None, None, Some(n)) => ConfidenceTarget::Example(n),
+                    (None, None, None, None, None) => ConfidenceTarget::Synset,
+                    _ => return Err("set_confidence: give at most one of `sense`, `entry`, \
+                                     `definition`, `example` and `relation` (`relation` may be \
+                                     combined with `sense` for a sense relation)".to_string()),
+                };
+                set_confidence(wn, &synset, what, confidence, changes)?;
+                last_synset_id = Some(synset);
+            }
             Action::ChangeILI { synset, ili } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 wn.update_synset(&synset, |s| {
@@ -493,6 +545,95 @@ pub fn apply_automaton<L: Lexicon>(
         changelog_append(wn, &actions_for_log)?;
     }
     Ok((last_synset_id, validation_report))
+}
+
+/// What a `set_confidence` action scores, after resolving its references.
+enum ConfidenceTarget {
+    Synset,
+    Sense(SenseId),
+    Entry(String),
+    Definition(usize),
+    Example(usize),
+    SynsetRelation(SynsetId, SynsetRelType, SynsetId),
+    SenseRelation(SenseId, SenseRelType, SenseOrSynsetId),
+}
+
+fn set_confidence<L: Lexicon>(
+    wn: &mut L,
+    synset: &SynsetId,
+    what: ConfidenceTarget,
+    confidence: Option<f64>,
+    changes: &mut ChangeList,
+) -> Result<(), String> {
+    if let Some(c) = confidence {
+        if !crate::validate::is_valid_confidence(c) {
+            return Err(format!("Confidence {} is not between 0.0 and 1.0", c));
+        }
+    }
+    let e = |e: crate::wordnet::LexiconError| e.to_string();
+    if wn.synset_by_id(synset).map_err(e)?.is_none() {
+        return Err(format!("No synset {}", synset.as_str()));
+    }
+    match what {
+        ConfidenceTarget::Synset => {
+            wn.update_synset(synset, |ss| ss.confidence = confidence).map_err(e)?;
+        }
+        ConfidenceTarget::Sense(sense) => {
+            wn.update_sense(&sense, |s| s.confidence = confidence)
+                .map_err(e)?
+                .ok_or(format!("No sense {}", sense.as_str()))?;
+        }
+        ConfidenceTarget::Entry(lemma) => {
+            let pos = wn
+                .pos_for_entry_synset(&lemma, synset)
+                .map_err(e)?
+                .ok_or(format!("No entry {} in {}", lemma, synset.as_str()))?;
+            wn.update_entry(&lemma, &pos, |entry| entry.confidence = confidence).map_err(e)?;
+        }
+        ConfidenceTarget::Definition(n) => {
+            let mut found = false;
+            wn.update_synset(synset, |ss| {
+                if let Some(text) = n.checked_sub(1).and_then(|i| ss.definition.get(i)).cloned() {
+                    found = ss.definition.set_confidence(&text, confidence);
+                }
+            })
+            .map_err(e)?;
+            if !found {
+                return Err(format!("{} has no definition {}", synset.as_str(), n));
+            }
+        }
+        ConfidenceTarget::Example(n) => {
+            let mut found = false;
+            wn.update_synset(synset, |ss| {
+                if let Some(ex) = n.checked_sub(1).and_then(|i| ss.example.get_mut(i)) {
+                    ex.confidence = confidence;
+                    found = true;
+                }
+            })
+            .map_err(e)?;
+            if !found {
+                return Err(format!("{} has no example {}", synset.as_str(), n));
+            }
+        }
+        ConfidenceTarget::SynsetRelation(source, rel, target) => {
+            if !wn.set_synset_rel_confidence(&source, &rel, &target, confidence).map_err(e)? {
+                return Err(format!(
+                    "No {} relation from {} to {}",
+                    rel.value(), source.as_str(), target.as_str()
+                ));
+            }
+        }
+        ConfidenceTarget::SenseRelation(source, rel, target) => {
+            if !wn.set_sense_rel_confidence(&source, &rel, &target, confidence).map_err(e)? {
+                return Err(format!(
+                    "No {} relation from {} to {}",
+                    rel.value(), source.as_str(), target.as_str()
+                ));
+            }
+        }
+    }
+    changes.mark();
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -795,6 +936,45 @@ pub enum Action {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         relations: Vec<UpdateRelationItem>,
     },
+    /// Set (or, with `confidence` omitted, clear) a WN-LMF confidence score. `synset` alone
+    /// scores the synset; at most one of `sense`/`entry`/`definition`/`example`/`relation`
+    /// narrows it down to something inside it.
+    #[serde(rename = "set_confidence")]
+    SetConfidence {
+        synset: SynsetRef,
+        /// The score, between 0.0 and 1.0. Omit to clear it (which means 1.0).
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confidence: Option<f64>,
+        /// Score this member sense - or, with `relation`, the sense relation's source sense.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sense: Option<SenseRef>,
+        /// Score the whole lexical entry of this member lemma.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        entry: Option<String>,
+        /// Score this definition (1-indexed).
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        definition: Option<usize>,
+        /// Score this example (1-indexed, matching `delete_example`).
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        example: Option<usize>,
+        /// Score an existing relation of this type from `synset` (or from `sense`) to `target`.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        relation: Option<String>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target: Option<SynsetRef>,
+        /// The relation's target sense; for a sense relation that allows a synset target
+        /// (domain_topic/domain_region/exemplifies/other), omit it to mean `target` itself.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_sense: Option<SenseRef>,
+    },
     #[serde(rename = "validate")]
     Validate,
     #[serde(rename = "fix_transitivity")]
@@ -908,6 +1088,32 @@ impl Action {
             ),
             Action::Validate => "Validated the lexicon".to_string(),
             Action::FixTransitivity => "Fixed transitivity of relations".to_string(),
+            Action::SetConfidence {
+                synset, confidence, sense, entry, definition, example, relation, target, target_sense,
+            } => {
+                let what = if let Some(relation) = relation {
+                    let source = synset_with_sense(synset, sense);
+                    let target = match target {
+                        Some(t) => synset_with_sense(t, target_sense),
+                        None => "?".to_string(),
+                    };
+                    format!("{} relation {} -> {}", relation, source, target)
+                } else if let Some(s) = sense {
+                    format!("sense {}", synset_with_sense(synset, &Some(s.clone())))
+                } else if let Some(lemma) = entry {
+                    format!("entry \"{}\" in {}", lemma, synset.as_str())
+                } else if let Some(n) = definition {
+                    format!("definition {} of {}", n, synset.as_str())
+                } else if let Some(n) = example {
+                    format!("example {} of {}", n, synset.as_str())
+                } else {
+                    synset.as_str().to_string()
+                };
+                match confidence {
+                    Some(c) => format!("Set confidence of {} to {}", what, c),
+                    None => format!("Cleared confidence of {}", what),
+                }
+            }
         }
     }
 }
@@ -1276,6 +1482,121 @@ mod tests {
             target_lemma: None,
         }];
         apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+    }
+
+    /// Three noun synsets with one lemma each, for the `set_confidence` tests.
+    fn confidence_fixture() -> (LexiconHashMapBackend, SynsetId, SynsetId, SynsetId) {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let mut change_list = ChangeList::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let mut ids = Vec::new();
+        for (def, lemma) in [("a dog", "dog"), ("an animal", "animal"), ("a cat", "cat")] {
+            let ssid = change_manager::add_synset(
+                &mut lexicon,
+                def.to_string(),
+                "noun.animal".to_string(),
+                PosKey::new("n".to_string()),
+                None,
+                &mut change_list,
+            )
+            .unwrap();
+            change_manager::add_entry(&mut lexicon, ssid.clone(), lemma.to_string(),
+                PosKey::new("n".to_string()), Vec::new(), None, &mut change_list).unwrap();
+            ids.push(ssid);
+        }
+        (lexicon, ids[0].clone(), ids[1].clone(), ids[2].clone())
+    }
+
+    fn parse_actions(yaml: &str) -> Vec<Action> {
+        serde_yaml::from_str::<Vec<ActionWrapper>>(yaml)
+            .unwrap()
+            .into_iter()
+            .map(|w| w.0)
+            .collect()
+    }
+
+    #[test]
+    fn test_set_confidence_on_every_target() {
+        let (mut wn, dog, animal, cat) = confidence_fixture();
+        let yaml = format!(
+            "- add_example:\n    synset: {dog}\n    example: the dog barked\n\
+             - add_relation:\n    source: {dog}\n    relation: hypernym\n    target: {animal}\n\
+             - add_relation:\n    source: {dog}\n    source_sense: lemma=dog\n    relation: antonym\n    target: {cat}\n    target_sense: lemma=cat\n\
+             - set_confidence:\n    synset: {dog}\n    confidence: 0.7\n\
+             - set_confidence:\n    synset: {dog}\n    sense: lemma=dog\n    confidence: 0.8\n\
+             - set_confidence:\n    synset: {dog}\n    entry: dog\n    confidence: 0.9\n\
+             - set_confidence:\n    synset: {dog}\n    definition: 1\n    confidence: 0.6\n\
+             - set_confidence:\n    synset: {dog}\n    example: 1\n    confidence: 0.5\n\
+             - set_confidence:\n    synset: {dog}\n    relation: hypernym\n    target: {animal}\n    confidence: 0.4\n\
+             - set_confidence:\n    synset: {dog}\n    sense: lemma=dog\n    relation: antonym\n    target: {cat}\n    target_sense: lemma=cat\n    confidence: 0.3\n"
+        );
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+
+        let ss = wn.synset_by_id(&dog).unwrap().unwrap();
+        assert_eq!(ss.confidence, Some(0.7));
+        assert_eq!(ss.definition.confidence("a dog"), Some(0.6));
+        assert_eq!(ss.example[0].confidence, Some(0.5));
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.4));
+        let dog_sense = wn.get_sense_id2("dog", &dog).unwrap().unwrap();
+        let cat_sense = wn.get_sense_id2("cat", &cat).unwrap().unwrap();
+        let (_, _, sense) = wn.get_sense_by_id(&dog_sense).unwrap().unwrap();
+        assert_eq!(sense.confidence, Some(0.8));
+        assert_eq!(sense.antonym.confidence(cat_sense.as_str()), Some(0.3));
+        let entry = wn.entry_by_lemma("dog").unwrap().remove(0);
+        assert_eq!(entry.confidence, Some(0.9));
+
+        // The inverse direction addresses the same stored relation; omitting `confidence`
+        // clears it.
+        let yaml = format!(
+            "- set_confidence:\n    synset: {animal}\n    relation: hyponym\n    target: {dog}\n    confidence: 0.35\n\
+             - set_confidence:\n    synset: {dog}\n"
+        );
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let ss = wn.synset_by_id(&dog).unwrap().unwrap();
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.35));
+        assert_eq!(ss.confidence, None);
+    }
+
+    #[test]
+    fn test_set_confidence_errors() {
+        let (mut wn, dog, animal, _) = confidence_fixture();
+        for yaml in [
+            // Out of range.
+            format!("- set_confidence:\n    synset: {dog}\n    confidence: 1.5\n"),
+            // No such relation.
+            format!("- set_confidence:\n    synset: {dog}\n    relation: hypernym\n    target: {animal}\n    confidence: 0.5\n"),
+            // Relation without a target.
+            format!("- set_confidence:\n    synset: {dog}\n    relation: hypernym\n    confidence: 0.5\n"),
+            // Ambiguous selector.
+            format!("- set_confidence:\n    synset: {dog}\n    definition: 1\n    example: 1\n    confidence: 0.5\n"),
+            // No such example / definition / entry.
+            format!("- set_confidence:\n    synset: {dog}\n    example: 1\n    confidence: 0.5\n"),
+            format!("- set_confidence:\n    synset: {dog}\n    definition: 2\n    confidence: 0.5\n"),
+            format!("- set_confidence:\n    synset: {dog}\n    entry: cat\n    confidence: 0.5\n"),
+        ] {
+            assert!(apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).is_err(),
+                "should have failed: {yaml}");
+        }
+    }
+
+    #[test]
+    fn test_update_relations_and_rewording_keep_confidence() {
+        let (mut wn, dog, animal, _) = confidence_fixture();
+        let yaml = format!(
+            "- add_relation:\n    source: {dog}\n    relation: hypernym\n    target: {animal}\n\
+             - add_example:\n    synset: {dog}\n    example: the dog barked\n\
+             - set_confidence:\n    synset: {dog}\n    relation: hypernym\n    target: {animal}\n    confidence: 0.4\n\
+             - set_confidence:\n    synset: {dog}\n    definition: 1\n    confidence: 0.6\n\
+             - set_confidence:\n    synset: {dog}\n    example: 1\n    confidence: 0.5\n\
+             - update_relations:\n    synset: {dog}\n    relations:\n    - relation: hypernym\n      target: {animal}\n\
+             - change_definition:\n    synset: {dog}\n    definition: a domestic dog\n\
+             - update_example:\n    synset: {dog}\n    number: 1\n    example: the dog barked loudly\n"
+        );
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let ss = wn.synset_by_id(&dog).unwrap().unwrap();
+        assert_eq!(ss.hypernym.confidence(animal.as_str()), Some(0.4));
+        assert_eq!(ss.definition.confidence("a domestic dog"), Some(0.6));
+        assert_eq!(ss.example[0].confidence, Some(0.5));
     }
 
     #[test]
