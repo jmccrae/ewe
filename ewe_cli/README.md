@@ -75,6 +75,12 @@ An example of the usage of the automaton file is given below
     pos: n
     lemmas:
       - bar
+- add_synset:                # `id` and `ili` are optional: without `id` one is derived
+    id: 02084071-n             # from the definition
+    ili: i46360
+    definition: a member of the genus Canis
+    lexfile: noun.animal
+    lemmas: [dog]
 - delete_synset:
     synset: 00001740-n
     reason: "Duplicate (#123)"
@@ -114,5 +120,61 @@ An example of the usage of the automaton file is given below
           target: 00001742-n
           source_lemma: test
           target_lemma: test
+- set_confidence:            # WN-LMF confidenceScore, 0.0-1.0, of the synset itself
+    synset: 00001740-n
+    confidence: 0.8
+- set_confidence:            # ... or one thing inside it: `sense`, `entry`, `definition`,
+    synset: 00001740-n       # `example` (1-indexed), or a `relation` to a `target`
+    relation: hypernym
+    target: 00001741-n
+    confidence: 0.6
+- set_confidence:            # a sense relation: `sense` is its source (`target_sense` can
+    synset: 00001740-n       # be omitted for domain_topic/domain_region/exemplifies/other
+    sense: "lemma=bar"       # targeting the synset itself)
+    relation: antonym
+    target: 00001742-n
+    target_sense: "lemma=baz"
+    confidence: 0.5
+- set_confidence:            # omitting `confidence` clears it (i.e. back to 1.0)
+    synset: 00001740-n
+    example: 1
 - validate
 ```
+
+### Confidence scores
+
+Actions that create or change something take an optional WN-LMF confidence score (0.0-1.0),
+so it can be set in the same step. Omitting it means no score, which WN-LMF treats as 1.0.
+
+```yaml
+- add_synset:
+    definition: a feathered animal
+    lexfile: noun.animal
+    lemmas: [bird]
+    confidence: 0.7              # the new synset
+    definition_confidence: 0.6   # its definition
+- add_entry:
+    synset: last
+    lemma: fowl
+    pos: n
+    confidence: 0.8              # the new sense
+    entry_confidence: 0.9        # the lexical entry (re-scores it if "fowl" already had one)
+- add_example:
+    synset: last
+    example: the bird sang
+    confidence: 0.5
+- add_relation:                  # a symmetric relation (also, similar, antonym, ...) is
+    source: last                 # scored in both directions
+    relation: hypernym
+    target: 00001741-n
+    confidence: 0.4
+```
+
+`change_definition`, `update_example` and each `update_relations` item take `confidence` too;
+there, omitting it keeps the item's current score. To change the score of something that
+already exists without otherwise editing it, use `set_confidence` (examples above).
+
+Confidence scores appear in the YAML source as a `confidence:` key on a synset, sense,
+entry or example, and on definitions and relation targets by writing the list item as a map,
+e.g. `hypernym: [{target: 00001741-n, confidence: 0.6}]`. Items without a score keep the plain
+form, so a wordnet with no scores is unchanged.
