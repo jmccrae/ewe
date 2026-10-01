@@ -124,10 +124,10 @@ fn relation_confidence_action(
 /// the definition, then examples: updates first (they only replace content in place), then
 /// deletes in descending original-number order (so an earlier delete never shifts the position
 /// a later one, or an update above it, expects), then adds last (which always append, so
-/// ordering doesn't matter for them). An existing example's confidence is set alongside its
-/// update (by original number, before any delete shifts it); every other confidence is set
-/// last, once whatever it scores exists. A malformed confidence draft is an error rather than
-/// being silently dropped.
+/// ordering doesn't matter for them). A new example's confidence goes inline on its
+/// `AddExample`; an existing example's is set alongside its update (by original number, before
+/// any delete shifts it); every other confidence is set last, once whatever it scores exists.
+/// A malformed confidence draft is an error rather than being silently dropped.
 fn build_actions(
     original: &MemberSynset,
     confidence: &ConfidenceDrafts,
@@ -225,27 +225,16 @@ fn build_actions(
         });
     }
 
-    // New examples are appended after whatever existing ones survive the deletes above.
-    let mut new_example_number = drafts
-        .iter()
-        .filter(|d| d.original_number.is_some() && !d.deleted)
-        .count();
-    let mut new_example_scores = Vec::new();
     for draft in drafts {
         if draft.original_number.is_none() && !draft.deleted && !draft.text.trim().is_empty() {
             actions.push(Action::AddExample {
-                confidence: None,
                 synset: SynsetRef::Id(synset_id.clone()),
                 example: draft.text.clone(),
                 source: normalize_source(&draft.source),
+                confidence: parse_confidence_draft(&draft.confidence)?,
             });
-            new_example_number += 1;
-            if let Some(c) = parse_confidence_draft(&draft.confidence)? {
-                new_example_scores.push(set_confidence(synset_id, Some(c), None, None, Some(new_example_number), None));
-            }
         }
     }
-    actions.extend(new_example_scores);
 
     // `DeleteRelation` clears links between the pair in both directions regardless of type
     // (see change_manager::delete_rel/delete_sense_rel), so deletes never need the
@@ -1234,15 +1223,16 @@ mod tests {
             Action::AddRelation {
                 source: SynsetRef::Id(dog.clone()), source_sense: None,
                 relation: "hypernym".to_string(), target: SynsetRef::Id(animal.clone()),
-                target_sense: None, source_lemma: None, target_lemma: None,
+                target_sense: None, source_lemma: None, target_lemma: None, confidence: None,
             },
             Action::AddRelation {
                 source: SynsetRef::Id(dog.clone()), source_sense: None,
                 relation: "antonym".to_string(), target: SynsetRef::Id(cat.clone()),
                 target_sense: None, source_lemma: Some("dog".to_string()),
-                target_lemma: Some("cat".to_string()),
+                target_lemma: Some("cat".to_string()), confidence: None,
             },
-            Action::AddExample { synset: SynsetRef::Id(dog.clone()), example: "woof".to_string(), source: None },
+            Action::AddExample { synset: SynsetRef::Id(dog.clone()), example: "woof".to_string(), source: None,
+                confidence: None },
         ];
         apply_automaton(actions, &mut wn, &mut changes).unwrap();
         (wn, dog, animal, cat)
