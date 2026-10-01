@@ -159,6 +159,8 @@ pub async fn add_synset(
     let actions = vec![Action::AddSynset {
         confidence: None,
         definition_confidence: None,
+        id: None,
+        ili: None,
         definition,
         lexfile,
         pos,

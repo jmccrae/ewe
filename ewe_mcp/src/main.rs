@@ -482,6 +482,8 @@ mod tests {
         vec![Action::AddSynset {
             confidence: None,
             definition_confidence: None,
+            id: None,
+            ili: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),

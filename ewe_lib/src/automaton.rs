@@ -130,6 +130,8 @@ pub fn apply_automaton<L: Lexicon>(
                 subcats,
                 confidence,
                 definition_confidence,
+                id,
+                ili,
             } => {
                 let poses = wn.pos_for_lexfile(&lexfile).map_err(|e| e.to_string())?;
                 let pos = if let Some(pos) = pos {
@@ -153,15 +155,39 @@ pub fn apply_automaton<L: Lexicon>(
                     poses.iter().next().unwrap().to_pos_key()
                 };
 
+                let id = match id {
+                    Some(id) => {
+                        let id = SynsetId::new_owned(id);
+                        if !id.as_str().ends_with(&format!("-{}", pos.as_str())) {
+                            return Err(format!(
+                                "Synset id {} does not match part of speech {}",
+                                id.as_str(),
+                                pos.as_str()
+                            ));
+                        }
+                        if wn.synset_by_id(&id).map_err(|e| e.to_string())?.is_some() {
+                            return Err(format!("Duplicate Synset ID: {}", id.as_str()));
+                        }
+                        Some(id)
+                    }
+                    None => None,
+                };
+
                 match change_manager::add_synset(
                     wn,
                     definition,
                     lexfile,
                     pos.clone(),
-                    None,
+                    id,
                     changes,
                 ) {
                     Ok(new_id) => {
+                        if let Some(ili) = ili {
+                            wn.update_synset(&new_id, |s| {
+                                s.ili = Some(ILIID::new(&ili));
+                            })
+                            .map_err(|e| e.to_string())?;
+                        }
                         if subcats.is_empty() {
                             for lemma in lemmas {
                                 change_manager::add_entry(
@@ -947,6 +973,14 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         definition_confidence: Option<f64>,
+        /// Id for the new synset (e.g. `00001740-n`). Omit to derive one from the definition.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// ILI for the new synset (e.g. `i35545`). Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ili: Option<String>,
     },
     #[serde(rename = "delete_synset")]
     DeleteSynset {
@@ -1519,6 +1553,8 @@ mod tests {
             Action::AddSynset {
                 confidence: None,
                 definition_confidence: None,
+                id: None,
+                ili: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1596,6 +1632,8 @@ mod tests {
             Action::AddSynset {
                 confidence: None,
                 definition_confidence: None,
+                id: None,
+                ili: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1829,6 +1867,29 @@ mod tests {
         let n = wn.n_synsets().unwrap();
         let yaml = "- add_synset:\n    definition: x\n    lexfile: noun.animal\n    lemmas: [x]\n    definition_confidence: -1\n";
         assert!(apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).is_err());
+        assert_eq!(wn.n_synsets().unwrap(), n);
+    }
+
+    #[test]
+    fn test_add_synset_with_id_and_ili() {
+        let (mut wn, _, _, _) = confidence_fixture();
+        let yaml = "- add_synset:\n    id: 02084071-n\n    ili: i46360\n    definition: a canine\n    lexfile: noun.animal\n    pos: n\n    lemmas: [madra]\n    definition_confidence: 0.0\n";
+        let (new_id, _) = apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let id = SynsetId::new("02084071-n");
+        assert_eq!(new_id, Some(id.clone()));
+        let ss = wn.synset_by_id(&id).unwrap().unwrap();
+        assert_eq!(ss.ili, Some(ILIID::new("i46360")));
+        assert_eq!(ss.definition.confidence("a canine"), Some(0.0));
+
+        let n = wn.n_synsets().unwrap();
+        // Duplicate id, and an id whose POS doesn't match, both create nothing.
+        for yaml in [
+            "- add_synset:\n    id: 02084071-n\n    definition: another canine\n    lexfile: noun.animal\n    lemmas: [x]\n",
+            "- add_synset:\n    id: 02084072-v\n    definition: a third canine\n    lexfile: noun.animal\n    lemmas: [x]\n",
+        ] {
+            assert!(apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).is_err(),
+                "should have failed: {yaml}");
+        }
         assert_eq!(wn.n_synsets().unwrap(), n);
     }
 
@@ -2177,6 +2238,8 @@ mod tests {
         let actions = vec![Action::AddSynset {
             confidence: None,
             definition_confidence: None,
+            id: None,
+            ili: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
@@ -2213,6 +2276,8 @@ mod tests {
         let actions = vec![Action::AddSynset {
             confidence: None,
             definition_confidence: None,
+            id: None,
+            ili: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
