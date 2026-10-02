@@ -2,7 +2,7 @@
 use ewe_lib::progress::{LoggingProgress, Progress};
 use ewe_lib::wordnet::{Lexicon, ReDBLexicon};
 use std::ops::{Deref, DerefMut};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
 use std::time::SystemTime;
 use teanga::disk_corpus::RedbDb;
@@ -164,8 +164,10 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
                 std::fs::remove_file(&settings.corpus_database)?;
             }
             let mut corpus = DiskCorpus::<RedbDb>::new(&settings.corpus_database)?;
-            let file = std::fs::File::open(source)?;
-            teanga::read_yaml(file, &mut corpus)?;
+            for path in corpus_source_files(source)? {
+                let file = std::fs::File::open(&path)?;
+                teanga::read_yaml(file, &mut corpus)?;
+            }
             corpus.commit()?;
             corpus
         } else {
@@ -187,8 +189,27 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
     Ok(corpus)
 }
 
+/// The corpus YAML files making up `corpus_source`: the file itself, or, if it is a
+/// directory, every `.yaml` file directly inside it, in name order. A directory lets a large
+/// corpus be split into several files (e.g. one per source), all sharing the same `_meta`.
+fn corpus_source_files(source: &str) -> std::io::Result<Vec<PathBuf>> {
+    let path = Path::new(source);
+    if !path.is_dir() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut files = std::fs::read_dir(path)?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|p| p.is_file() && p.extension().is_some_and(|ext| ext == "yaml"))
+        .collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
 /// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
-/// and `source` is newer than it.
+/// and `source` (or, for a directory, the directory itself or any corpus file in it) is
+/// newer than it.
 fn is_file_stale(database: &str, source: &str, disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
     let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
         Ok(mtime) => mtime,
@@ -197,5 +218,84 @@ fn is_file_stale(database: &str, source: &str, disable_auto_reload: bool) -> Res
     if disable_auto_reload {
         return Ok(false);
     }
-    Ok(Path::new(source).metadata()?.modified()? > db_mtime)
+    // The directory's own mtime changes when a file is added or removed.
+    let mut latest = Path::new(source).metadata()?.modified()?;
+    for path in corpus_source_files(source)? {
+        latest = latest.max(path.metadata()?.modified()?);
+    }
+    Ok(latest > db_mtime)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory under the system temp dir, unique per test run, cleaned up on drop.
+    struct ScratchDir(PathBuf);
+
+    impl ScratchDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ewe-db-test-{name}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            ScratchDir(dir)
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const META: &str = "_meta:
+    text:
+        type: characters
+    tokens:
+        type: span
+        base: text
+    test_key:
+        type: element
+        base: tokens
+        data: string
+";
+
+    #[test]
+    fn test_corpus_source_directory() {
+        let scratch = ScratchDir::new("corpus-dir");
+        let source = scratch.0.join("corpus");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("a.yaml"), format!("{META}ecWc:
+    text: This is an example
+    tokens: [[0, 4], [5, 7], [8, 10], [11, 18]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        std::fs::write(source.join("b.yaml"), format!("{META}Kjco:
+    text: This is a document.
+    tokens: [[0, 4], [5, 7], [8, 9], [10, 18], [18, 19]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        std::fs::write(source.join("notes.txt"), "not a corpus file").unwrap();
+
+        let source = source.to_string_lossy().to_string();
+        assert_eq!(corpus_source_files(&source).unwrap().len(), 2);
+
+        let mut settings = EweSettings::default();
+        settings.id_prefix = "test".to_string();
+        settings.corpus_source = Some(source.clone());
+        settings.corpus_database = scratch.0.join("corpus.db").to_string_lossy().to_string();
+        let corpus = open_corpus(&settings).unwrap();
+        let mut ids = corpus.get_order().to_vec();
+        ids.sort();
+        assert_eq!(ids, vec!["Kjco".to_string(), "ecWc".to_string()]);
+        drop(corpus);
+
+        assert!(!is_file_stale(&settings.corpus_database, &source, false).unwrap());
+    }
 }
