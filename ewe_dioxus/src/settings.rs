@@ -10,7 +10,7 @@ pub struct EweSettings {
     /// The corpus database file
     #[serde(default = "default_corpus_database")]
     pub corpus_database: String,
-    /// The corpus YAML file to load from
+    /// The corpus YAML file (or directory of YAML files) to load from
     #[serde(default)]
     pub corpus_source: Option<String>,
     /// Path (relative to the working directory) of the logo image, served at `/logo`
