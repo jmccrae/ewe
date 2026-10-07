@@ -33,6 +33,18 @@
     direction: rtl;
 }
 
+.concordance-left > span {
+    direction: ltr;
+    /* Default functionality of direction: rtl tells the browser's bidirectional
+     * text algorithm that the paragraph is right-to-left. Characters which have
+     * no direction of their own, like ".", "(", and "," are placed according to
+     * that paragraph direction. A leading "." is moved to the visual end, as in
+     * ".i. a folad ⁊ in" --> "i. a folad ⁊ in." which is not desirable. Isolate
+     * the text, leave direction: rtl, and add Univode bidi override so the text
+     * inside is laid out left-to-right. */
+    unicode-bidi: isolate;
+}
+
 .concordance-target {
     width: 10%;
     text-align: center;

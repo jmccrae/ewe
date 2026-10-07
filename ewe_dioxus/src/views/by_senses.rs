@@ -69,7 +69,7 @@ pub fn BySenses(id: ReadSignal<String>, page: ReadSignal<usize>) -> Element {
                                                 tr {
                                                     key: "{index}",
                                                     title: "{line.doc_id}",
-                                                    td { class: "concordance-left", "{line.left}" }
+                                                    td { class: "concordance-left", span { "{line.left}" } }
                                                     td { class: "concordance-target", "{line.target}" }
                                                     td { class: "concordance-right", "{line.right}" }
                                                 }
