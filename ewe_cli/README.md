@@ -116,3 +116,20 @@ An example of the usage of the automaton file is given below
           target_lemma: test
 - validate
 ```
+
+## Non-interactive validation (CI)
+
+`ewe validate` runs validation without any prompting and exits with status `0` if there are no
+errors, `1` if there are validation errors, and `2` if the wordnet could not be loaded.
+
+```
+ewe validate --wordnet path/to/wordnet
+```
+
+Individual checks can be turned off:
+
+- `--skip-symmetric`: symmetric relation checks
+- `--skip-duplicate-ili`: duplicate ILIs
+- `--skip-duplicate-definitions`: duplicate definitions
+- `--skip-similar`: `similar` links must join an `a` and an `s` synset
+- `--skip-hypernym`: hypernym/instance_hypernym checks (cross-POS, instance targets, missing hypernym, hypernym/instance conflict, transitivity)
