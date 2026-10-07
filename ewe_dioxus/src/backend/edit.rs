@@ -157,6 +157,8 @@ pub async fn add_synset(
 ) -> Result<MemberSynset> {
     let mut lexicon = write_lexicon()?;
     let actions = vec![Action::AddSynset {
+        confidence: None,
+        definition_confidence: None,
         definition,
         lexfile,
         pos,
