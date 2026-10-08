@@ -69,6 +69,30 @@ enum Command {
         #[arg(default_value = "./")]
         path: PathBuf,
     },
+    /// Validate the wordnet without prompting, exiting with status 0 if there are no validation
+    /// errors, 1 if there are, and 2 if the wordnet could not be loaded or validated.
+    Validate {
+        /// Skip symmetric sense/synset relation checks
+        #[arg(long)]
+        skip_symmetric: bool,
+
+        /// Skip the duplicate ILI check
+        #[arg(long)]
+        skip_duplicate_ili: bool,
+
+        /// Skip the duplicate definition check
+        #[arg(long)]
+        skip_duplicate_definitions: bool,
+
+        /// Skip the check that `similar` links join an `a` and an `s` synset
+        #[arg(long)]
+        skip_similar: bool,
+
+        /// Skip hypernym/instance_hypernym checks (cross-POS, instance targets, missing
+        /// hypernym, hypernym/instance conflict, transitivity)
+        #[arg(long)]
+        skip_hypernym: bool,
+    },
     /// Print summary statistics about the wordnet (synsets, entries, senses, relations), plus
     /// counts for the hypernym-hierarchy "test patterns" from Lohk, Fellbaum & Võhandu, "Tuning
     /// Hierarchies in Princeton WordNet" (GWC 2016) - self-hypernymy, shortcut, dense
@@ -203,6 +227,24 @@ fn main() {
                 *shortcut_instances,
                 *dense_component_instances,
                 *compound_pattern_instances,
+            );
+        }
+        Some(Command::Validate {
+            skip_symmetric,
+            skip_duplicate_ili,
+            skip_duplicate_definitions,
+            skip_similar,
+            skip_hypernym,
+        }) => {
+            commands::validate::run(
+                cli.wordnet,
+                ewe_lib::validate::ValidationOptions {
+                    skip_symmetric: *skip_symmetric,
+                    skip_duplicate_ili: *skip_duplicate_ili,
+                    skip_duplicate_definitions: *skip_duplicate_definitions,
+                    skip_similar: *skip_similar,
+                    skip_hypernym: *skip_hypernym,
+                },
             );
         }
         None => {

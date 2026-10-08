@@ -8,7 +8,27 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
 
+/// Which optional checks `validate_with` should skip. The default runs every check.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ValidationOptions {
+    /// Skip symmetric sense/synset relation checks (`SenseRelationSymmetry`, `SynsetRelationSymmetry`).
+    pub skip_symmetric: bool,
+    /// Skip the duplicate ILI check (`DuplicateILI`).
+    pub skip_duplicate_ili: bool,
+    /// Skip the duplicate definition check (`DuplicateDefinition`).
+    pub skip_duplicate_definitions: bool,
+    /// Skip the check that `similar` links join an `a` and an `s` synset (`SimilarTargetPOS`).
+    pub skip_similar: bool,
+    /// Skip hypernym/instance_hypernym checks (`CrossPOSHyper`, `HypernymTargetIsInstance`,
+    /// `NoHypernym`, `HypernymInstanceConflict`, `Transitivity`).
+    pub skip_hypernym: bool,
+}
+
 pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<Vec<ValidationError>> {
+    validate_with(wn, bar, &ValidationOptions::default())
+}
+
+pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts : &ValidationOptions) -> Result<Vec<ValidationError>> {
     let mut errors = Vec::new();
     bar.start((wn.n_entries()? + 2 * wn.n_synsets()?) as u64);
     bar.set_percent_mode(true);
@@ -86,7 +106,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                // No relation type marked `is_symmetric` is sense-synset, so a
                // `Synset` target here would mean the data is already broken
                // in a way `SenseRelationPOS` above will have caught.
-               if rel.is_symmetric() {
+               if rel.is_symmetric() && !opts.skip_symmetric {
                    if let SenseOrSynsetId::Sense(target_sense) = &target {
                        if !wn.sense_links_from_id(target_sense)?.iter().any(|(r2, t2)| {
                            *r2 == rel && *t2 == UnresolvedSenseOrSynsetId::Sense(sense.id.clone()) }) {
@@ -197,7 +217,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                         ili: ili.clone()
                     });
                 }
-                if ili.as_str() != "in" {
+                if ili.as_str() != "in" && !opts.skip_duplicate_ili {
                     match ili_index.get(ili.as_str()) {
                         Some(prev) => {
                             errors.push(ValidationError::DuplicateILI {
@@ -238,7 +258,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
         }
 
         for defn in synset.definition.iter() {
-            if !defn.is_empty() {
+            if !defn.is_empty() && !opts.skip_duplicate_definitions {
                 match definition_index.get(defn) {
                     Some(prev) => {
                         errors.push(ValidationError::DuplicateDefinition {
@@ -265,6 +285,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
             if rel == SynsetRelType::Hypernym ||
                 rel == SynsetRelType::InstanceHypernym {
                 match wn.synset_by_id(&target)? {
+                    Some(_) if opts.skip_hypernym => {},
                     Some(target_synset) => {
                         if synset.part_of_speech != target_synset.part_of_speech {
                             errors.push(ValidationError::CrossPOSHyper {
@@ -289,7 +310,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                     }
                 }
             }
-            if rel == SynsetRelType::Similar {
+            if rel == SynsetRelType::Similar && !opts.skip_similar {
                 if let Some(target_synset) = wn.synset_by_id(&target)? {
                     let expected = match synset.part_of_speech {
                         PartOfSpeech::a => Some(PartOfSpeech::s),
@@ -306,7 +327,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                     }
                 }
             }
-            if rel.is_symmetric() {
+            if rel.is_symmetric() && !opts.skip_symmetric {
                 if !wn.links_from(&target)?.iter().any(|(r2, t2)| {
                     *r2 == rel && *t2 == synset_id }) {
                     errors.push(ValidationError::SynsetRelationSymmetry {
@@ -340,7 +361,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
                 });
         }
 
-        if synset.part_of_speech == PartOfSpeech::n &&
+        if !opts.skip_hypernym && synset.part_of_speech == PartOfSpeech::n &&
             !synset_id.as_str().starts_with("00001740") &&
             synset.hypernym.is_empty() &&
             synset.instance_hypernym.is_empty() {
@@ -349,7 +370,7 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
             });
         }
 
-        if !synset.hypernym.is_empty() && !synset.instance_hypernym.is_empty() {
+        if !opts.skip_hypernym && !synset.hypernym.is_empty() && !synset.instance_hypernym.is_empty() {
             errors.push(ValidationError::HypernymInstanceConflict {
                 id: synset_id.clone()
             });
@@ -402,7 +423,9 @@ pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<
             }
         }
 
-        check_transitive(wn, &mut errors, &synset_id, &synset)?;
+        if !opts.skip_hypernym {
+            check_transitive(wn, &mut errors, &synset_id, &synset)?;
+        }
 
     }
     check_no_loops(wn, &mut errors, bar)?;
@@ -893,6 +916,29 @@ mod tests {
             ValidationError::DuplicateILI { id1, id2, ili } if
                 ili.as_str() == "i12345" &&
                 ((*id1 == a && *id2 == b) || (*id1 == b && *id2 == a)))));
+    }
+
+    #[test]
+    fn test_skip_options() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000050-n", "skip shared", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000051-n", "skip shared", 'n', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.ili = Some(ILIID::new("i999")); }).unwrap();
+        wn.update_synset(&b, |ss| { ss.ili = Some(ILIID::new("i999")); }).unwrap();
+
+        let run = |opts: &ValidationOptions| validate_with(&wn, &mut NullProgress, opts).unwrap();
+        let all = run(&ValidationOptions::default());
+        assert!(all.iter().any(|e| matches!(e, ValidationError::DuplicateDefinition { .. })));
+        assert!(all.iter().any(|e| matches!(e, ValidationError::DuplicateILI { .. })));
+        assert!(all.iter().any(|e| matches!(e, ValidationError::NoHypernym { .. })));
+
+        let skipped = run(&ValidationOptions {
+            skip_duplicate_definitions: true, skip_duplicate_ili: true, skip_hypernym: true,
+            ..Default::default() });
+        assert!(!skipped.iter().any(|e| matches!(e,
+            ValidationError::DuplicateDefinition { .. } | ValidationError::DuplicateILI { .. } |
+            ValidationError::NoHypernym { .. })));
     }
 
     #[test]
