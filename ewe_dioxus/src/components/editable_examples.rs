@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
 use ewe_lib::wordnet::Example;
+use crate::components::{confidence_draft, ConfidenceBadge};
+#[cfg(feature = "edit")]
+use crate::components::ConfidenceInput;
 
 /// One example row as currently drafted in the editor. Nothing here is saved until the shared
 /// accept button (`EditToggle`) commits every field's draft as a single batch.
@@ -13,6 +16,8 @@ pub struct ExampleDraft {
     /// Empty means no source; normalized to `None` when building the automaton action (an
     /// empty source is not a valid value).
     pub source: String,
+    /// The draft confidence score - empty for none (see `components::confidence`).
+    pub confidence: String,
     /// Marked for deletion (existing rows only): hidden from the editing view, but kept around
     /// so the accept handler still knows to emit a `DeleteExample` for it.
     pub deleted: bool,
@@ -27,6 +32,7 @@ impl ExampleDraft {
                 original_number: Some(i + 1),
                 text: ex.text.clone(),
                 source: ex.source.clone().unwrap_or_default(),
+                confidence: confidence_draft(ex.confidence),
                 deleted: false,
             })
             .collect()
@@ -43,6 +49,8 @@ pub struct EditableExamplesProps {
     /// The draft rows, shown (and edited) while `editing` is on.
     pub drafts: Vec<ExampleDraft>,
     pub on_drafts_changed: EventHandler<Vec<ExampleDraft>>,
+    /// Whether to show each row's confidence input (see `EditToggle`'s ⚠ button).
+    pub show_confidence: bool,
 }
 
 /// Renders `examples` as plain, non-editable text - the shape shown on the public site and
@@ -69,6 +77,7 @@ fn plain_examples(examples: &[Example]) -> Element {
                     "“{example.text}”"
                 }
             },
+            ConfidenceBadge { value: example.confidence },
             if index < examples.len() - 1 {
                 ", "
             }
@@ -128,6 +137,21 @@ pub fn EditableExamples(props: EditableExamplesProps) -> Element {
                                 }
                             },
                         }
+                        if props.show_confidence {
+                            ConfidenceInput {
+                                value: draft.confidence.clone(),
+                                on_input: {
+                                    let drafts = drafts.clone();
+                                    move |value: String| {
+                                        let mut drafts = drafts.clone();
+                                        if let Some(row) = drafts.get_mut(index) {
+                                            row.confidence = value;
+                                        }
+                                        on_drafts_changed.call(drafts);
+                                    }
+                                },
+                            }
+                        }
                         button {
                             class: "edit-delete",
                             r#type: "button",
@@ -161,6 +185,7 @@ pub fn EditableExamples(props: EditableExamplesProps) -> Element {
                             original_number: None,
                             text: String::new(),
                             source: String::new(),
+                            confidence: String::new(),
                             deleted: false,
                         });
                         on_drafts_changed.call(drafts);

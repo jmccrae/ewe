@@ -1,11 +1,13 @@
 use dioxus::prelude::*;
-use crate::components::Synset;
+use crate::components::{ConfidenceBadge, Synset};
 use ewe_lib::wordnet::SynsetId;
 
 #[derive(PartialEq, Clone, Props)]
 pub struct RelationProps {
     relation_name: &'static str,
-    targets: Vec<(SynsetId, Option<String>, Option<String>)>,
+    /// (target synset, source lemma, target lemma, confidence) - the lemmas only for a sense
+    /// relation.
+    targets: Vec<(SynsetId, Option<String>, Option<String>, Option<f64>)>,
     display_ids: bool,
     display_sensekeys: bool,
     display_subcats: bool,
@@ -41,6 +43,7 @@ pub fn Relation(props : RelationProps) -> Element {
                                         }
                                     }
                                 },
+                                ConfidenceBadge { value: p.3 },
                                 Synset {
                                     synset_id: p.0.clone(),
                                     display_ids: props.display_ids,
