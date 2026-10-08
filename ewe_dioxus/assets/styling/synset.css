@@ -238,6 +238,15 @@
     gap: 4px;
 }
 
+/* The identifiers block is already shrunk to 0.75em, so don't shrink the score again. */
+.synset-identifiers-editing .confidence-input {
+    font-size: 1em;
+}
+
+.synset-identifiers-editing .confidence-field {
+    margin-left: 0;
+}
+
 .ili-input {
     font-family: var(--font-mono);
     font-size: 1em;
@@ -669,37 +678,63 @@
     color: var(--color-accent);
 }
 
-/* A WN-LMF confidence score below 1.0 (see `components::confidence`) - secondary metadata like
-   `.sense_key`, but a small pill so it reads as an annotation on whatever precedes it rather
-   than as part of the text. */
+/* A WN-LMF confidence score below 1.0 (see `components::confidence`): a warning sign coloured
+   on a red-orange-green spectrum by the score, set inline from Rust. */
 .confidence {
     display: inline-block;
     margin-left: 0.3em;
-    padding: 0 0.45em;
-    border-radius: 999px;
-    background: var(--color-surface-light);
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: 0.75em;
-    white-space: nowrap;
+    font-size: 0.85em;
+    line-height: 1;
+    cursor: help;
     vertical-align: middle;
+}
+
+/* The sign beside a confidence input in the editor, while the draft has no valid score. */
+.confidence-unset {
+    color: var(--color-text-muted);
+}
+
+.confidence-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 0.3em;
+}
+
+.confidence-field .confidence {
+    margin-left: 0;
 }
 
 .confidence-input {
     font-family: var(--font-mono);
     font-size: 0.9em;
     width: 5em;
-    margin-left: 0.3em;
 }
 
-.sense-confidence-editing {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
+/* The ⚠ button beside accept/reject that shows/hides the confidence inputs; filled in while
+   they're shown, like a pressed toggle. */
+.edit-toggle-actions .confidence-toggle {
+    font-size: 0.95rem;
 }
 
-.sense-confidence-editing-item {
-    display: inline-flex;
+.edit-toggle-actions .confidence-toggle-on {
+    background: var(--color-surface-light);
+    border-color: var(--color-text-muted);
+}
+
+/* The definition, its input and its confidence on one line, with the input taking whatever
+   width the label and confidence leave over. */
+.definition-row {
+    display: flex;
     align-items: center;
+    gap: 4px;
+}
+
+.definition-row .definition-editing {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.definition-row .definition-input {
+    width: 100%;
 }

@@ -41,6 +41,21 @@ impl ConfidenceDrafts {
     }
 }
 
+/// Whether anything in the synset carries a confidence score (even 1.0) - if so, the editor
+/// opens with the confidence inputs shown; otherwise they stay hidden until toggled on.
+fn has_confidence(synset: &MemberSynset) -> bool {
+    synset.confidence.is_some()
+        || first_definition_confidence(synset).is_some()
+        || synset.members.iter().any(|m| m.sense.confidence.is_some() || m.entry_confidence.is_some())
+        || synset.example.iter().any(|e| e.confidence.is_some())
+        || SYNSET_RELATION_TYPES
+            .iter()
+            .any(|info| synset_rel_values(synset, info.key).scores().next().is_some())
+        || SENSE_RELATION_TYPES
+            .iter()
+            .any(|info| sense_rel_values(synset, info.key).iter().any(|r| r.confidence.is_some()))
+}
+
 fn first_definition_confidence(synset: &MemberSynset) -> Option<f64> {
     synset.definition.first().and_then(|d| synset.definition.confidence(d))
 }
@@ -432,6 +447,9 @@ pub fn Synset(props: SynsetProps) -> Element {
     let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
     let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
     let mut confidence_drafts = use_signal(ConfidenceDrafts::default);
+    // Whether the editor shows the confidence inputs - toggled by `EditToggle`'s ⚠ button, and
+    // reset on entering edit mode to whether the synset has any scores at all.
+    let mut show_confidence = use_signal(|| false);
     // Only mutated (`.set()`) inside the `edit` feature's accept handler below; harmless when
     // it isn't.
     #[allow(unused_mut)]
@@ -524,18 +542,22 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     class: "pos",
                                     "({synset.part_of_speech})"
                                 },
-                                if editing() {
-                                    ConfidenceInput {
-                                        value: confidence_drafts().synset,
-                                        on_input: move |v| confidence_drafts.write().synset = v,
-                                    }
-                                } else {
+                                if !editing() {
                                     ConfidenceBadge { value: synset.confidence }
                                 },
                                 if editing() {
                                     EditableLemmas {
                                         drafts: lemma_drafts(),
                                         on_drafts_changed: move |drafts| lemma_drafts.set(drafts),
+                                        show_confidence: show_confidence(),
+                                        confidence: confidence_drafts().senses,
+                                        on_confidence_changed: move |(lemma, value): (String, String)| {
+                                            let mut drafts = confidence_drafts.write();
+                                            match drafts.senses.iter_mut().find(|(l, _)| *l == lemma) {
+                                                Some(entry) => entry.1 = value,
+                                                None => drafts.senses.push((lemma, value)),
+                                            }
+                                        },
                                     }
                                 } else {
                                     for (index, member) in synset.members.iter().enumerate() {
@@ -605,22 +627,16 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             drafts: wikidata_drafts(),
                                             on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
                                         }
-                                    }
-                                    div {
-                                        class: "field-row sense-confidence-editing",
-                                        b { class: "field-label", "Sense confidence: " }
-                                        for (index, (lemma, value)) in confidence_drafts().senses.into_iter().enumerate() {
+                                        // The synset's own score - shown with the identifiers
+                                        // rather than next to the part of speech, where it would
+                                        // read as scoring the first lemma.
+                                        if show_confidence() {
                                             span {
-                                                key: "{lemma}",
-                                                class: "sense-confidence-editing-item",
-                                                "{lemma}"
+                                                class: "synset-id-editing",
+                                                b { class: "synset-id-title", "Synset confidence: " }
                                                 ConfidenceInput {
-                                                    value,
-                                                    on_input: move |v| {
-                                                        if let Some(entry) = confidence_drafts.write().senses.get_mut(index) {
-                                                            entry.1 = v;
-                                                        }
-                                                    },
+                                                    value: confidence_drafts().synset,
+                                                    on_input: move |v| confidence_drafts.write().synset = v,
                                                 }
                                             }
                                         }
@@ -628,16 +644,18 @@ pub fn Synset(props: SynsetProps) -> Element {
                                 }
                                 if editing() {
                                     div {
-                                        class: "field-row",
+                                        class: "field-row definition-row",
                                         b { class: "field-label", "Definition: " }
                                         EditableDefinition {
                                             editing: true,
                                             value: definition_draft(),
                                             on_input: move |v| definition_draft.set(v),
                                         }
-                                        ConfidenceInput {
-                                            value: confidence_drafts().definition,
-                                            on_input: move |v| confidence_drafts.write().definition = v,
+                                        if show_confidence() {
+                                            ConfidenceInput {
+                                                value: confidence_drafts().definition,
+                                                on_input: move |v| confidence_drafts.write().definition = v,
+                                            }
                                         }
                                     }
                                 } else {
@@ -657,6 +675,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             examples: synset.example.clone(),
                                             drafts: example_drafts(),
                                             on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                            show_confidence: show_confidence(),
                                         }
                                     }
                                 } else {
@@ -665,6 +684,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         examples: synset.example.clone(),
                                         drafts: example_drafts(),
                                         on_drafts_changed: move |drafts| example_drafts.set(drafts),
+                                        show_confidence: false,
                                     }
                                 }
                                 if props.display_topics {
@@ -688,6 +708,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         on_pending_adds_changed: move |v| relation_adds.set(v),
                                         confidence_drafts: confidence_drafts().relations,
                                         on_confidence_drafts_changed: move |v| confidence_drafts.write().relations = v,
+                                        show_confidence: show_confidence(),
                                     }
                                 } else if show_relations() {
                                     div {
@@ -1078,8 +1099,10 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
                                         let wikidata = synset.wikidata.clone();
                                         let confidence = ConfidenceDrafts::from_synset(synset);
+                                        let scored = has_confidence(synset);
                                         move |_| {
                                             confidence_drafts.set(confidence.clone());
+                                            show_confidence.set(scored);
                                             lemma_drafts.set(members.clone());
                                             definition_draft.set(definition.clone());
                                             example_drafts.set(ExampleDraft::from_examples(&examples));
@@ -1153,6 +1176,8 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         editing.set(false);
                                         edit_error.set(None);
                                     },
+                                    show_confidence: show_confidence(),
+                                    on_toggle_confidence: move |_| show_confidence.toggle(),
                                     if editing() {
                                         DeleteSynsetButton { synset_id: synset.id.clone() }
                                     }

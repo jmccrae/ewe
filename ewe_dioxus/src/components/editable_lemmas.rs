@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+#[cfg(feature = "edit")]
+use crate::components::ConfidenceInput;
 
 #[derive(Clone, PartialEq, Props)]
 pub struct EditableLemmasProps {
@@ -7,6 +9,13 @@ pub struct EditableLemmasProps {
     /// keys, pronunciations, etc.) otherwise, since none of that applies while editing.
     pub drafts: Vec<String>,
     pub on_drafts_changed: EventHandler<Vec<String>>,
+    /// Whether to show a confidence input on each lemma (see `EditToggle`'s ⚠ button).
+    pub show_confidence: bool,
+    /// (lemma, draft) sense confidence scores, keyed by lemma rather than row so they follow
+    /// a lemma when it's reordered. A lemma with no entry has an empty draft.
+    pub confidence: Vec<(String, String)>,
+    /// Called with (lemma, draft) when a lemma's confidence input changes.
+    pub on_confidence_changed: EventHandler<(String, String)>,
 }
 
 /// The synset's member lemmas, editable as a compact inline list of text tokens (unlike
@@ -21,6 +30,8 @@ pub struct EditableLemmasProps {
 pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
     let drafts = props.drafts;
     let on_drafts_changed = props.on_drafts_changed;
+    let confidence = props.confidence;
+    let on_confidence_changed = props.on_confidence_changed;
 
     // The index currently being dragged, so `ondrop` on another row knows what to move.
     // Reorders are resolved locally (not via the HTML5 DataTransfer payload) since it's the
@@ -148,6 +159,19 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
                                 on_drafts_changed.call(drafts);
                             }
                         },
+                    }
+                    if props.show_confidence {
+                        ConfidenceInput {
+                            value: confidence
+                                .iter()
+                                .find(|(l, _)| l == lemma.trim())
+                                .map(|(_, c)| c.clone())
+                                .unwrap_or_default(),
+                            on_input: {
+                                let lemma = lemma.trim().to_string();
+                                move |v| on_confidence_changed.call((lemma.clone(), v))
+                            },
+                        }
                     }
                     button {
                         class: "edit-delete",

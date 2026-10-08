@@ -42,6 +42,8 @@ pub struct EditableRelationsProps {
     /// anything not in here still shows (and keeps) its saved score.
     pub confidence_drafts: Vec<(RelationKey, String)>,
     pub on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
+    /// Whether to show each existing relation's confidence input (see `EditToggle`'s ⚠ button).
+    pub show_confidence: bool,
 }
 
 /// The draft (if touched) or saved score of one existing relation, as input text.
@@ -151,6 +153,7 @@ fn render_synset_relation_group(
     on_pending_adds_changed: EventHandler<Vec<PendingRelation>>,
     confidence_drafts: &[(RelationKey, String)],
     on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
+    show_confidence: bool,
 ) -> Element {
     let visible_existing: Vec<SynsetId> = existing
         .iter()
@@ -192,10 +195,12 @@ fn render_synset_relation_group(
                         let value = relation_confidence_value(confidence_drafts, &key, existing.confidence(id.as_str()));
                         let drafts = confidence_drafts.to_vec();
                         rsx! {
-                            ConfidenceInput {
-                                value,
-                                on_input: move |v: String| on_confidence_drafts_changed
-                                    .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                            if show_confidence {
+                                ConfidenceInput {
+                                    value,
+                                    on_input: move |v: String| on_confidence_drafts_changed
+                                        .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                                }
                             }
                         }
                     }
@@ -252,6 +257,7 @@ fn render_sense_relation_group(
     on_pending_adds_changed: EventHandler<Vec<PendingRelation>>,
     confidence_drafts: &[(RelationKey, String)],
     on_confidence_drafts_changed: EventHandler<Vec<(RelationKey, String)>>,
+    show_confidence: bool,
 ) -> Element {
     let visible_existing: Vec<SenseRelation> = existing
         .iter()
@@ -300,10 +306,12 @@ fn render_sense_relation_group(
                         let value = relation_confidence_value(confidence_drafts, &key, r.confidence);
                         let drafts = confidence_drafts.to_vec();
                         rsx! {
-                            ConfidenceInput {
-                                value,
-                                on_input: move |v: String| on_confidence_drafts_changed
-                                    .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                            if show_confidence {
+                                ConfidenceInput {
+                                    value,
+                                    on_input: move |v: String| on_confidence_drafts_changed
+                                        .call(upsert_confidence_draft(&drafts, key.clone(), v)),
+                                }
                             }
                         }
                     }
@@ -400,6 +408,7 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                     on_pending_adds_changed,
                     &confidence_drafts,
                     on_confidence_drafts_changed,
+                    props.show_confidence,
                 )}
             }
             for info in SENSE_RELATION_TYPES.iter() {
@@ -412,6 +421,7 @@ pub fn EditableRelations(props: EditableRelationsProps) -> Element {
                     on_pending_adds_changed,
                     &confidence_drafts,
                     on_confidence_drafts_changed,
+                    props.show_confidence,
                 )}
             }
 

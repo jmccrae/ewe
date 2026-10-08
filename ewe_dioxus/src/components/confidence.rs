@@ -1,12 +1,19 @@
-//! WN-LMF confidence scores (`confidenceScore`): a read-only badge, and the input used for
-//! them while the synset-wide edit toggle is on.
+//! WN-LMF confidence scores (`confidenceScore`): a read-only warning sign, and the input used
+//! for them while the synset-wide edit toggle is on.
 //!
 //! No score at all means the WN-LMF default of 1.0, and a score of exactly 1.0 says the same
-//! thing - neither is worth any visual noise, so the badge only appears below 1.0.
+//! thing - neither is worth any visual noise, so the sign only appears below 1.0.
 
 use dioxus::prelude::*;
 
 const TITLE: &str = "Confidence score (WN-LMF confidenceScore)";
+
+/// The colour for a score on a red (0.0) - orange - green (1.0) spectrum. The hue runs
+/// 0-120 degrees; lightness is kept low enough that even the yellow-ish middle stays legible
+/// against a light background.
+fn confidence_color(c: f64) -> String {
+    format!("hsl({:.0}, 85%, 38%)", c.clamp(0.0, 1.0) * 120.0)
+}
 
 #[component]
 pub fn ConfidenceBadge(value: Option<f64>) -> Element {
@@ -14,28 +21,45 @@ pub fn ConfidenceBadge(value: Option<f64>) -> Element {
         Some(c) => rsx! {
             span {
                 class: "confidence",
-                title: TITLE,
-                "conf. {c}"
+                title: "Confidence: {c}",
+                color: confidence_color(c),
+                // U+FE0E asks for the text (not emoji) presentation, so `color` applies.
+                "\u{26A0}\u{FE0E}"
             }
         },
         None => rsx! {},
     }
 }
 
-/// A small number field for a draft score. Empty means no score.
+/// A small number field for a draft score, preceded by the same warning sign `ConfidenceBadge`
+/// shows outside the editor (so it's clear what the number is), coloured by the draft as it's
+/// typed. Unlike the badge, the sign is always shown here: grey while the draft is empty (no
+/// score) or not a valid score, and green at 1.0. Empty means no score.
 #[component]
 pub fn ConfidenceInput(value: String, on_input: EventHandler<String>) -> Element {
+    let color = match parse_confidence_draft(&value) {
+        Ok(Some(c)) => Some(confidence_color(c)),
+        _ => None,
+    };
     rsx! {
-        input {
-            class: "confidence-input",
-            r#type: "number",
-            min: "0",
-            max: "1",
-            step: "0.05",
-            placeholder: "conf.",
-            title: "{TITLE} - between 0 and 1, or empty for none",
-            value: "{value}",
-            oninput: move |e| on_input.call(e.value()),
+        span {
+            class: "confidence-field",
+            span {
+                class: if color.is_some() { "confidence" } else { "confidence confidence-unset" },
+                color: color,
+                "\u{26A0}\u{FE0E}"
+            }
+            input {
+                class: "confidence-input",
+                r#type: "number",
+                min: "0",
+                max: "1",
+                step: "0.05",
+                placeholder: "conf.",
+                title: "{TITLE} - between 0 and 1, or empty for none",
+                value: "{value}",
+                oninput: move |e| on_input.call(e.value()),
+            }
         }
     }
 }

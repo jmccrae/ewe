@@ -49,6 +49,8 @@ pub struct EditableExamplesProps {
     /// The draft rows, shown (and edited) while `editing` is on.
     pub drafts: Vec<ExampleDraft>,
     pub on_drafts_changed: EventHandler<Vec<ExampleDraft>>,
+    /// Whether to show each row's confidence input (see `EditToggle`'s ⚠ button).
+    pub show_confidence: bool,
 }
 
 /// Renders `examples` as plain, non-editable text - the shape shown on the public site and
@@ -135,18 +137,20 @@ pub fn EditableExamples(props: EditableExamplesProps) -> Element {
                                 }
                             },
                         }
-                        ConfidenceInput {
-                            value: draft.confidence.clone(),
-                            on_input: {
-                                let drafts = drafts.clone();
-                                move |value: String| {
-                                    let mut drafts = drafts.clone();
-                                    if let Some(row) = drafts.get_mut(index) {
-                                        row.confidence = value;
+                        if props.show_confidence {
+                            ConfidenceInput {
+                                value: draft.confidence.clone(),
+                                on_input: {
+                                    let drafts = drafts.clone();
+                                    move |value: String| {
+                                        let mut drafts = drafts.clone();
+                                        if let Some(row) = drafts.get_mut(index) {
+                                            row.confidence = value;
+                                        }
+                                        on_drafts_changed.call(drafts);
                                     }
-                                    on_drafts_changed.call(drafts);
-                                }
-                            },
+                                },
+                            }
                         }
                         button {
                             class: "edit-delete",
