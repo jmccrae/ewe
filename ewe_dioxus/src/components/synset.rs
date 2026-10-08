@@ -51,6 +51,7 @@ fn build_actions(
 
     if draft_definition != original_definition {
         actions.push(Action::Definition {
+            confidence: None,
             synset: SynsetRef::Id(synset_id.clone()),
             definition: draft_definition.to_string(),
         });
@@ -88,6 +89,7 @@ fn build_actions(
         let source = normalize_source(&draft.source);
         if draft.text != original.text || source != original.source {
             actions.push(Action::UpdateExample {
+                confidence: None,
                 synset: SynsetRef::Id(synset_id.clone()),
                 number,
                 example: draft.text.clone(),
@@ -112,6 +114,7 @@ fn build_actions(
     for draft in drafts {
         if draft.original_number.is_none() && !draft.deleted && !draft.text.trim().is_empty() {
             actions.push(Action::AddExample {
+                confidence: None,
                 synset: SynsetRef::Id(synset_id.clone()),
                 example: draft.text.clone(),
                 source: normalize_source(&draft.source),
@@ -154,6 +157,7 @@ fn build_actions(
             )
         };
         actions.push(Action::AddRelation {
+            confidence: None,
             source: SynsetRef::Id(source),
             source_sense: None,
             relation: add.info.store_as.to_string(),
