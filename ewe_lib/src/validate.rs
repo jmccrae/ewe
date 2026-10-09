@@ -7,9 +7,16 @@ use std::collections::{HashSet,HashMap};
 use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Which optional checks `validate_with` should skip. The default runs every check.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// A project can set these in the `[validation]` table of its `settings.toml` (see
+/// [`ValidationOptions::for_wordnet`]); keys are the field names below, and an unknown key is an
+/// error rather than silently ignored.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ValidationOptions {
     /// Skip symmetric sense/synset relation checks (`SenseRelationSymmetry`, `SynsetRelationSymmetry`).
     pub skip_symmetric: bool,
@@ -22,6 +29,59 @@ pub struct ValidationOptions {
     /// Skip hypernym/instance_hypernym checks (`CrossPOSHyper`, `HypernymTargetIsInstance`,
     /// `NoHypernym`, `HypernymInstanceConflict`, `Transitivity`).
     pub skip_hypernym: bool,
+}
+
+/// The part of a `settings.toml` that `ValidationOptions` reads - every other top-level key
+/// (`database`, `[theme]`, ...) belongs to `ewe_dioxus` and is ignored here.
+#[derive(Deserialize)]
+struct SettingsFile {
+    #[serde(default)]
+    validation: ValidationOptions,
+}
+
+impl ValidationOptions {
+    /// Reads the `[validation]` table from the contents of a `settings.toml`. A missing table
+    /// gives the default (run every check).
+    pub fn from_settings_str(contents: &str) -> std::result::Result<Self, String> {
+        toml::from_str::<SettingsFile>(contents)
+            .map(|s| s.validation)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Reads the `[validation]` table from the `settings.toml` at `path`.
+    pub fn from_settings_file(path: &Path) -> std::result::Result<Self, String> {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| format!("Could not read {}: {}", path.display(), e))?;
+        Self::from_settings_str(&contents)
+            .map_err(|e| format!("Invalid {}: {}", path.display(), e))
+    }
+
+    /// Finds the project `settings.toml` for the YAML source folder `yaml_dir` and reads its
+    /// `[validation]` table. Looks in `yaml_dir` itself, then up to two parents, so both the
+    /// standard `<root>/settings.toml` + `<root>/src/yaml/` layout (as written by `ewe init`)
+    /// and a flat layout are covered. No `settings.toml` found gives the default.
+    pub fn for_wordnet(yaml_dir: &Path) -> std::result::Result<Self, String> {
+        // `canonicalize` so `..` works for relative paths like "./" (whose `parent()` is "").
+        let start = yaml_dir.canonicalize().unwrap_or_else(|_| yaml_dir.to_path_buf());
+        for dir in start.ancestors().take(3) {
+            let candidate = dir.join("settings.toml");
+            if candidate.is_file() {
+                return Self::from_settings_file(&candidate);
+            }
+        }
+        Ok(Self::default())
+    }
+
+    /// Skips every check that either `self` or `other` skips.
+    pub fn union(self, other: Self) -> Self {
+        ValidationOptions {
+            skip_symmetric: self.skip_symmetric || other.skip_symmetric,
+            skip_duplicate_ili: self.skip_duplicate_ili || other.skip_duplicate_ili,
+            skip_duplicate_definitions: self.skip_duplicate_definitions || other.skip_duplicate_definitions,
+            skip_similar: self.skip_similar || other.skip_similar,
+            skip_hypernym: self.skip_hypernym || other.skip_hypernym,
+        }
+    }
 }
 
 pub fn validate<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar) -> Result<Vec<ValidationError>> {
@@ -939,6 +999,42 @@ mod tests {
         assert!(!skipped.iter().any(|e| matches!(e,
             ValidationError::DuplicateDefinition { .. } | ValidationError::DuplicateILI { .. } |
             ValidationError::NoHypernym { .. })));
+    }
+
+    #[test]
+    fn test_options_from_settings_str() {
+        let opts = ValidationOptions::from_settings_str(
+            "database = \"wordnet.db\"\n\n[theme]\nprimary = \"#002868\"\n\n\
+             [validation]\nskip_hypernym = true\nskip_duplicate_ili = true\n").unwrap();
+        assert_eq!(opts, ValidationOptions {
+            skip_hypernym: true, skip_duplicate_ili: true, ..Default::default() });
+
+        assert_eq!(ValidationOptions::from_settings_str("database = \"wordnet.db\"\n").unwrap(),
+            ValidationOptions::default());
+        assert!(ValidationOptions::from_settings_str("[validation]\nskip_hypernyms = true\n").is_err());
+    }
+
+    #[test]
+    fn test_options_for_wordnet_finds_project_settings() {
+        let root = std::env::temp_dir().join(format!("ewe-validation-opts-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let yaml = root.join("src").join("yaml");
+        std::fs::create_dir_all(&yaml).unwrap();
+        assert_eq!(ValidationOptions::for_wordnet(&yaml).unwrap(), ValidationOptions::default());
+
+        std::fs::write(root.join("settings.toml"), "[validation]\nskip_similar = true\n").unwrap();
+        let found = ValidationOptions::for_wordnet(&yaml);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(found.unwrap(), ValidationOptions { skip_similar: true, ..Default::default() });
+    }
+
+    #[test]
+    fn test_options_union() {
+        let a = ValidationOptions { skip_symmetric: true, ..Default::default() };
+        let b = ValidationOptions { skip_hypernym: true, ..Default::default() };
+        assert_eq!(a.union(b), ValidationOptions {
+            skip_symmetric: true, skip_hypernym: true, ..Default::default() });
     }
 
     #[test]

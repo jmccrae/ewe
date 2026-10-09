@@ -18,7 +18,7 @@ use ewe_lib::wordnet::{Lexicon, MemberSynset, PartOfSpeech, PosKey, SynsetId};
 #[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::wordnet::ReDBLexicon;
 #[cfg(any(feature = "server", feature = "desktop"))]
-use ewe_lib::validate::validate;
+use ewe_lib::validate::validate_with;
 #[cfg(any(feature = "server", feature = "desktop"))]
 use ewe_lib::progress::{NullProgress, Progress};
 #[cfg(any(feature = "server", feature = "desktop"))]
@@ -316,10 +316,11 @@ pub async fn get_progress() -> Result<Option<ProgressStatus>> {
 /// poll (which needs no lock this call holds) could end up waiting behind it for no reason.
 #[cfg_attr(not(feature = "desktop"), get("/api/edit/validate"))]
 pub async fn validate_lexicon() -> Result<Vec<String>> {
-    let outcome = tokio::task::spawn_blocking(|| -> Result<Vec<String>> {
+    let options = crate::db::read_settings().validation;
+    let outcome = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
         let lexicon = read_lexicon()?;
         let mut progress = SharedProgress::new("Validating");
-        let errors = validate(&*lexicon, &mut progress)
+        let errors = validate_with(&*lexicon, &mut progress, &options)
             .map_err(|e| EweEditError::Automaton(e.to_string()))?;
         Ok(errors.into_iter().map(|e| e.to_string()).collect())
     })
@@ -352,6 +353,7 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
     let source = settings.wordnet_source.clone().ok_or_else(|| {
         EweEditError::Save("No wordnet_source is configured - nowhere to save to".to_string())
     })?;
+    let options = settings.validation;
 
     // Runs on a blocking thread for the same reason `validate_lexicon` does - this holds the
     // write lock and does two long synchronous passes (validate, then the actual file writes),
@@ -359,7 +361,7 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
     let outcome = tokio::task::spawn_blocking(move || -> Result<SaveResult> {
         let mut lexicon = write_lexicon()?;
         let mut progress = SharedProgress::new("Validating");
-        let validation_errors: Vec<String> = validate(&*lexicon, &mut progress)
+        let validation_errors: Vec<String> = validate_with(&*lexicon, &mut progress, &options)
             .map_err(|e| EweEditError::Automaton(e.to_string()))?
             .into_iter()
             .map(|e| e.to_string())

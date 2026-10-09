@@ -97,6 +97,7 @@ accent = "#bf0a30"
 | `footer`            | string           | a generic credits footer | Raw HTML rendered as-is (via `dangerous_inner_html`) in the page footer. |
 | `disable_auto_reload` | bool           | `false` | If true, never rebuild `database`/`corpus_database` just because a source file is newer — they're still built if missing. Useful to skip a slow source scan on startup with very large sources. |
 | `lexicon_cache_mb`  | integer          | `128` | Bounds the lexicon database's in-memory page cache (redb otherwise defaults to 1GiB regardless of file size). |
+| `[validation]`      | table, optional  | all `false` | Validation checks to skip when validating or saving in the editor: `skip_symmetric`, `skip_duplicate_ili`, `skip_duplicate_definitions`, `skip_similar`, `skip_hypernym` (booleans). The `ewe` CLI and `ewe-mcp` read the same table from the project's `settings.toml` (see [`ewe_cli/README.md`](../ewe_cli/README.md#non-interactive-validation-ci)). An unknown key fails the load. |
 
 `logo` is read from disk (and inlined into the page) via the same server function that carries `project_name`/`footer` (`backend::api::get_branding`) rather than bundled at build time via Dioxus's `asset!` macro, so you can rebrand a running deployment (swap the logo file, or repoint the path in `settings.toml`) without rebuilding or restarting the app. `[theme]` overrides ride along in that same struct and are applied at runtime via `document.documentElement.style.setProperty(...)` — see [Styling](#styling) below.
 

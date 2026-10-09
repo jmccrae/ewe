@@ -151,6 +151,21 @@ Individual checks can be turned off:
 - `--skip-duplicate-definitions`: duplicate definitions
 - `--skip-similar`: `similar` links must join an `a` and an `s` synset
 - `--skip-hypernym`: hypernym/instance_hypernym checks (cross-POS, instance targets, missing hypernym, hypernym/instance conflict, transitivity)
+
+A project can also turn checks off permanently in the `[validation]` table of its
+`settings.toml`, using the flag names with underscores. The file is looked for in the wordnet's YAML folder
+and up to two folders above it, so `<project>/settings.toml` is found for `<project>/src/yaml/`.
+
+```toml
+[validation]
+skip_duplicate_ili = true
+skip_hypernym = true
+```
+
+These settings apply wherever EWE validates (`ewe validate`, the interactive editor, `save` and
+the automaton `validate` action), and also in `ewe-mcp` and the Dioxus app. On the command line,
+a check is skipped if either a flag or `settings.toml` skips it. An unknown key in
+`[validation]` is an error (exit status `2`).
 ### Confidence scores
 
 Actions that create or change something take an optional WN-LMF confidence score (0.0-1.0),

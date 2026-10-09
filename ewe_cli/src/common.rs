@@ -3,7 +3,7 @@
 use crate::indicatif_progress::IndicatifProgress;
 use ewe_lib::progress::NullProgress;
 use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, SenseId, Synset, SynsetId};
-use ewe_lib::validate::validate;
+use ewe_lib::validate::{validate_with, ValidationOptions};
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
@@ -46,12 +46,22 @@ pub(crate) fn locate_wordnet(
     Ok((path, wn))
 }
 
+/// The `[validation]` options from the project `settings.toml` for the YAML folder `path` (see
+/// `ValidationOptions::for_wordnet`), exiting with code 2 if that file can't be read or parsed.
+pub(crate) fn load_validation_options(path: &str) -> ValidationOptions {
+    ValidationOptions::for_wordnet(Path::new(path)).unwrap_or_else(|e| {
+        eprintln!("{}", e);
+        std::process::exit(2);
+    })
+}
+
 pub(crate) fn save<L: Lexicon>(
     wn: &L,
     path: &str,
+    options: &ValidationOptions,
 ) -> result::Result<bool, ewe_lib::wordnet::LexiconSaveError> {
     let mut progress = IndicatifProgress::new();
-    let errors = validate(wn, &mut progress)?;
+    let errors = validate_with(wn, &mut progress, options)?;
     if !errors.is_empty() {
         println!("There were validation errors");
         for error in errors {

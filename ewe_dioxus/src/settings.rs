@@ -1,4 +1,5 @@
 /// Setting for running the application
+use ewe_lib::validate::ValidationOptions;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +64,11 @@ pub struct EweSettings {
     /// relative or missing URLs is invalid per the sitemap protocol.
     #[serde(default)]
     pub base_url: Option<String>,
+    /// Validation checks to skip (`[validation]` table) when validating or saving. `ewe` (CLI)
+    /// and `ewe-mcp` read the same table from a project's `settings.toml` (see
+    /// `ValidationOptions::for_wordnet`), so all three frontends agree on what "valid" means.
+    #[serde(default)]
+    pub validation: ValidationOptions,
 }
 
 // `ThemeOverrides` itself lives in `backend::api` (re-exported here), not this module: `Branding`
@@ -200,6 +206,7 @@ impl EweSettings {
             contact_email: None,
             source_url: None,
             base_url: None,
+            validation: ValidationOptions::default(),
         }
     }
 
@@ -363,6 +370,26 @@ mod tests {
         assert_eq!(settings.theme.accent.as_deref(), Some("#bf0a30"));
         assert_eq!(settings.theme.text, None);
         assert_eq!(settings.theme.font_body, None);
+    }
+
+    #[test]
+    fn validation_options_parse_and_default_when_absent() {
+        let scratch = ScratchDir::new("validation");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(&settings_path, r#"database = "wordnet.db""#).unwrap();
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+        assert_eq!(settings.validation, ValidationOptions::default());
+
+        std::fs::write(
+            &settings_path,
+            "database = \"wordnet.db\"\n\n[validation]\nskip_duplicate_ili = true\n",
+        )
+        .unwrap();
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            settings.validation,
+            ValidationOptions { skip_duplicate_ili: true, ..Default::default() }
+        );
     }
 
     #[test]
