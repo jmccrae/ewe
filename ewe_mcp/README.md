@@ -74,7 +74,9 @@ Tools
 - **`search_prefix(prefix, max_results?)`** — lemmas starting with a prefix, for
   autocomplete-style lookups.
 - **`validate()`** — runs full validation over the loaded wordnet and returns the
-  errors found (empty if none).
+  errors found (empty if none). Checks skipped in the project `settings.toml`'s
+  `[validation]` table (see [`ewe_cli/README.md`](../ewe_cli/README.md#non-interactive-validation-ci))
+  are skipped here and in the validation that gates saving; `reload()` re-reads them.
 - **`apply_automaton(actions, dry_run?)`** — applies a batch of automaton actions (add
   or delete synsets/entries/relations/examples, change definitions, etc. - see
   [`ewe_cli/README.md`](../ewe_cli/README.md) for the full action reference). Rejects

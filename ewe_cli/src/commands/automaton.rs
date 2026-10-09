@@ -1,6 +1,6 @@
 //! `ewe automaton` - runs a scripted sequence of edits from a YAML automaton file.
 
-use crate::common::{locate_wordnet, save};
+use crate::common::{load_validation_options, locate_wordnet, save};
 use ewe_lib::automaton::ActionWrapper;
 use ewe_lib::change_manager::ChangeList;
 use std::fs::File;
@@ -32,15 +32,16 @@ pub(crate) fn run(script: &str, wordnet: Option<PathBuf>) {
         exit(-1);
     });
 
+    let options = load_validation_options(&path);
+
     let mut ewe_changed = ChangeList::new();
 
     let (_, validation_report) =
-        ewe_lib::automaton::apply_automaton(actions, &mut wn, &mut ewe_changed).unwrap_or_else(
-            |e| {
+        ewe_lib::automaton::apply_automaton_with(actions, &mut wn, &mut ewe_changed, &options)
+            .unwrap_or_else(|e| {
                 eprintln!("Could not apply automaton: {}", e);
                 exit(-1);
-            },
-        );
+            });
     if let Some(report) = validation_report {
         for error in report.errors.iter() {
             println!("{}", error);
@@ -52,5 +53,5 @@ pub(crate) fn run(script: &str, wordnet: Option<PathBuf>) {
         }
     }
 
-    save(&wn, &path).expect("Could not save");
+    save(&wn, &path, &options).expect("Could not save");
 }

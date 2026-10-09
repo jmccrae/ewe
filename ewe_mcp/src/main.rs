@@ -8,6 +8,7 @@ use clap::Parser;
 use ewe_lib::automaton::Action;
 use ewe_lib::change_manager::ChangeList;
 use ewe_lib::progress::NullProgress;
+use ewe_lib::validate::ValidationOptions;
 use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, SenseId, SynsetId};
 use rmcp::ServiceExt;
 use rmcp::handler::server::wrapper::Parameters;
@@ -70,6 +71,9 @@ struct ServerState {
     /// couldn't be determined (e.g. `path` didn't exist), in which case the staleness check
     /// is skipped rather than blocking every future save.
     loaded_mtime: Option<SystemTime>,
+    /// Checks to skip, from the `[validation]` table of the project's `settings.toml` (see
+    /// `ValidationOptions::for_wordnet`) - read at startup and again on `reload`.
+    validation: ValidationOptions,
 }
 
 /// Best-effort snapshot of `path`'s current mtime - `None` rather than an error, since a
@@ -180,9 +184,12 @@ struct ReloadReport {
     discarded_unsaved_changes: bool,
 }
 
-fn validation_errors_of(wn: &LexiconHashMapBackend) -> Result<Vec<String>, String> {
+fn validation_errors_of(
+    wn: &LexiconHashMapBackend,
+    options: &ValidationOptions,
+) -> Result<Vec<String>, String> {
     let mut progress = NullProgress;
-    Ok(ewe_lib::validate::validate(wn, &mut progress)
+    Ok(ewe_lib::validate::validate_with(wn, &mut progress, options)
         .map_err(|e| e.to_string())?
         .iter()
         .map(|e| e.to_string())
@@ -205,7 +212,7 @@ fn is_stale(state: &ServerState) -> bool {
 /// auto-save so the two can't drift out of sync on what "safe to save" means. Returns
 /// `(saved, validation_errors, stale)`.
 fn perform_save(state: &mut ServerState, force: bool) -> Result<(bool, Vec<String>, bool), String> {
-    let validation_errors = validation_errors_of(&state.wn)?;
+    let validation_errors = validation_errors_of(&state.wn, &state.validation)?;
     let stale = is_stale(state);
     let saved = if (validation_errors.is_empty() && !stale) || force {
         let mut save_progress = NullProgress;
@@ -323,10 +330,14 @@ impl EweMcpServer {
         serde_json::to_string(&matches).map_err(|e| e.to_string())
     }
 
-    #[tool(description = "Run full validation over the loaded wordnet and return any errors found.")]
+    #[tool(
+        description = "Run full validation over the loaded wordnet and return any errors found. \
+        Checks skipped by the `[validation]` table of the project's settings.toml are skipped \
+        here too (and by the validation that gates `save`/`apply_automaton`)."
+    )]
     fn validate(&self) -> Result<String, String> {
         let state = self.state.lock().unwrap();
-        let errors = validation_errors_of(&state.wn)?;
+        let errors = validation_errors_of(&state.wn, &state.validation)?;
         let report = ValidateReport {
             count: errors.len(),
             errors,
@@ -366,12 +377,17 @@ impl EweMcpServer {
             let mut scratch_wn = state.wn.clone();
             let mut scratch_changes = ChangeList::new();
             let (would_succeed, apply_error, last_synset_id) =
-                match ewe_lib::automaton::apply_automaton(actions, &mut scratch_wn, &mut scratch_changes)
-                {
+                match ewe_lib::automaton::apply_automaton_with(
+                    actions,
+                    &mut scratch_wn,
+                    &mut scratch_changes,
+                    &state.validation,
+                ) {
                     Ok((last_synset_id, _)) => (true, None, last_synset_id),
                     Err(e) => (false, Some(e), None),
                 };
-            let validation_errors = validation_errors_of(&scratch_wn).unwrap_or_default();
+            let validation_errors =
+                validation_errors_of(&scratch_wn, &state.validation).unwrap_or_default();
             let report = DryRunReport {
                 would_succeed,
                 apply_error,
@@ -428,10 +444,11 @@ impl EweMcpServer {
         edit) - `save`/`apply_automaton` refuse to write over such a change (reporting \
         `stale: true`) until this is called. Discards any pending in-memory changes this \
         session made but never saved; `discarded_unsaved_changes` in the result says whether \
-        that happened."
+        that happened. Also re-reads the `[validation]` settings from the project's settings.toml."
     )]
     fn reload(&self) -> Result<String, String> {
         let mut guard = self.state.lock().unwrap();
+        let validation = ValidationOptions::for_wordnet(Path::new(&guard.path))?;
         let mut progress = NullProgress;
         let wn = LexiconHashMapBackend::new()
             .load(&guard.path, &mut progress)
@@ -440,6 +457,7 @@ impl EweMcpServer {
         guard.wn = wn;
         guard.changes = ChangeList::new();
         guard.loaded_mtime = source_mtime(&guard.path);
+        guard.validation = validation;
         let report = ReloadReport {
             path: guard.path.clone(),
             discarded_unsaved_changes,
@@ -474,6 +492,7 @@ mod tests {
                 wn,
                 changes: ChangeList::new(),
                 loaded_mtime,
+                validation: ValidationOptions::default(),
             })),
         }
     }
@@ -548,6 +567,21 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn validate_respects_validation_options() {
+        // `test_server`'s seed synset is a noun with no hypernym.
+        let server = test_server(String::new());
+        let all = server.validate().unwrap();
+        assert!(all.contains("hypernym"), "{}", all);
+
+        server.state.lock().unwrap().validation = ValidationOptions {
+            skip_hypernym: true,
+            ..Default::default()
+        };
+        let skipped = server.validate().unwrap();
+        assert!(!skipped.contains("hypernym"), "{}", skipped);
+    }
+
     /// A fresh, uniquely-named `<temp>/<name>/src/yaml` directory to load/save a test
     /// wordnet against - nested under its own unique parent (rather than a bare
     /// `<temp>/<name>`) so that `Lexicon::save`'s sibling `../deprecations.csv` write
@@ -575,6 +609,7 @@ mod tests {
             wn: LexiconHashMapBackend::new(),
             changes: ChangeList::new(),
             loaded_mtime: source_mtime(&path),
+            validation: ValidationOptions::default(),
         };
         assert!(
             !is_stale(&state),
@@ -647,6 +682,8 @@ mod tests {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let (path, wn) = locate_wordnet(cli.wordnet).map_err(|e| anyhow::anyhow!(e))?;
+    let validation =
+        ValidationOptions::for_wordnet(Path::new(&path)).map_err(|e| anyhow::anyhow!(e))?;
     let loaded_mtime = source_mtime(&path);
 
     let server = EweMcpServer {
@@ -655,6 +692,7 @@ async fn main() -> anyhow::Result<()> {
             wn,
             changes: ChangeList::new(),
             loaded_mtime,
+            validation,
         })),
     };
 

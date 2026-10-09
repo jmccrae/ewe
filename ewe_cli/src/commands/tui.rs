@@ -1,11 +1,11 @@
 //! The interactive terminal menu shown when `ewe` is run with no subcommand.
 
-use crate::common::{input, looks_like_wordnet_dir, save};
+use crate::common::{input, load_validation_options, looks_like_wordnet_dir, save};
 use crate::indicatif_progress::IndicatifProgress;
 use ewe_lib::change_manager;
 use ewe_lib::change_manager::ChangeList;
 use ewe_lib::rels::{SenseRelType, SynsetRelType};
-use ewe_lib::validate::{fix, validate};
+use ewe_lib::validate::{fix, validate_with, ValidationOptions};
 use ewe_lib::wordnet::{
     Lexicon, LexiconHashMapBackend, PosKey, Sense, SenseId, SenseOrSynsetId, Synset, SynsetId,
 };
@@ -568,7 +568,12 @@ fn change_relation<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
     }
 }
 
-fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -> bool {
+fn main_menu<L: Lexicon>(
+    wn: &mut L,
+    path: &str,
+    options: &ValidationOptions,
+    ewe_changed: &mut ChangeList,
+) -> bool {
     println!("");
     println!("Please choose an option:");
     println!("1. Add/delete/move entry");
@@ -592,7 +597,7 @@ fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -
         "5" => change_relation(wn, ewe_changed),
         "6" => {
             let mut progress = IndicatifProgress::new();
-            let errors = validate(wn, &mut progress).expect("Could not complete validation");
+            let errors = validate_with(wn, &mut progress, options).expect("Could not complete validation");
             for error in errors.iter() {
                 println!("{}", error);
             }
@@ -604,7 +609,7 @@ fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -
         }
         "7" => {
             let mut progress = IndicatifProgress::new();
-            let errors = validate(wn, &mut progress).expect("Could not complete validation");
+            let errors = validate_with(wn, &mut progress, options).expect("Could not complete validation");
             let mut fixed = 0;
             for error in errors.iter() {
                 if fix(wn, error, ewe_changed).expect("Could not fix error") {
@@ -614,7 +619,7 @@ fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -
             println!("{}/{} validation errors fixed", fixed, errors.len());
         }
         "8" => {
-            let saved = save(wn, path).expect("Could not save");
+            let saved = save(wn, path, options).expect("Could not save");
             if saved {
                 ewe_changed.reset();
             }
@@ -622,7 +627,7 @@ fn main_menu<L: Lexicon>(wn: &mut L, path: &str, ewe_changed: &mut ChangeList) -
         "x" => {
             if ewe_changed.changed() {
                 if input("Save changes (Y/n)? ").to_lowercase() != "n" {
-                    let saved = save(wn, path).expect("Could not save");
+                    let saved = save(wn, path, options).expect("Could not save");
                     if saved {
                         ewe_changed.reset();
                         return false;
@@ -672,7 +677,9 @@ pub(crate) fn run() {
         .load(&path, &mut progress)
         .unwrap();
 
+    let options = load_validation_options(&path);
+
     let mut ewe_changed = ChangeList::new();
 
-    while main_menu(&mut wn, &path, &mut ewe_changed) {}
+    while main_menu(&mut wn, &path, &options, &mut ewe_changed) {}
 }

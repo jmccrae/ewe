@@ -2,7 +2,7 @@ use crate::change_manager;
 use crate::change_manager::{ChangeList, RelationUpdate};
 use crate::progress::NullProgress;
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::validate::{validate, ValidationError};
+use crate::validate::{validate_with, ValidationError, ValidationOptions};
 use crate::wordnet::{Lexicon, PosKey, SenseId, SenseOrSynsetId, SynsetId, ILIID};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +27,17 @@ pub fn apply_automaton<L: Lexicon>(
     actions: Vec<Action>,
     wn: &mut L,
     changes: &mut ChangeList,
+) -> Result<(Option<SynsetId>, Option<ValidationReport>), String> {
+    apply_automaton_with(actions, wn, changes, &ValidationOptions::default())
+}
+
+/// As [`apply_automaton`], but a `validate` action in the batch skips the checks `opts` skips
+/// (e.g. the project's `settings.toml` `[validation]` table).
+pub fn apply_automaton_with<L: Lexicon>(
+    actions: Vec<Action>,
+    wn: &mut L,
+    changes: &mut ChangeList,
+    opts: &ValidationOptions,
 ) -> Result<(Option<SynsetId>, Option<ValidationReport>), String> {
     let actions_for_log = actions.clone();
     let mut last_synset_id: Option<SynsetId> = None;
@@ -507,7 +518,7 @@ pub fn apply_automaton<L: Lexicon>(
             }
             Action::Validate => {
                 let mut progress = NullProgress;
-                let errors = validate(wn, &mut progress).map_err(|e| e.to_string())?;
+                let errors = validate_with(wn, &mut progress, opts).map_err(|e| e.to_string())?;
                 validation_report = Some(ValidationReport { errors });
             }
             Action::FixTransitivity => {
@@ -2228,5 +2239,29 @@ mod tests {
 
         apply_automaton(vec![Action::Validate], &mut lexicon, &mut ChangeList::new()).unwrap();
         assert!(has_unsaved_changes(&lexicon).unwrap(), "a later batch should be unsaved again");
+    }
+
+    #[test]
+    fn test_validate_action_respects_options() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.add_lexfile("noun.animal").unwrap();
+        let actions = vec![Action::AddSynset {
+            confidence: None,
+            definition_confidence: None,
+            definition: "a synset with no hypernym".to_string(),
+            lexfile: "noun.animal".to_string(),
+            pos: Some(PosKey::new("n".to_string())),
+            lemmas: vec!["orphan".to_string()],
+            subcats: Vec::new(),
+        }];
+        apply_automaton(actions, &mut lexicon, &mut ChangeList::new()).unwrap();
+
+        let no_hypernym = |report: Option<ValidationReport>| report.unwrap().errors.iter()
+            .any(|e| matches!(e, ValidationError::NoHypernym { .. }));
+        let (_, report) = apply_automaton(vec![Action::Validate], &mut lexicon, &mut ChangeList::new()).unwrap();
+        assert!(no_hypernym(report));
+        let opts = ValidationOptions { skip_hypernym: true, ..Default::default() };
+        let (_, report) = apply_automaton_with(vec![Action::Validate], &mut lexicon, &mut ChangeList::new(), &opts).unwrap();
+        assert!(!no_hypernym(report));
     }
 }

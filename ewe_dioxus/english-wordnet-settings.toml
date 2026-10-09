@@ -43,3 +43,11 @@ footer = """
 [theme]
 primary = "#002868"
 accent = "#bf0a30"
+
+# Validation checks to skip (all default to false); also read by the `ewe` CLI and `ewe-mcp`.
+# [validation]
+# skip_symmetric = false
+# skip_duplicate_ili = false
+# skip_duplicate_definitions = false
+# skip_similar = false
+# skip_hypernym = false
