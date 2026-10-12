@@ -89,6 +89,17 @@ Tools
   and discards it - the real wordnet is never touched, but the report is otherwise
   identical (including any validation errors the change would introduce), since it runs
   through the exact same code path as a real apply.
+- **One tool per automaton action** — `add_entry`, `delete_entry`, `move_entry`,
+  `change_members`, `add_synset`, `delete_synset`, `change_definition`, `change_ili`,
+  `change_wikidata`, `change_source`, `add_example`, `update_example`, `delete_example`,
+  `add_relation`, `delete_relation`, `reverse_relation`, `update_relations`,
+  `set_confidence` and `fix_transitivity`. Each takes that action's fields directly
+  (plus `dry_run?`) and behaves exactly like `apply_automaton` with a one-action batch:
+  same validation, auto-save, `stale` handling and report. These tools are generated at
+  startup from the `Action` type's JSON schema, so a new automaton action becomes a tool
+  automatically, with its description taken from the variant's doc comment. Use
+  `apply_automaton` when steps depend on each other (e.g. `add_synset` then an
+  `add_relation` from `"last"`).
 - **`save(force?)`** — persists any pending in-memory changes to disk. Skipped unless
   the wordnet validates cleanly and the on-disk files haven't changed since this server
   last loaded/saved them; the report says which (`validation_errors`, `stale`) and
