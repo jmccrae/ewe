@@ -2347,6 +2347,8 @@ mod tests {
         let actions = vec![Action::AddSynset {
             confidence: None,
             definition_confidence: None,
+            id: None,
+            ili: None,
             definition: "a synset with no hypernym".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
