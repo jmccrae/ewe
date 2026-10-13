@@ -75,6 +75,12 @@ An example of the usage of the automaton file is given below
     pos: n
     lemmas:
       - bar
+- add_synset:                # `id` and `ili` are optional: without `id` one is derived
+    id: 02084071-n             # from the definition
+    ili: i46360
+    definition: a member of the genus Canis
+    lexfile: noun.animal
+    lemmas: [dog]
 - delete_synset:
     synset: 00001740-n
     reason: "Duplicate (#123)"
