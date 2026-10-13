@@ -11,6 +11,9 @@ pub use dismiss::use_dismiss_on_outside_click;
 mod synset;
 pub use synset::Synset;
 
+mod confidence;
+pub use confidence::{confidence_draft, parse_confidence_draft, ConfidenceBadge, ConfidenceInput};
+
 mod editable_definition;
 pub use editable_definition::EditableDefinition;
 

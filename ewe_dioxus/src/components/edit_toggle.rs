@@ -12,6 +12,11 @@ pub struct EditToggleProps {
     pub on_accept: EventHandler<()>,
     /// Click the reject (×) button to discard every pending edit and leave edit mode.
     pub on_reject: EventHandler<()>,
+    /// Whether the confidence score inputs are currently shown in the editor.
+    pub show_confidence: bool,
+    /// Click the ⚠ button to show/hide the confidence score inputs. Confidence is optional
+    /// in WN-LMF and most wordnets don't use it, so they stay out of the way unless asked for.
+    pub on_toggle_confidence: EventHandler<()>,
     /// Extra controls (currently just `DeleteSynsetButton`) rendered alongside the accept/
     /// reject pair while editing - grouped here, rather than as a separate sibling, so every
     /// action for this synset lives in the same `edit-toggle-actions` row.
@@ -45,6 +50,18 @@ pub fn EditToggle(props: EditToggleProps) -> Element {
                     disabled: props.saving,
                     onclick: move |_| props.on_reject.call(()),
                     "×"
+                }
+                button {
+                    class: if props.show_confidence {
+                        "confidence-toggle edit-toggle-btn confidence-toggle-on"
+                    } else {
+                        "confidence-toggle edit-toggle-btn"
+                    },
+                    r#type: "button",
+                    title: if props.show_confidence { "Hide confidence scores" } else { "Show confidence scores" },
+                    aria_pressed: "{props.show_confidence}",
+                    onclick: move |_| props.on_toggle_confidence.call(()),
+                    "\u{26A0}\u{FE0E}"
                 }
                 {props.children}
             }
