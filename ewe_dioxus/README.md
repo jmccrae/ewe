@@ -84,7 +84,7 @@ accent = "#bf0a30"
 | `database`          | string           | `"wordnet.db"` | Path to the ReDB database file that the app reads from (and, if it needs rebuilding, writes to). |
 | `wordnet_source`    | string, optional | unset | Path to a directory of Wordnet YAML source files (e.g. from the [english-wordnet](https://github.com/globalwordnet/english-wordnet) repo). Leave unset if you already have a database and don't want it rebuilt. |
 | `corpus_database`   | string           | `"corpus.db"` | Path to the corpus database file backing the "where does this sense occur" lookups (see [Corpus lookups](#corpus-lookups) below). |
-| `corpus_source`     | string, optional | unset | Path to a Teanga-format corpus YAML file. Leave unset if you already have a corpus database and don't want it rebuilt. |
+| `corpus_source`     | string, optional | unset | Path to a Teanga-format corpus YAML file, or a directory of them (every `.yaml`/`.yml` file directly inside is loaded into the one corpus, in filename order; they should share the same `_meta`). Leave unset if you already have a corpus database and don't want it rebuilt. |
 | `id_prefix`         | string           | `"oewn"` | Prefix used for synset/entry ids in XML/RDF/Turtle export and in id lookups (e.g. `oewn-00001740-n`), and to derive the corpus's sense-key layer name (`{id_prefix}_key`). Set this to your own project's id prefix if you're not the Open English Wordnet. |
 | `contact_email`     | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon email="...">` attribute. |
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |

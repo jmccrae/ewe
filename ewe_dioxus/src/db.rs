@@ -2,7 +2,7 @@
 use ewe_lib::progress::{LoggingProgress, Progress};
 use ewe_lib::wordnet::{Lexicon, ReDBLexicon};
 use std::ops::{Deref, DerefMut};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{RwLockReadGuard, RwLockWriteGuard};
 use std::time::SystemTime;
 use teanga::disk_corpus::RedbDb;
@@ -148,14 +148,16 @@ fn latest_source_mtime(source: &str) -> Result<SystemTime, Box<dyn std::error::E
 }
 
 /// Open the corpus database at `settings.corpus_database`. If it doesn't exist yet,
-/// or (unless `settings.disable_auto_reload` is set) `settings.corpus_source` has been
-/// modified more recently than the database, the database is rebuilt from source first.
+/// or (unless `settings.disable_auto_reload` is set) `settings.corpus_source` (a Teanga YAML
+/// file, or a directory of them - see [`corpus_source_files`]) has been modified more
+/// recently than the database, the database is rebuilt from source first.
 /// Either way, a search index on the configured key layer (see [`key_layer_name`]) is
 /// guaranteed to exist by the time this returns, so sense lookups don't have to scan
 /// every document.
 pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
     let mut corpus = if let Some(source) = &settings.corpus_source {
-        if is_file_stale(&settings.corpus_database, source, settings.disable_auto_reload)? {
+        let files = corpus_source_files(source)?;
+        if is_corpus_stale(&settings.corpus_database, &files, settings.disable_auto_reload)? {
             eprintln!(
                 "Corpus source at {} is newer than {}, rebuilding database",
                 source, settings.corpus_database
@@ -164,8 +166,12 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
                 std::fs::remove_file(&settings.corpus_database)?;
             }
             let mut corpus = DiskCorpus::<RedbDb>::new(&settings.corpus_database)?;
-            let file = std::fs::File::open(source)?;
-            teanga::read_yaml(file, &mut corpus)?;
+            for path in &files {
+                eprintln!("Loading corpus file {}", path.display());
+                // Buffered, since teanga's YAML reader pulls the input a byte at a time.
+                let file = std::io::BufReader::new(std::fs::File::open(path)?);
+                teanga::read_yaml(file, &mut corpus)?;
+            }
             corpus.commit()?;
             corpus
         } else {
@@ -187,9 +193,33 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
     Ok(corpus)
 }
 
+/// The YAML files making up the corpus at `source`: either `source` itself, or every
+/// `.yaml`/`.yml` file directly inside it (sorted, so documents load in a stable order) when
+/// it's a directory. Teanga's YAML reader can't be handed a directory - reading one fails with
+/// an error on every byte, which it silently skips, so it spins forever instead of failing.
+fn corpus_source_files(source: &str) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    let path = Path::new(source);
+    if !path.is_dir() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let file = entry?.path();
+        let is_yaml = matches!(file.extension().and_then(|e| e.to_str()), Some("yaml" | "yml"));
+        if is_yaml && file.is_file() {
+            files.push(file);
+        }
+    }
+    if files.is_empty() {
+        return Err(format!("Corpus source directory {} contains no .yaml files", source).into());
+    }
+    files.sort();
+    Ok(files)
+}
+
 /// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
-/// and `source` is newer than it.
-fn is_file_stale(database: &str, source: &str, disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
+/// and any of the corpus source `files` is newer than it.
+fn is_corpus_stale(database: &str, files: &[PathBuf], disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
     let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
         Ok(mtime) => mtime,
         Err(_) => return Ok(true),
@@ -197,5 +227,10 @@ fn is_file_stale(database: &str, source: &str, disable_auto_reload: bool) -> Res
     if disable_auto_reload {
         return Ok(false);
     }
-    Ok(Path::new(source).metadata()?.modified()? > db_mtime)
+    for file in files {
+        if file.metadata()?.modified()? > db_mtime {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
