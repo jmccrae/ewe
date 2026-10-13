@@ -26,6 +26,7 @@ mod components;
 #[cfg(any(feature = "server", feature = "desktop"))]
 mod db;
 /// Downloads page configuration (`downloads.toml`)
+#[cfg(feature = "server")]
 mod downloads_config;
 /// The settings file
 #[cfg(any(feature = "server", feature = "desktop"))]
@@ -33,6 +34,7 @@ mod settings;
 /// Define a views module that contains the UI for all Layouts and Routes for our app.
 mod views;
 
+#[cfg(feature = "server")]
 use downloads_config::DownloadsConfig;
 #[cfg(any(feature = "server", feature = "desktop"))]
 use settings::EweSettings;
@@ -123,11 +125,13 @@ pub(crate) static ASSETS_FOLDER: Asset =
 /// (they're synchronous disk I/O wrapped in `async move` purely to match `Lazy::new`'s signature),
 /// so a plain `OnceLock` with a genuinely synchronous initializer sidesteps the problem entirely
 /// instead of needing dioxus's own runtime machinery at all.
+#[cfg(any(feature = "server", feature = "desktop"))]
 struct SyncLazy<T: 'static> {
     cell: std::sync::OnceLock<T>,
     init: fn() -> T,
 }
 
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl<T: 'static> SyncLazy<T> {
     const fn new(init: fn() -> T) -> Self {
         Self { cell: std::sync::OnceLock::new(), init }
@@ -154,7 +158,7 @@ static SETTINGS: SyncLazy<RwLock<settings::EweSettings>> = SyncLazy::new(|| {
 
 /// Downloads are entirely optional: if `downloads.toml` doesn't exist, the
 /// Downloads page just has nothing to list rather than erroring.
-#[allow(dead_code)]
+#[cfg(feature = "server")]
 static DOWNLOADS: SyncLazy<DownloadsConfig> = SyncLazy::new(|| {
     if std::path::Path::new("downloads.toml").exists() {
         DownloadsConfig::load("downloads.toml").expect("Failed to load downloads.toml")

@@ -12,7 +12,7 @@
 //! handle itself.
 
 use dioxus::prelude::*;
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 use ewe_lib::wordnet::ReDBLexicon;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
@@ -56,6 +56,8 @@ enum EweSetupError {
 /// `configure_wordnet_source` returns, or a fast path - like re-opening an already-up-to-date
 /// database - that never reports incremental progress at all).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Only ever deserialized (never constructed) on the client side of a `web` build.
+#[cfg_attr(not(all(feature = "edit", any(feature = "server", feature = "desktop"))), allow(dead_code))]
 pub struct SetupProgress {
     pub current: u64,
     pub total: u64,
@@ -64,28 +66,28 @@ pub struct SetupProgress {
 /// The currently running load's progress, or `None` if nothing is running - either because
 /// nothing has been configured yet, or because the last configure attempt has already finished
 /// (check `get_setup_error` to tell success from failure).
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 static SETUP_PROGRESS: std::sync::RwLock<Option<SetupProgress>> = std::sync::RwLock::new(None);
 
 /// The error from the most recently *finished* configure attempt, if it failed. Cleared at the
 /// start of every new `configure_wordnet_source` call, so it only ever reflects the latest
 /// attempt.
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 static SETUP_ERROR: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 struct SharedSetupProgress {
     current: u64,
 }
 
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 impl SharedSetupProgress {
     fn new() -> Self {
         Self { current: 0 }
     }
 }
 
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 impl ewe_lib::progress::Progress for SharedSetupProgress {
     fn start(&mut self, total: u64) {
         self.current = 0;
@@ -239,7 +241,7 @@ pub async fn configure_wordnet_source(path: String) -> Result<()> {
 /// lexicon, best-effort rebuild the corpus, then hot-swap all three into the running server -
 /// see `configure_wordnet_source`'s doc comment for why this deliberately doesn't persist
 /// anything to disk itself.
-#[cfg(any(feature = "server", feature = "desktop"))]
+#[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 async fn run_configure(new_settings: crate::settings::EweSettings) -> Result<(), String> {
     let lexicon = {
         let settings_for_load = new_settings.clone();

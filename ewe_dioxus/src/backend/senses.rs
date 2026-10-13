@@ -177,7 +177,9 @@ pub async fn get_sense_count(id: SynsetId) -> Result<usize> {
 
 /// The ids of the documents that contain at least one token tagged with the
 /// given synset id.
-#[cfg_attr(not(feature = "desktop"), get("/api/senses/{id}"))]
+// Only reachable over the JSON API, which a desktop build doesn't serve.
+#[cfg(not(feature = "desktop"))]
+#[get("/api/senses/{id}")]
 pub async fn get_sense_documents(id: SynsetId) -> Result<Vec<String>> {
     let mut doc_ids: Vec<String> = all_concordance_lines(id)
         .await?
