@@ -77,7 +77,12 @@ enum Route {
 
 // We can import assets in dioxus with the `asset!` macro. This macro takes a path to an asset relative to the crate root.
 // The macro returns an `Asset` type that will display as the path to the asset in the browser or a local path in desktop bundles.
+// Only desktop links this directly: everywhere else the icon comes from the server's `/favicon`
+// route (see `backend::favicon`), so `settings.toml` can choose it.
+#[cfg(feature = "desktop")]
 const FAVICON: Asset = asset!("/assets/favicon.ico");
+#[cfg(not(feature = "desktop"))]
+const FAVICON: &str = "/favicon";
 // The asset macro also minifies some assets like CSS and JS to make bundled smaller
 const MAIN_CSS: Asset = asset!("/assets/styling/main.css");
 // The default palette/font custom properties (colours, fonts) that everything else in
@@ -234,6 +239,10 @@ fn main() {
                 "/downloads/{filename}",
                 dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
             )
+            .route("/favicon", dioxus_fullstack::axum::routing::get(backend::favicon::favicon))
+            // For crawlers and older clients that request this directly rather than reading
+            // the page's `<link rel="icon">`.
+            .route("/favicon.ico", dioxus_fullstack::axum::routing::get(backend::favicon::favicon))
             .layer(dioxus_fullstack::axum::middleware::from_fn(
                 strip_referer_from_export_links,
             ))

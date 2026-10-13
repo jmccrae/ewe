@@ -14,9 +14,13 @@ pub struct EweSettings {
     /// The corpus YAML file (or directory of YAML files) to load from
     #[serde(default)]
     pub corpus_source: Option<String>,
-    /// Path (relative to the working directory) of the logo image, served at `/logo`
+    /// Path of the SVG logo, read from disk and inlined into the page header
     #[serde(default = "default_logo")]
     pub logo: String,
+    /// Path of the favicon (`.ico`, `.png` or `.svg`), served at `/favicon` (see
+    /// `backend::favicon`). Unset, or unreadable, means the bundled `assets/favicon.ico`.
+    #[serde(default)]
+    pub favicon: Option<String>,
     /// The project name shown in the header
     #[serde(default = "default_project_name")]
     pub project_name: String,
@@ -195,6 +199,7 @@ impl EweSettings {
             corpus_database: default_corpus_database(),
             corpus_source: None,
             logo: default_logo(),
+            favicon: None,
             project_name: default_project_name(),
             tagline: default_tagline(),
             intro: default_intro(),
@@ -211,7 +216,7 @@ impl EweSettings {
     }
 
     /// Loads settings from `path`, resolving every path-valued field (`database`,
-    /// `wordnet_source`, `corpus_database`, `corpus_source`, `logo`) relative to `path`'s own
+    /// `wordnet_source`, `corpus_database`, `corpus_source`, `logo`, `favicon`) relative to `path`'s own
     /// directory rather than the process's working directory. This lets a `settings.toml` be
     /// dropped into (and moved between) any project folder - e.g. a Wordnet checkout picked via
     /// the desktop setup screen's folder dialog (see
@@ -245,6 +250,7 @@ impl EweSettings {
         settings.database = resolve(&settings.database);
         settings.corpus_database = resolve(&settings.corpus_database);
         settings.logo = resolve(&settings.logo);
+        settings.favicon = settings.favicon.as_deref().map(|s| resolve(s));
         settings.wordnet_source = settings.wordnet_source.as_deref().map(|s| resolve(s));
         settings.corpus_source = settings.corpus_source.as_deref().map(|s| resolve(s));
 
@@ -292,6 +298,7 @@ mod tests {
                 corpus_database = "semcor.db"
                 corpus_source = "../semcor.yaml"
                 logo = "src/assets/english.svg"
+                favicon = "src/assets/favicon.png"
             "#,
         )
         .unwrap();
@@ -309,6 +316,10 @@ mod tests {
             Some(scratch.0.join("../semcor.yaml").to_string_lossy().to_string()).as_deref()
         );
         assert_eq!(settings.logo, scratch.0.join("src/assets/english.svg").to_string_lossy());
+        assert_eq!(
+            settings.favicon.as_deref(),
+            Some(scratch.0.join("src/assets/favicon.png").to_string_lossy().to_string()).as_deref()
+        );
     }
 
     #[test]
