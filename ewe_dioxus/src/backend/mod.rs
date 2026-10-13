@@ -12,6 +12,9 @@ pub mod openapi;
 #[cfg(feature="server")]
 pub mod seo;
 
+#[cfg(feature="server")]
+pub mod favicon;
+
 // The Downloads page isn't part of a desktop build.
 #[cfg(not(feature = "desktop"))]
 pub mod downloads;

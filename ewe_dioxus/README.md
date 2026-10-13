@@ -57,7 +57,7 @@ ewe_dioxus/
 
 The app looks for a `settings.toml` file in the current working directory when it starts. If the file is missing, it falls back to generic defaults described below. `settings.toml` is git-ignored, since it's environment-specific (absolute paths, per-deployment branding); [`english-wordnet-settings.toml`](./english-wordnet-settings.toml) is checked in as a copy-and-rename starting point for an Open English Wordnet deployment.
 
-Every path-valued key below (`database`, `wordnet_source`, `corpus_database`, `corpus_source`, `logo`) is resolved relative to `settings.toml`'s own directory, not the process's working directory - so a project folder with its own `settings.toml` and relative paths (e.g. `wordnet_source = "src/yaml"`) works the same no matter where it's loaded from. This is what makes the desktop app's project-folder picker (below) work.
+Every path-valued key below (`database`, `wordnet_source`, `corpus_database`, `corpus_source`, `logo`, `favicon`) is resolved relative to `settings.toml`'s own directory, not the process's working directory - so a project folder with its own `settings.toml` and relative paths (e.g. `wordnet_source = "src/yaml"`) works the same no matter where it's loaded from. This is what makes the desktop app's project-folder picker (below) work.
 
 ```toml
 database = "wordnet.db"
@@ -65,6 +65,7 @@ wordnet_source = "/path/to/english-wordnet/src/yaml/"
 corpus_database = "corpus.db"
 corpus_source = "/path/to/corpus.yaml"
 logo = "assets/english.svg"
+favicon = "assets/favicon.png"
 project_name = "My Wordnet"
 id_prefix = "oewn"
 contact_email = "me@example.org"
@@ -90,6 +91,7 @@ accent = "#bf0a30"
 | `source_url`        | string, optional | unset | Recorded in exported WN-LMF XML's `<Lexicon url="...">` attribute. |
 | `base_url`          | string, optional | unset | This deployment's own public base URL (e.g. `https://en-word.net`), used to build absolute URLs in `/sitemap.xml` and the `Sitemap:` line in `/robots.txt`. Neither is served with real content while this is unset. |
 | `logo`              | string           | `"assets/gwa.svg"` | Path to an SVG logo file, read from disk and inlined directly into the page. |
+| `favicon`           | string, optional | unset | Path to the browser-tab icon (`.ico`, `.png` or `.svg`), served at `/favicon`. Unset, or a file that can't be read, falls back to the bundled `assets/favicon.ico`. Web only; the desktop app always uses the bundled icon. |
 | `[theme]`           | table, optional  | all unset | CSS custom-property overrides applied on top of the bundled default `theme.css` — see [Styling](#styling) below. Every key is optional and independent; unset ones fall back to the compiled-in default via the normal CSS cascade. Color keys (`primary`, `accent`, `text`, `text_secondary`, `text_muted`, `text_dim`, `text_faint`, `text_mute`, `text_strong`, `text_on_dark`, `border`, `border_light`, `surface_light`, `surface_hover`, `surface_dark`) must be CSS hex colors (`#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`). Font keys (`font_body`, `font_heading`, `font_heading_weight`, `font_mono`) are CSS font-family/weight values. `settings.toml` fails to load with a descriptive error if any key doesn't match. |
 | `project_name`      | string           | `"EWE Wordnet Editor"` | Shown as the `<h1>` next to the logo, and as the exported XML's `<Lexicon label="...">`. |
 | `tagline`           | string           | a generic tagline | Short line shown centered on the home page, below the search box. |
@@ -100,6 +102,8 @@ accent = "#bf0a30"
 | `[validation]`      | table, optional  | all `false` | Validation checks to skip when validating or saving in the editor: `skip_symmetric`, `skip_duplicate_ili`, `skip_duplicate_definitions`, `skip_similar`, `skip_hypernym` (booleans). The `ewe` CLI and `ewe-mcp` read the same table from the project's `settings.toml` (see [`ewe_cli/README.md`](../ewe_cli/README.md#non-interactive-validation-ci)). An unknown key fails the load. |
 
 `logo` is read from disk (and inlined into the page) via the same server function that carries `project_name`/`footer` (`backend::api::get_branding`) rather than bundled at build time via Dioxus's `asset!` macro, so you can rebrand a running deployment (swap the logo file, or repoint the path in `settings.toml`) without rebuilding or restarting the app. `[theme]` overrides ride along in that same struct and are applied at runtime via `document.documentElement.style.setProperty(...)` — see [Styling](#styling) below.
+
+`favicon` works the same way, without a client-side fetch: every page links `/favicon`, and the server reads `settings.toml` on each request to decide which file is behind it, so the right icon shows from first paint and a swapped file is picked up without a restart. It's served with a one-hour `Cache-Control`, and browsers cache favicons aggressively on top of that, so a hard refresh may be needed to see a change right away.
 
 `wordnet.db` and `corpus.db` are git-ignored — every developer builds their own copy locally.
 
