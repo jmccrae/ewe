@@ -63,6 +63,8 @@ pub struct ThemeOverrides {
     pub font_mono: Option<String>,
 }
 
+// Only `EweSettings::load` (server/desktop) validates; the web client just receives the overrides.
+#[cfg(any(feature = "server", feature = "desktop"))]
 impl ThemeOverrides {
     /// The full set of overridable color properties as `(field name, value)` pairs, for
     /// `validate`'s loop and any other code that needs to walk every field generically rather
@@ -130,6 +132,7 @@ impl ThemeOverrides {
 /// shorthand/alpha forms). Deliberately stricter than valid CSS overall (no named colors, no
 /// `rgb()`/`hsl()`) since every real-world override so far is a hex color, and a narrow allowlist
 /// is easiest to reason about as safe to interpolate into `document::eval`'d JS.
+#[cfg(any(feature = "server", feature = "desktop"))]
 fn is_valid_hex_color(s: &str) -> bool {
     let hex = s.strip_prefix('#').unwrap_or_default();
     s.starts_with('#') && matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
@@ -140,11 +143,12 @@ fn is_valid_hex_color(s: &str) -> bool {
 /// inject extra CSS/JS: `"`, `\`, `<`, `>`, `;`, and control characters. Single quotes are allowed
 /// - `'Times New Roman'` is a normal, legitimate CSS font-stack style, and harmless inside a
 /// double-quoted JS string.
+#[cfg(any(feature = "server", feature = "desktop"))]
 fn is_valid_font_value(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii() && !c.is_control() && !"\"\\<>;".contains(c))
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "server", feature = "desktop")))]
 mod theme_overrides_tests {
     use super::*;
 
@@ -314,7 +318,9 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     Ok(synset_ids)
 }
 
-#[cfg_attr(not(feature = "desktop"), get("/api/lemma/{lemma}"))]
+// Only reachable over the JSON API, which a desktop build doesn't serve.
+#[cfg(not(feature = "desktop"))]
+#[get("/api/lemma/{lemma}")]
 pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     let lexicon = read_lexicon()?;
     let entries = lexicon.entry_by_lemma(&lemma)?;

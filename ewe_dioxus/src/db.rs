@@ -1,9 +1,13 @@
 /// Opening (and, if necessary, rebuilding) the ReDB lexicon database.
 use ewe_lib::progress::{LoggingProgress, Progress};
 use ewe_lib::wordnet::{Lexicon, ReDBLexicon};
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+#[cfg(feature = "edit")]
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
-use std::sync::{RwLockReadGuard, RwLockWriteGuard};
+use std::sync::RwLockReadGuard;
+#[cfg(feature = "edit")]
+use std::sync::RwLockWriteGuard;
 use std::time::SystemTime;
 use teanga::disk_corpus::RedbDb;
 use teanga::{Corpus, DiskCorpus};
@@ -30,8 +34,10 @@ impl<'a> Deref for LexiconGuard<'a> {
 }
 
 /// The write-lock counterpart of [`LexiconGuard`].
+#[cfg(feature = "edit")]
 pub struct LexiconGuardMut<'a>(RwLockWriteGuard<'a, Option<ReDBLexicon>>);
 
+#[cfg(feature = "edit")]
 impl<'a> Deref for LexiconGuardMut<'a> {
     type Target = ReDBLexicon;
     fn deref(&self) -> &ReDBLexicon {
@@ -39,6 +45,7 @@ impl<'a> Deref for LexiconGuardMut<'a> {
     }
 }
 
+#[cfg(feature = "edit")]
 impl<'a> DerefMut for LexiconGuardMut<'a> {
     fn deref_mut(&mut self) -> &mut ReDBLexicon {
         self.0.as_mut().unwrap()
@@ -57,6 +64,7 @@ pub fn read_lexicon() -> Result<LexiconGuard<'static>, LexiconUnavailable> {
 
 /// Takes a write lock on the shared lexicon, or an error if it failed to load at startup (and
 /// hasn't since been configured via `backend::setup::configure_wordnet_source`).
+#[cfg(feature = "edit")]
 pub fn write_lexicon() -> Result<LexiconGuardMut<'static>, LexiconUnavailable> {
     let guard = crate::LEXICON.get().write().unwrap();
     if guard.is_none() {
@@ -73,6 +81,7 @@ pub fn read_settings() -> RwLockReadGuard<'static, EweSettings> {
 }
 
 /// Takes a write lock on the shared settings.
+#[cfg(feature = "edit")]
 pub fn write_settings() -> RwLockWriteGuard<'static, EweSettings> {
     crate::SETTINGS.get().write().unwrap()
 }
