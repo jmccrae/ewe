@@ -157,7 +157,7 @@ fn latest_source_mtime(source: &str) -> Result<SystemTime, Box<dyn std::error::E
 pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
     let mut corpus = if let Some(source) = &settings.corpus_source {
         let files = corpus_source_files(source)?;
-        if is_corpus_stale(&settings.corpus_database, &files, settings.disable_auto_reload)? {
+        if is_corpus_stale(&settings.corpus_database, source, &files, settings.disable_auto_reload)? {
             eprintln!(
                 "Corpus source at {} is newer than {}, rebuilding database",
                 source, settings.corpus_database
@@ -218,8 +218,8 @@ fn corpus_source_files(source: &str) -> Result<Vec<PathBuf>, Box<dyn std::error:
 }
 
 /// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
-/// and any of the corpus source `files` is newer than it.
-fn is_corpus_stale(database: &str, files: &[PathBuf], disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
+/// and `source` or any of the corpus source `files` in it is newer than it.
+fn is_corpus_stale(database: &str, source: &str, files: &[PathBuf], disable_auto_reload: bool) -> Result<bool, Box<dyn std::error::Error>> {
     let db_mtime = match Path::new(database).metadata().and_then(|m| m.modified()) {
         Ok(mtime) => mtime,
         Err(_) => return Ok(true),
@@ -227,10 +227,104 @@ fn is_corpus_stale(database: &str, files: &[PathBuf], disable_auto_reload: bool)
     if disable_auto_reload {
         return Ok(false);
     }
+    // For a directory, its own mtime changes when a file is added, removed or renamed, which
+    // the files' mtimes alone miss (e.g. a deleted file, or one copied with its mtime kept).
+    if Path::new(source).metadata()?.modified()? > db_mtime {
+        return Ok(true);
+    }
     for file in files {
         if file.metadata()?.modified()? > db_mtime {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory under the system temp dir, unique per test run, cleaned up on drop.
+    struct ScratchDir(PathBuf);
+
+    impl ScratchDir {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "ewe-db-test-{name}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            ScratchDir(dir)
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const META: &str = "_meta:
+    text:
+        type: characters
+    tokens:
+        type: span
+        base: text
+    test_key:
+        type: element
+        base: tokens
+        data: string
+";
+
+    #[test]
+    fn test_corpus_source_directory() {
+        let scratch = ScratchDir::new("corpus-dir");
+        let source = scratch.0.join("corpus");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("a.yaml"), format!("{META}ecWc:
+    text: This is an example
+    tokens: [[0, 4], [5, 7], [8, 10], [11, 18]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        std::fs::write(source.join("b.yml"), format!("{META}Kjco:
+    text: This is a document.
+    tokens: [[0, 4], [5, 7], [8, 9], [10, 18], [18, 19]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        std::fs::write(source.join("notes.txt"), "not a corpus file").unwrap();
+
+        let source_str = source.to_string_lossy().to_string();
+        let files = corpus_source_files(&source_str).unwrap();
+        assert_eq!(files.len(), 2);
+
+        let mut settings = EweSettings::default();
+        settings.id_prefix = "test".to_string();
+        settings.corpus_source = Some(source_str.clone());
+        settings.corpus_database = scratch.0.join("corpus.db").to_string_lossy().to_string();
+        let corpus = open_corpus(&settings).unwrap();
+        let mut ids = corpus.get_order().to_vec();
+        ids.sort();
+        assert_eq!(ids, vec!["Kjco".to_string(), "ecWc".to_string()]);
+        drop(corpus);
+
+        assert!(!is_corpus_stale(&settings.corpus_database, &source_str, &files, false).unwrap());
+
+        // Removing a file leaves every remaining file older than the database, but the
+        // directory's own mtime still marks it stale.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::remove_file(source.join("b.yml")).unwrap();
+        let files = corpus_source_files(&source_str).unwrap();
+        assert!(is_corpus_stale(&settings.corpus_database, &source_str, &files, false).unwrap());
+    }
+
+    #[test]
+    fn test_corpus_source_directory_without_yaml() {
+        let scratch = ScratchDir::new("corpus-empty");
+        std::fs::write(scratch.0.join("notes.txt"), "not a corpus file").unwrap();
+        assert!(corpus_source_files(&scratch.0.to_string_lossy()).is_err());
+    }
 }
