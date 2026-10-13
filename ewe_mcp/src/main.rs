@@ -11,8 +11,11 @@ use ewe_lib::progress::NullProgress;
 use ewe_lib::validate::ValidationOptions;
 use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, SenseId, SynsetId};
 use rmcp::ServiceExt;
+use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
+use rmcp::handler::server::tool::{IntoCallToolResult, ToolCallContext};
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::{tool, tool_router};
+use rmcp::model::{CallToolResponse, JsonObject, Tool};
+use rmcp::{ErrorData, ServerHandler, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -86,6 +89,188 @@ fn source_mtime(path: &str) -> Option<SystemTime> {
 #[derive(Clone)]
 struct EweMcpServer {
     state: Arc<Mutex<ServerState>>,
+    /// The `#[tool]` methods below plus one generated tool per automaton action (see
+    /// `action_tools`) - built once in `new` rather than per request, since generating the
+    /// action tools walks `Action`'s whole JSON schema.
+    tool_router: ToolRouter<EweMcpServer>,
+}
+
+impl EweMcpServer {
+    fn new(state: ServerState) -> Self {
+        let mut tool_router = Self::tool_router();
+        for tool in action_tools() {
+            tool_router.add_route(ToolRoute::new_dyn(tool, call_action_route));
+        }
+        EweMcpServer {
+            state: Arc::new(Mutex::new(state)),
+            tool_router,
+        }
+    }
+
+    /// Runs the generated action tool `name` (an `Action` variant name, e.g.
+    /// `change_definition`) with `args` - that variant's fields plus an optional `dry_run` - as a
+    /// one-action `apply_automaton` batch.
+    fn call_action(&self, name: &str, mut args: JsonObject) -> Result<String, String> {
+        let dry_run = match args.remove("dry_run") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(b)) => b,
+            Some(other) => return Err(format!("dry_run must be a boolean, not {}", other)),
+        };
+        // `Action` is externally tagged: a struct variant is `{"<name>": {fields}}`, a unit
+        // variant the bare string `"<name>"`.
+        let tagged = if args.is_empty() && is_unit_action(name) {
+            serde_json::Value::String(name.to_string())
+        } else {
+            serde_json::json!({ name: args })
+        };
+        let action: Action = serde_json::from_value(tagged)
+            .map_err(|e| format!("Invalid arguments for {}: {}", name, e))?;
+        self.apply_actions(vec![action], dry_run)
+    }
+
+    /// Shared by the `apply_automaton` tool and every generated action tool: applies `actions`
+    /// (against a scratch clone if `dry_run`), then validates and auto-saves if clean.
+    fn apply_actions(&self, actions: Vec<Action>, dry_run: bool) -> Result<String, String> {
+        if actions.iter().any(|a| matches!(a, Action::Validate)) {
+            return Err(
+                "Action batches may not contain a `validate` action - call the `validate` tool instead."
+                    .to_string(),
+            );
+        }
+
+        let mut guard = self.state.lock().unwrap();
+        // Deref once up front: `&mut guard.wn`/`&mut guard.changes` below borrow disjoint
+        // fields of `*guard` directly, which the borrow checker can split - going through
+        // `MutexGuard`'s `DerefMut` on each access instead would look like one call
+        // borrowing the whole guard twice.
+        let state = &mut *guard;
+
+        if dry_run {
+            let mut scratch_wn = state.wn.clone();
+            let mut scratch_changes = ChangeList::new();
+            let (would_succeed, apply_error, last_synset_id) =
+                match ewe_lib::automaton::apply_automaton_with(
+                    actions,
+                    &mut scratch_wn,
+                    &mut scratch_changes,
+                    &state.validation,
+                ) {
+                    Ok((last_synset_id, _)) => (true, None, last_synset_id),
+                    Err(e) => (false, Some(e), None),
+                };
+            let validation_errors =
+                validation_errors_of(&scratch_wn, &state.validation).unwrap_or_default();
+            let report = DryRunReport {
+                would_succeed,
+                apply_error,
+                last_synset_id: last_synset_id.map(|id| id.as_str().to_string()),
+                validation_errors,
+            };
+            return serde_json::to_string(&report).map_err(|e| e.to_string());
+        }
+
+        let change_summaries: Vec<String> = actions.iter().map(|a| a.summary()).collect();
+        let (last_synset_id, _) = ewe_lib::automaton::apply_automaton(
+            actions,
+            &mut state.wn,
+            &mut state.changes,
+        )?;
+        let last_synset_id = last_synset_id.map(|id| id.as_str().to_string());
+
+        let (saved, validation_errors, stale) = perform_save(state, false)?;
+
+        let report = ApplyReport {
+            applied: true,
+            saved,
+            stale,
+            last_synset_id,
+            validation_errors,
+            change_summaries,
+        };
+        serde_json::to_string(&report).map_err(|e| e.to_string())
+    }
+}
+
+/// The `ToolRoute` handler for every generated action tool. The work is synchronous (like the
+/// `#[tool]` methods), so it's done before returning an already-completed future.
+fn call_action_route(
+    context: ToolCallContext<'_, EweMcpServer>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_>,
+> {
+    let result = context
+        .service
+        .call_action(&context.name, context.arguments.unwrap_or_default())
+        .into_call_tool_result();
+    Box::pin(std::future::ready(result))
+}
+
+/// Appended to each generated action tool's description (which comes from the `Action`
+/// variant's doc comment).
+const ACTION_TOOL_SUFFIX: &str = "\n\nApplied like a one-action `apply_automaton` batch: on \
+success it validates and auto-saves if the result is clean, otherwise leaves the change applied \
+in memory but unsaved and reports the validation errors. With `dry_run: true`, applies against \
+a scratch copy and reports whether it would succeed, without changing anything. A synset/sense \
+ref of \"last\" only means something inside a multi-action `apply_automaton` batch.";
+
+/// One MCP tool per `Action` variant (except `validate`, which has its own tool), generated
+/// from `Action`'s JSON schema so new automaton actions are exposed automatically. Each tool's
+/// input schema is the variant's own fields plus an optional `dry_run`.
+fn action_tools() -> Vec<Tool> {
+    let root = serde_json::to_value(schemars::schema_for!(Action)).expect("Action schema");
+    let defs = root.get("$defs").cloned();
+    let variants = root
+        .get("oneOf")
+        .and_then(|v| v.as_array())
+        .expect("Action's schema should be a oneOf over its variants");
+    let mut tools = Vec::new();
+    for variant in variants {
+        let (name, mut input) = if let Some(name) = variant.get("const").and_then(|c| c.as_str()) {
+            // A unit variant (e.g. `fix_transitivity`) takes no fields.
+            (name.to_string(), serde_json::json!({ "type": "object", "properties": {} }))
+        } else {
+            let properties = variant
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .expect("a struct variant's schema should have one property, its name");
+            let (name, inner) = properties.iter().next().expect("variant name");
+            (name.clone(), inner.clone())
+        };
+        if name == "validate" {
+            continue;
+        }
+        let input = input.as_object_mut().expect("variant fields should be an object schema");
+        input
+            .entry("properties")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .expect("properties")
+            .insert(
+                "dry_run".to_string(),
+                serde_json::json!({
+                    "type": "boolean",
+                    "description": "If true, only report whether this would succeed and any validation errors it would introduce, without changing the wordnet. Defaults to false."
+                }),
+            );
+        if let Some(defs) = &defs {
+            input.insert("$defs".to_string(), defs.clone());
+        }
+        let description = variant
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or_default();
+        tools.push(Tool::new(
+            name,
+            format!("{}{}", description, ACTION_TOOL_SUFFIX),
+            Arc::new(input.clone()),
+        ));
+    }
+    tools
+}
+
+/// Whether `name` is a unit (field-less) `Action` variant, like `fix_transitivity`.
+fn is_unit_action(name: &str) -> bool {
+    serde_json::from_value::<Action>(serde_json::Value::String(name.to_string())).is_ok()
 }
 
 #[derive(Serialize)]
@@ -228,7 +413,7 @@ fn perform_save(state: &mut ServerState, force: bool) -> Result<(bool, Vec<Strin
     Ok((saved, validation_errors, stale && !saved))
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl EweMcpServer {
     #[tool(
         description = "Look up a word (lemma) and return every synset/sense it belongs to as JSON."
@@ -359,63 +544,7 @@ impl EweMcpServer {
         &self,
         Parameters(ApplyAutomatonParams { actions, dry_run }): Parameters<ApplyAutomatonParams>,
     ) -> Result<String, String> {
-        if actions.iter().any(|a| matches!(a, Action::Validate)) {
-            return Err(
-                "Action batches may not contain a `validate` action - call the `validate` tool instead."
-                    .to_string(),
-            );
-        }
-
-        let mut guard = self.state.lock().unwrap();
-        // Deref once up front: `&mut guard.wn`/`&mut guard.changes` below borrow disjoint
-        // fields of `*guard` directly, which the borrow checker can split - going through
-        // `MutexGuard`'s `DerefMut` on each access instead would look like one call
-        // borrowing the whole guard twice.
-        let state = &mut *guard;
-
-        if dry_run {
-            let mut scratch_wn = state.wn.clone();
-            let mut scratch_changes = ChangeList::new();
-            let (would_succeed, apply_error, last_synset_id) =
-                match ewe_lib::automaton::apply_automaton_with(
-                    actions,
-                    &mut scratch_wn,
-                    &mut scratch_changes,
-                    &state.validation,
-                ) {
-                    Ok((last_synset_id, _)) => (true, None, last_synset_id),
-                    Err(e) => (false, Some(e), None),
-                };
-            let validation_errors =
-                validation_errors_of(&scratch_wn, &state.validation).unwrap_or_default();
-            let report = DryRunReport {
-                would_succeed,
-                apply_error,
-                last_synset_id: last_synset_id.map(|id| id.as_str().to_string()),
-                validation_errors,
-            };
-            return serde_json::to_string(&report).map_err(|e| e.to_string());
-        }
-
-        let change_summaries: Vec<String> = actions.iter().map(|a| a.summary()).collect();
-        let (last_synset_id, _) = ewe_lib::automaton::apply_automaton(
-            actions,
-            &mut state.wn,
-            &mut state.changes,
-        )?;
-        let last_synset_id = last_synset_id.map(|id| id.as_str().to_string());
-
-        let (saved, validation_errors, stale) = perform_save(state, false)?;
-
-        let report = ApplyReport {
-            applied: true,
-            saved,
-            stale,
-            last_synset_id,
-            validation_errors,
-            change_summaries,
-        };
-        serde_json::to_string(&report).map_err(|e| e.to_string())
+        self.apply_actions(actions, dry_run)
     }
 
     #[tool(
@@ -466,6 +595,9 @@ impl EweMcpServer {
     }
 }
 
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for EweMcpServer {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,15 +618,13 @@ mod tests {
         )
         .unwrap();
         let loaded_mtime = source_mtime(&path);
-        EweMcpServer {
-            state: Arc::new(Mutex::new(ServerState {
-                path,
-                wn,
-                changes: ChangeList::new(),
-                loaded_mtime,
-                validation: ValidationOptions::default(),
-            })),
-        }
+        EweMcpServer::new(ServerState {
+            path,
+            wn,
+            changes: ChangeList::new(),
+            loaded_mtime,
+            validation: ValidationOptions::default(),
+        })
     }
 
     fn add_synset_action(lemma: &str) -> Vec<Action> {
@@ -509,6 +639,130 @@ mod tests {
             lemmas: vec![lemma.to_string()],
             subcats: Vec::new(),
         }]
+    }
+
+    fn args(value: serde_json::Value) -> JsonObject {
+        value.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn action_tools_cover_every_action_but_validate() {
+        let schema = serde_json::to_value(schemars::schema_for!(Action)).unwrap();
+        let n_variants = schema["oneOf"].as_array().unwrap().len();
+        let tools = action_tools();
+        assert_eq!(tools.len(), n_variants - 1, "one tool per Action variant except validate");
+
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        for name in ["change_definition", "add_relation", "update_relations", "fix_transitivity"] {
+            assert!(names.contains(&name), "missing {} in {:?}", name, names);
+        }
+        assert!(!names.contains(&"validate"));
+
+        for tool in &tools {
+            assert!(tool.input_schema["properties"]["dry_run"].is_object(), "{}", tool.name);
+            assert!(tool.description.as_deref().unwrap_or_default().contains("apply_automaton"));
+        }
+        let add_relation = tools.iter().find(|t| t.name == "add_relation").unwrap();
+        assert!(add_relation.input_schema["$defs"]["SynsetRef"].is_object());
+        assert!(add_relation.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("relation")));
+    }
+
+    #[test]
+    fn router_lists_static_and_action_tools() {
+        let server = test_server("/nonexistent/does-not-matter".to_string());
+        let names: Vec<String> = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        for name in ["lookup_word", "validate", "apply_automaton", "save", "change_definition", "delete_synset"] {
+            assert!(names.contains(&name.to_string()), "missing {} in {:?}", name, names);
+        }
+        assert_eq!(names.iter().filter(|n| *n == "validate").count(), 1);
+    }
+
+    #[test]
+    fn single_action_tools_apply_changes() {
+        let dir = isolated_test_wn_dir("single_action_tools_apply");
+        let server = test_server(dir.to_string_lossy().to_string());
+
+        // No hypernym, so this is applied in memory but not saved.
+        let report = server
+            .call_action(
+                "add_synset",
+                args(serde_json::json!({
+                    "definition": "a single-action synset",
+                    "lexfile": "noun.animal",
+                    "pos": "n",
+                    "lemmas": ["singleactioncat"]
+                })),
+            )
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_str(&report).unwrap();
+        assert_eq!(report["applied"], true, "{}", report);
+        let id = report["last_synset_id"].as_str().unwrap().to_string();
+
+        server
+            .call_action(
+                "change_definition",
+                args(serde_json::json!({ "synset": id, "definition": "a changed definition" })),
+            )
+            .unwrap();
+        let looked_up = server
+            .lookup_id(Parameters(LookupIdParams { id: id.clone() }))
+            .unwrap();
+        assert!(looked_up.contains("a changed definition"), "{}", looked_up);
+
+        // A unit action takes no fields.
+        let fixed = server
+            .call_action("fix_transitivity", args(serde_json::json!({ "dry_run": true })))
+            .unwrap();
+        assert!(fixed.contains("\"would_succeed\":true"), "{}", fixed);
+
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn single_action_dry_run_leaves_state_untouched() {
+        let server = test_server("/nonexistent/does-not-matter".to_string());
+        let report = server
+            .call_action(
+                "add_synset",
+                args(serde_json::json!({
+                    "definition": "a dry run synset",
+                    "lexfile": "noun.animal",
+                    "lemmas": ["dryrunsingle"],
+                    "dry_run": true
+                })),
+            )
+            .unwrap();
+        assert!(report.contains("\"would_succeed\":true"), "{}", report);
+        let looked_up = server
+            .lookup_word(Parameters(LookupWordParams {
+                word: "dryrunsingle".to_string(),
+                ignore_case: false,
+                sense_ids: false,
+            }))
+            .unwrap();
+        assert_eq!(looked_up, "[]");
+    }
+
+    #[test]
+    fn single_action_tools_reject_bad_arguments() {
+        let server = test_server("/nonexistent/does-not-matter".to_string());
+        let missing_field = server.call_action(
+            "change_definition",
+            args(serde_json::json!({ "definition": "no synset given" })),
+        );
+        assert!(missing_field.unwrap_err().contains("synset"));
+        assert!(server.call_action("not_an_action", JsonObject::new()).is_err());
+        assert!(server
+            .call_action("fix_transitivity", args(serde_json::json!({ "dry_run": "yes" })))
+            .is_err());
     }
 
     #[test]
@@ -688,15 +942,13 @@ async fn main() -> anyhow::Result<()> {
         ValidationOptions::for_wordnet(Path::new(&path)).map_err(|e| anyhow::anyhow!(e))?;
     let loaded_mtime = source_mtime(&path);
 
-    let server = EweMcpServer {
-        state: Arc::new(Mutex::new(ServerState {
-            path,
-            wn,
-            changes: ChangeList::new(),
-            loaded_mtime,
-            validation,
-        })),
-    };
+    let server = EweMcpServer::new(ServerState {
+        path,
+        wn,
+        changes: ChangeList::new(),
+        loaded_mtime,
+        validation,
+    });
 
     let service = server.serve(rmcp::transport::stdio()).await?;
     service.waiting().await?;

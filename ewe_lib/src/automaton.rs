@@ -935,6 +935,8 @@ pub struct ActionWrapper(#[serde(with = "serde_yaml::with::singleton_map")] pub 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Action {
+    /// Add `lemma` (part of speech `pos`) to `synset` as a new sense. `subcat` lists verb frame
+    /// ids for the new sense.
     #[serde(rename = "add_entry")]
     AddEntry {
         synset: SynsetRef,
@@ -952,19 +954,27 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         entry_confidence: Option<f64>,
     },
+    /// Remove `lemma` from `synset`, deleting its sense there.
     #[serde(rename = "delete_entry")]
     DeleteEntry { synset: SynsetRef, lemma: String },
+    /// Move `lemma`'s sense from `synset` to `target_synset`, keeping its sense relations, forms
+    /// and pronunciations - prefer this over `delete_entry` + `add_entry`.
     #[serde(rename = "move_entry")]
     MoveEntry {
         synset: SynsetRef,
         lemma: String,
         target_synset: SynsetRef,
     },
+    /// Set `synset`'s complete member list to `members`, in that order: lemmas not listed are
+    /// deleted from the synset and new ones are added. Also used just to reorder members.
     #[serde(rename = "change_members")]
     ChangeMembers {
         synset: SynsetRef,
         members: Vec<String>,
     },
+    /// Create a new synset in `lexfile` with `definition` and member `lemmas` (`pos` defaults to
+    /// the lexfile's part of speech; `subcats` gives each lemma's verb frames). Its id is assigned
+    /// automatically and can be referred to as `"last"` later in the same batch.
     #[serde(rename = "add_synset")]
     AddSynset {
         definition: String,
@@ -993,6 +1003,9 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         ili: Option<String>,
     },
+    /// Delete `synset`. With `superseded_by`, its entries, examples and relations are handed to that
+    /// synset and a deprecation record is kept; without it the synset is removed outright. `reason`
+    /// should name the issue behind the deletion, e.g. "Duplicate (#123)".
     #[serde(rename = "delete_synset")]
     DeleteSynset {
         synset: SynsetRef,
@@ -1005,6 +1018,7 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         superseded_by: Option<SynsetRef>,
     },
+    /// Replace `synset`'s definition.
     #[serde(rename = "change_definition")]
     Definition {
         synset: SynsetRef,
@@ -1014,16 +1028,21 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         confidence: Option<f64>,
     },
+    /// Set `synset`'s Interlingual Index (ILI) id, e.g. "i12345".
     #[serde(rename = "change_ili")]
     ChangeILI { synset: SynsetRef, ili: String },
+    /// Replace `synset`'s Wikidata links with `wikidata` (one or more Q-ids; an empty list removes
+    /// them all).
     #[serde(rename = "change_wikidata")]
     ChangeWikidata {
         synset: SynsetRef,
         #[serde(deserialize_with = "crate::wordnet::string_or_vec")]
         wikidata: Vec<String>,
     },
+    /// Set `synset`'s source (provenance) note.
     #[serde(rename = "change_source")]
     ChangeSource { synset: SynsetRef, source: String },
+    /// Add a usage example to `synset`, with an optional `source`.
     #[serde(rename = "add_example")]
     AddExample {
         synset: SynsetRef,
@@ -1036,6 +1055,7 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         confidence: Option<f64>,
     },
+    /// Replace `synset`'s `number`-th (1-indexed) example and its source.
     #[serde(rename = "update_example")]
     UpdateExample {
         synset: SynsetRef,
@@ -1050,8 +1070,12 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         confidence: Option<f64>,
     },
+    /// Delete `synset`'s `number`-th (1-indexed) example.
     #[serde(rename = "delete_example")]
     DeleteExample { synset: SynsetRef, number: usize },
+    /// Add a `relation` from `source` to `target`. Give `source_sense`/`target_sense` (or
+    /// `source_lemma`/`target_lemma`) to make it a sense relation; otherwise it links the synsets. The
+    /// inverse relation, if any, is added automatically.
     #[serde(rename = "add_relation")]
     AddRelation {
         source: SynsetRef,
@@ -1074,6 +1098,9 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         confidence: Option<f64>,
     },
+    /// Delete every relation between `source` and `target` (in both directions) - between the
+    /// synsets, or between the senses given by `source_sense`/`target_sense` (or
+    /// `source_lemma`/`target_lemma`).
     #[serde(rename = "delete_relation")]
     DeleteRelation {
         source: SynsetRef,
@@ -1091,6 +1118,8 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         target_lemma: Option<String>,
     },
+    /// Reverse the direction of the relation(s) from `source` to `target` (between the given senses,
+    /// if `source_sense`/`target_sense` are set), e.g. to fix a hypernym added the wrong way round.
     #[serde(rename = "reverse_relation")]
     ReverseRelation {
         source: SynsetRef,
@@ -1102,6 +1131,8 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         target_sense: Option<SenseRef>,
     },
+    /// Replace **all** relations to and from `synset` with `relations` (relations not listed are
+    /// deleted, including incoming ones). Existing relations that are kept keep their confidence.
     #[serde(rename = "update_relations")]
     UpdateRelations {
         synset: SynsetRef,
@@ -1148,8 +1179,11 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         target_sense: Option<SenseRef>,
     },
+    /// Validate the wordnet, reporting any errors (see `validate::validate`).
     #[serde(rename = "validate")]
     Validate,
+    /// Across the whole wordnet, delete hypernym links that are implied by another hypernym
+    /// (A -> C where A -> B -> C also holds).
     #[serde(rename = "fix_transitivity")]
     FixTransitivity,
 }
