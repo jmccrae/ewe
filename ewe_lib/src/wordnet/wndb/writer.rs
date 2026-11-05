@@ -140,18 +140,52 @@ fn last2(s: &str) -> &str {
     }
 }
 
-/// 0-based position of `sense_id` within `synset_id`'s members, ordered the same way `writeData`
-/// orders them for `srcIdx`/`trgIdx` purposes (`entries.sortBy(_._2.id.takeRight(2))` - NOT the
-/// synset's own `members` declaration order, which is only used for the synset line's own member
-/// list).
-fn member_index(
+/// Order a synset's `(entry index, sense id)` members as they are written on its `data.*` line:
+/// by the synset's own `members` declaration order, falling back to the sense key's last two
+/// characters when it declares none.
+fn sort_members_for_line(
+    synset_members: &[String],
+    members: &mut [(usize, SenseId)],
+    all_entries: &[AllEntry],
+) {
+    if !synset_members.is_empty() {
+        members.sort_by_key(|(i, _)| {
+            synset_members
+                .iter()
+                .position(|m| *m == all_entries[*i].lemma)
+                .unwrap_or(usize::MAX)
+        });
+    } else {
+        members.sort_by(|(_, a), (_, b)| last2(a.as_str()).cmp(last2(b.as_str())));
+    }
+}
+
+/// Each synset's member senses in the order they appear on its `data.*` line - the order the
+/// `srcIdx`/`trgIdx` pointer fields count in (the WNDB word number is the word's position on the
+/// line). Checked against the Princeton WordNet 3.1 dump: lexical pointers index by line
+/// position (~95% semantically consistent) rather than by lex_id order (~30%), and the two
+/// orders differ in ~7,000 multi-word synsets.
+fn index_member_order<L: Lexicon>(
+    wn: &L,
     entries_for_synset: &HashMap<SynsetId, Vec<(usize, SenseId)>>,
-    synset_id: &SynsetId,
-    sense_id: &SenseId,
-) -> usize {
-    let mut v = entries_for_synset.get(synset_id).cloned().unwrap_or_default();
-    v.sort_by(|(_, a), (_, b)| last2(a.as_str()).cmp(last2(b.as_str())));
-    v.iter().position(|(_, s)| s == sense_id).unwrap_or(0)
+    all_entries: &[AllEntry],
+) -> Result<HashMap<SynsetId, Vec<SenseId>>> {
+    let mut map = HashMap::new();
+    for (synset_id, members) in entries_for_synset {
+        let synset_members = wn.synset_by_id(synset_id)?.map(|s| s.members.to_vec()).unwrap_or_default();
+        let mut sorted = members.clone();
+        sort_members_for_line(&synset_members, &mut sorted, all_entries);
+        map.insert(synset_id.clone(), sorted.into_iter().map(|(_, s)| s).collect());
+    }
+    Ok(map)
+}
+
+/// 0-based position of `sense_id` on `synset_id`'s `data.*` line (see [`index_member_order`]).
+fn member_index(member_order: &HashMap<SynsetId, Vec<SenseId>>, synset_id: &SynsetId, sense_id: &SenseId) -> usize {
+    member_order
+        .get(synset_id)
+        .and_then(|v| v.iter().position(|s| s == sense_id))
+        .unwrap_or(0)
 }
 
 fn collect_all_entries<L: Lexicon>(wn: &L) -> Result<Vec<AllEntry>> {
@@ -336,6 +370,7 @@ pub fn write_wndb<L: Lexicon>(wn: &L, out_dir: &Path, options: &WndbExportOption
     let all_entries = collect_all_entries(wn)?;
     let entries_for_synset = index_entries_by_synset(&all_entries);
     let synset_exemplifiers = index_synset_exemplifiers(&all_entries);
+    let member_order = index_member_order(wn, &entries_for_synset, &all_entries)?;
 
     write_exc_files(&all_entries, out_dir)?;
 
@@ -354,6 +389,7 @@ pub fn write_wndb<L: Lexicon>(wn: &L, out_dir: &Path, options: &WndbExportOption
             &mut extra_lexnames,
             &all_entries,
             &entries_for_synset,
+            &member_order,
             &synset_exemplifiers,
         )?;
     }
@@ -389,6 +425,7 @@ fn write_data<L: Lexicon>(
     extra_lexnames: &mut HashMap<String, usize>,
     all_entries: &[AllEntry],
     entries_for_synset: &HashMap<SynsetId, Vec<(usize, SenseId)>>,
+    member_order: &HashMap<SynsetId, Vec<SenseId>>,
     synset_exemplifiers: &HashMap<SynsetId, Vec<SenseId>>,
 ) -> Result<()> {
     let mut synsets: Vec<(SynsetId, Synset)> = Vec::new();
@@ -416,17 +453,7 @@ fn write_data<L: Lexicon>(
 
         let members = entries_for_synset.get(synset_id).cloned().unwrap_or_default();
         let mut members_sorted = members.clone();
-        if !synset.members.is_empty() {
-            members_sorted.sort_by_key(|(i, _)| {
-                synset
-                    .members
-                    .iter()
-                    .position(|m| *m == all_entries[*i].lemma)
-                    .unwrap_or(usize::MAX)
-            });
-        } else {
-            members_sorted.sort_by(|(_, a), (_, b)| last2(a.as_str()).cmp(last2(b.as_str())));
-        }
+        sort_members_for_line(&synset.members, &mut members_sorted, all_entries);
 
         {
             let buf = &mut bufs[buf_idx];
@@ -466,7 +493,7 @@ fn write_data<L: Lexicon>(
                 let Some(symbol) = rel_type.wndb_pointer(bucket_pos) else {
                     continue;
                 };
-                let src_idx = member_index(entries_for_synset, synset_id, sense_id);
+                let src_idx = member_index(member_order, synset_id, sense_id);
                 // A bare-synset target points at that synset's first word (index 01).
                 let (target_synset, trg_idx) = match &target {
                     SensePointerTarget::Sense(target_sense_id) => {
@@ -474,7 +501,7 @@ fn write_data<L: Lexicon>(
                             continue;
                         };
                         let target_synset = target_sense.synset.clone();
-                        let idx = member_index(entries_for_synset, &target_synset, target_sense_id);
+                        let idx = member_index(member_order, &target_synset, target_sense_id);
                         (target_synset, idx)
                     }
                     SensePointerTarget::Synset(target_synset) => {
@@ -515,7 +542,7 @@ fn write_data<L: Lexicon>(
                         .synset_by_id(&source_synset)?
                         .map(|s| wndb_pos_char_no_satellite(&s.part_of_speech).to_string())
                         .unwrap_or_else(|| "n".to_string());
-                    let src_idx = member_index(entries_for_synset, &source_synset, &sense_id);
+                    let src_idx = member_index(member_order, &source_synset, &sense_id);
                     let (_, _) = offsets.resolve(wn, &source_synset)?;
                     pointers.push((
                         symbol,
@@ -1216,6 +1243,40 @@ mod tests {
         let alpha = index_noun.lines().find(|l| l.starts_with("alpha ")).unwrap();
         // The index collapses `-u` to its `-` class symbol.
         assert!(alpha.starts_with("alpha n 1 1 - "), "{alpha}");
+    }
+
+    #[test]
+    fn test_pointer_word_index_follows_data_line_order_not_lex_id_order() {
+        // Princeton's word numbers count position on the data line, which is not lex_id order:
+        // here "second" is listed first but has the higher lex_id.
+        let mut wn = LexiconHashMapBackend::new();
+        let mut ss = Synset::new(PartOfSpeech::n);
+        ss.definition.push("d".to_string());
+        ss.members.push("second".to_string());
+        ss.members.push("first".to_string());
+        wn.insert_synset("noun.act".to_string(), SsId::new("30000000-n"), ss).unwrap();
+        let mut other = Synset::new(PartOfSpeech::n);
+        other.definition.push("d".to_string());
+        other.members.push("other".to_string());
+        wn.insert_synset("noun.act".to_string(), SsId::new("30000001-n"), other).unwrap();
+        let mut e = Entry::new();
+        let mut sense = Sense::new(SId::new("second%1:04:02::"), SsId::new("30000000-n"));
+        sense.derivation.push(SId::new("other%1:04:00::"));
+        e.sense.push(sense);
+        wn.insert_entry("second".to_string(), PosKey::new("n"), e).unwrap();
+        let mut e = Entry::new();
+        e.sense.push(Sense::new(SId::new("first%1:04:00::"), SsId::new("30000000-n")));
+        wn.insert_entry("first".to_string(), PosKey::new("n"), e).unwrap();
+        let mut e = Entry::new();
+        e.sense.push(Sense::new(SId::new("other%1:04:00::"), SsId::new("30000001-n")));
+        wn.insert_entry("other".to_string(), PosKey::new("n"), e).unwrap();
+
+        let out_dir = write_fixture(&wn, None);
+        let data_noun = std::fs::read_to_string(out_dir.join("data.noun")).unwrap();
+        let line = data_noun.lines().find(|l| l.contains(" second 2 first 0 ")).unwrap_or_else(|| panic!("{data_noun}"));
+        // "second" is the 1st word on the line.
+        assert!(line.contains("+ 00000"), "{line}");
+        assert!(line.contains(" n 0101 "), "{line}");
     }
 
     #[test]
