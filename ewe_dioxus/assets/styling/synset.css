@@ -253,6 +253,11 @@
     width: 10em;
 }
 
+.synset-source-input {
+    font-size: 1em;
+    width: 16em;
+}
+
 .wikidata-editing {
     display: inline-flex;
     flex-wrap: wrap;
@@ -283,6 +288,7 @@
 .example-source-input,
 .lemma-input,
 .ili-input,
+.synset-source-input,
 .wikidata-input,
 .relation-search-input,
 .relation-type-select,
@@ -299,6 +305,7 @@
 .example-source-input:focus,
 .lemma-input:focus,
 .ili-input:focus,
+.synset-source-input:focus,
 .wikidata-input:focus,
 .relation-search-input:focus,
 .relation-type-select:focus,

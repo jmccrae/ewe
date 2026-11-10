@@ -25,6 +25,8 @@ pub use editable_lemmas::EditableLemmas;
 
 mod editable_ili;
 pub use editable_ili::EditableIli;
+mod editable_source;
+pub use editable_source::EditableSource;
 
 mod editable_wikidata;
 pub use editable_wikidata::EditableWikidata;

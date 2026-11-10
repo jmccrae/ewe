@@ -623,7 +623,8 @@ pub fn apply_automaton_with<L: Lexicon>(
             Action::ChangeSource { synset, source } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 wn.update_synset(&synset, |s| {
-                    s.source = Some(source);
+                    // An empty source means "no source", so it can be cleared.
+                    s.source = if source.trim().is_empty() { None } else { Some(source) };
                 })
                 .map_err(|e| e.to_string())?;
             }

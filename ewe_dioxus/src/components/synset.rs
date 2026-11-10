@@ -4,7 +4,7 @@ use crate::components::editable_relations::{sense_rel_values, synset_rel_values}
 use crate::components::relation_types::{SENSE_RELATION_TYPES, SYNSET_RELATION_TYPES};
 use crate::components::{
     confidence_draft, parse_confidence_draft, ConfidenceBadge, ConfidenceInput,
-    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableIli,
+    DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableIli, EditableSource,
     EditableLemmas, EditableRelations, EditableWikidata, ExampleDraft, PendingRelation, Relation,
     RelationKey, Subcat,
 };
@@ -159,6 +159,8 @@ fn build_actions(
     draft_ili: &str,
     original_wikidata: &[String],
     draft_wikidata: &[String],
+    original_source: &str,
+    draft_source: &str,
 ) -> Result<Vec<Action>, String> {
     let mut actions = Vec::new();
 
@@ -186,6 +188,13 @@ fn build_actions(
         actions.push(Action::ChangeILI {
             synset: SynsetRef::Id(synset_id.clone()),
             ili: draft_ili.to_string(),
+        });
+    }
+
+    if draft_source.trim() != original_source {
+        actions.push(Action::ChangeSource {
+            synset: SynsetRef::Id(synset_id.clone()),
+            source: draft_source.trim().to_string(),
         });
     }
 
@@ -443,6 +452,7 @@ pub fn Synset(props: SynsetProps) -> Element {
     let mut definition_draft = use_signal(String::new);
     let mut example_drafts = use_signal(Vec::<ExampleDraft>::new);
     let mut ili_draft = use_signal(String::new);
+    let mut source_draft = use_signal(String::new);
     let mut wikidata_drafts = use_signal(Vec::<String>::new);
     let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
     let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
@@ -528,6 +538,20 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     if synset.ili.is_some() || !synset.wikidata.is_empty() {
                                         span {
                                             ")"
+                                        }
+                                    }
+                                    if let Some(ref source) = synset.source {
+                                        span {
+                                            " "
+                                            b {
+                                                class: "synset-id-title",
+                                                "Source: "
+                                            }
+                                            if source.starts_with("http") {
+                                                a { class: "identifier", href: "{source}", "{source}" }
+                                            } else {
+                                                "{source}"
+                                            }
                                         }
                                     }
                                 }
@@ -626,6 +650,10 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         EditableWikidata {
                                             drafts: wikidata_drafts(),
                                             on_drafts_changed: move |drafts| wikidata_drafts.set(drafts),
+                                        }
+                                        EditableSource {
+                                            value: source_draft(),
+                                            on_input: move |v| source_draft.set(v),
                                         }
                                         // The synset's own score - shown with the identifiers
                                         // rather than next to the part of speech, where it would
@@ -1098,6 +1126,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let examples = synset.example.clone();
                                         let ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
                                         let wikidata = synset.wikidata.clone();
+                                        let source = synset.source.clone().unwrap_or_default();
                                         let confidence = ConfidenceDrafts::from_synset(synset);
                                         let scored = has_confidence(synset);
                                         move |_| {
@@ -1108,6 +1137,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             example_drafts.set(ExampleDraft::from_examples(&examples));
                                             ili_draft.set(ili.clone());
                                             wikidata_drafts.set(wikidata.clone());
+                                            source_draft.set(source.clone());
                                             relation_deletes.set(Vec::new());
                                             relation_adds.set(Vec::new());
                                             edit_error.set(None);
@@ -1122,6 +1152,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let original_examples = synset.example.clone();
                                         let original_ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
                                         let original_wikidata = synset.wikidata.clone();
+                                        let original_source = synset.source.clone().unwrap_or_default();
                                         move |_| {
                                             let actions = build_actions(
                                                 &original,
@@ -1139,6 +1170,8 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 &ili_draft(),
                                                 &original_wikidata,
                                                 &wikidata_drafts(),
+                                                &original_source,
+                                                &source_draft(),
                                             );
                                             let actions = match actions {
                                                 Ok(actions) => actions,
@@ -1277,7 +1310,39 @@ mod tests {
         let members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
         let definition = synset.definition.first().cloned().unwrap_or_default();
         build_actions(synset, confidence, &synset.id, &members, &members, &definition, &definition,
-            &synset.example, examples, &[], &[], "", "", &synset.wikidata, &synset.wikidata)
+            &synset.example, examples, &[], &[], "", "", &synset.wikidata, &synset.wikidata,
+            synset.source.as_deref().unwrap_or(""), synset.source.as_deref().unwrap_or(""))
+    }
+
+    /// `build_actions` with only the source draft differing from what is saved.
+    fn source_actions(synset: &MemberSynset, draft_source: &str) -> Vec<Action> {
+        let members: Vec<String> = synset.members.iter().map(|m| m.lemma.clone()).collect();
+        let definition = synset.definition.first().cloned().unwrap_or_default();
+        let confidence = ConfidenceDrafts::from_synset(synset);
+        let examples = ExampleDraft::from_examples(&synset.example);
+        build_actions(synset, &confidence, &synset.id, &members, &members, &definition, &definition,
+            &synset.example, &examples, &[], &[], "", "", &synset.wikidata, &synset.wikidata,
+            synset.source.as_deref().unwrap_or(""), draft_source).unwrap()
+    }
+
+    #[test]
+    fn test_build_actions_sets_changes_and_clears_synset_source() {
+        let (mut wn, dog, _animal, _cat) = fixture();
+
+        // Unchanged: no action.
+        assert!(source_actions(&member_synset(&wn, &dog), "").is_empty());
+
+        let actions = source_actions(&member_synset(&wn, &dog), "Colloquial WordNet");
+        apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(member_synset(&wn, &dog).source.as_deref(), Some("Colloquial WordNet"));
+
+        let actions = source_actions(&member_synset(&wn, &dog), "Other");
+        apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(member_synset(&wn, &dog).source.as_deref(), Some("Other"));
+
+        let actions = source_actions(&member_synset(&wn, &dog), "");
+        apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(member_synset(&wn, &dog).source, None);
     }
 
     #[test]
