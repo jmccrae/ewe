@@ -161,6 +161,7 @@ fn build_actions(
     draft_wikidata: &[String],
     original_source: &str,
     draft_source: &str,
+    adjposition_drafts: &[(String, String)],
 ) -> Result<Vec<Action>, String> {
     let mut actions = Vec::new();
 
@@ -196,6 +197,22 @@ fn build_actions(
             synset: SynsetRef::Id(synset_id.clone()),
             source: draft_source.trim().to_string(),
         });
+    }
+
+    for (lemma, draft) in adjposition_drafts {
+        // A member removed in this same edit has nothing left to change.
+        if !members.contains(lemma) {
+            continue;
+        }
+        let saved = original.members.iter().find(|m| m.lemma == *lemma)
+            .and_then(|m| m.sense.adjposition.clone()).unwrap_or_default();
+        if *draft != saved {
+            actions.push(Action::ChangeAdjposition {
+                synset: SynsetRef::Id(synset_id.clone()),
+                sense: SenseRef::Lemma(lemma.clone()),
+                adjposition: Some(draft.clone()).filter(|d| !d.is_empty()),
+            });
+        }
     }
 
     let wikidata: Vec<String> = draft_wikidata
@@ -340,6 +357,17 @@ fn build_actions(
     Ok(actions)
 }
 
+/// (lemma, draft position) for each member that can have an adjective position - adjective
+/// senses only (satellites included). Empty draft means none.
+fn adjposition_draft_values(synset: &MemberSynset) -> Vec<(String, String)> {
+    synset
+        .members
+        .iter()
+        .filter(|m| matches!(m.poskey.as_str(), "a" | "s"))
+        .map(|m| (m.lemma.clone(), m.sense.adjposition.clone().unwrap_or_default()))
+        .collect()
+}
+
 /// An empty source is not a valid value - treat it the same as no source at all.
 fn normalize_source(source: &str) -> Option<String> {
     if source.is_empty() {
@@ -453,6 +481,7 @@ pub fn Synset(props: SynsetProps) -> Element {
     let mut example_drafts = use_signal(Vec::<ExampleDraft>::new);
     let mut ili_draft = use_signal(String::new);
     let mut source_draft = use_signal(String::new);
+    let mut adjposition_drafts = use_signal(Vec::<(String, String)>::new);
     let mut wikidata_drafts = use_signal(Vec::<String>::new);
     let mut relation_deletes = use_signal(Vec::<RelationKey>::new);
     let mut relation_adds = use_signal(Vec::<PendingRelation>::new);
@@ -582,6 +611,12 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 None => drafts.senses.push((lemma, value)),
                                             }
                                         },
+                                        adjposition: adjposition_drafts(),
+                                        on_adjposition_changed: move |(lemma, value): (String, String)| {
+                                            if let Some(entry) = adjposition_drafts.write().iter_mut().find(|(l, _)| *l == lemma) {
+                                                entry.1 = value;
+                                            }
+                                        },
                                     }
                                 } else {
                                     for (index, member) in synset.members.iter().enumerate() {
@@ -602,6 +637,13 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 }
                                             }
                                             ConfidenceBadge { value: member.sense.confidence.or(member.entry_confidence) },
+                                            if let Some(ref adjposition) = member.sense.adjposition {
+                                                span {
+                                                    class: "adjposition",
+                                                    title: "Adjective position",
+                                                    " ({adjposition})"
+                                                }
+                                            }
                                             if props.display_sensekeys {
                                                 span {
                                                     class: "sense_key",
@@ -1141,6 +1183,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         let ili = synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default();
                                         let wikidata = synset.wikidata.clone();
                                         let source = synset.source.clone().unwrap_or_default();
+                                        let adjpositions = adjposition_draft_values(synset);
                                         let confidence = ConfidenceDrafts::from_synset(synset);
                                         let scored = has_confidence(synset);
                                         move |_| {
@@ -1152,6 +1195,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             ili_draft.set(ili.clone());
                                             wikidata_drafts.set(wikidata.clone());
                                             source_draft.set(source.clone());
+                                            adjposition_drafts.set(adjpositions.clone());
                                             relation_deletes.set(Vec::new());
                                             relation_adds.set(Vec::new());
                                             edit_error.set(None);
@@ -1186,6 +1230,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 &wikidata_drafts(),
                                                 &original_source,
                                                 &source_draft(),
+                                                &adjposition_drafts(),
                                             );
                                             let actions = match actions {
                                                 Ok(actions) => actions,
@@ -1325,7 +1370,7 @@ mod tests {
         let definition = synset.definition.first().cloned().unwrap_or_default();
         build_actions(synset, confidence, &synset.id, &members, &members, &definition, &definition,
             &synset.example, examples, &[], &[], "", "", &synset.wikidata, &synset.wikidata,
-            synset.source.as_deref().unwrap_or(""), synset.source.as_deref().unwrap_or(""))
+            synset.source.as_deref().unwrap_or(""), synset.source.as_deref().unwrap_or(""), &[])
     }
 
     /// `build_actions` with only the source draft differing from what is saved.
@@ -1336,7 +1381,7 @@ mod tests {
         let examples = ExampleDraft::from_examples(&synset.example);
         build_actions(synset, &confidence, &synset.id, &members, &members, &definition, &definition,
             &synset.example, &examples, &[], &[], "", "", &synset.wikidata, &synset.wikidata,
-            synset.source.as_deref().unwrap_or(""), draft_source).unwrap()
+            synset.source.as_deref().unwrap_or(""), draft_source, &[]).unwrap()
     }
 
     #[test]
@@ -1360,6 +1405,30 @@ mod tests {
     }
 
     #[test]
+    fn test_build_actions_sets_and_clears_adjposition() {
+        let (mut wn, dog, _animal, _cat) = fixture();
+        let run = |wn: &mut LexiconHashMapBackend, draft: &str| {
+            let ss = member_synset(wn, &dog);
+            let members: Vec<String> = ss.members.iter().map(|m| m.lemma.clone()).collect();
+            let definition = ss.definition.first().cloned().unwrap_or_default();
+            let confidence = ConfidenceDrafts::from_synset(&ss);
+            let examples = ExampleDraft::from_examples(&ss.example);
+            let drafts = [("dog".to_string(), draft.to_string())];
+            let actions = build_actions(&ss, &confidence, &dog, &members, &members, &definition,
+                &definition, &ss.example, &examples, &[], &[], "", "", &ss.wikidata, &ss.wikidata,
+                "", "", &drafts).unwrap();
+            apply_automaton(actions.clone(), wn, &mut ChangeList::new()).unwrap();
+            actions
+        };
+        assert!(run(&mut wn, "").is_empty());
+        assert_eq!(run(&mut wn, "ip").len(), 1);
+        assert_eq!(member_synset(&wn, &dog).members[0].sense.adjposition.as_deref(), Some("ip"));
+        assert!(run(&mut wn, "ip").is_empty());
+        assert_eq!(run(&mut wn, "").len(), 1);
+        assert_eq!(member_synset(&wn, &dog).members[0].sense.adjposition, None);
+    }
+
+    #[test]
     fn test_build_actions_adds_and_deletes_sense_also_and_similar() {
         let (mut wn, dog, _animal, cat) = fixture();
         for key in ["also_sense", "similar_sense"] {
@@ -1375,7 +1444,7 @@ mod tests {
             let examples = ExampleDraft::from_examples(&dog_ss.example);
             let actions = build_actions(&dog_ss, &confidence, &dog, &members, &members, &definition,
                 &definition, &dog_ss.example, &examples, &[], &[add], "", "", &dog_ss.wikidata,
-                &dog_ss.wikidata, "", "").unwrap();
+                &dog_ss.wikidata, "", "", &[]).unwrap();
             apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
 
             let dog_ss = member_synset(&wn, &dog);
@@ -1394,7 +1463,7 @@ mod tests {
             let confidence = ConfidenceDrafts::from_synset(&dog_ss);
             let actions = build_actions(&dog_ss, &confidence, &dog, &members, &members, &definition,
                 &definition, &dog_ss.example, &examples, &[delete], &[], "", "", &dog_ss.wikidata,
-                &dog_ss.wikidata, "", "").unwrap();
+                &dog_ss.wikidata, "", "", &[]).unwrap();
             apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
             assert!(sense_rel_values(&member_synset(&wn, &dog), key).is_empty(), "{key} deleted");
             assert!(sense_rel_values(&member_synset(&wn, &cat), key).is_empty(), "{key} inverse deleted");

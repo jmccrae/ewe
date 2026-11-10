@@ -91,7 +91,7 @@ Tools
   through the exact same code path as a real apply.
 - **One tool per automaton action** — `add_entry`, `delete_entry`, `move_entry`,
   `change_members`, `add_synset`, `delete_synset`, `change_definition`, `change_ili`,
-  `change_wikidata`, `change_source`, `add_example`, `update_example`, `delete_example`,
+  `change_wikidata`, `change_source`, `change_adjposition`, `add_example`, `update_example`, `delete_example`,
   `add_relation`, `delete_relation`, `reverse_relation`, `update_relations`,
   `set_confidence` and `fix_transitivity`. Each takes that action's fields directly
   (plus `dry_run?`) and behaves exactly like `apply_automaton` with a one-action batch:

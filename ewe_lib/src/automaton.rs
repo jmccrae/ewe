@@ -628,6 +628,21 @@ pub fn apply_automaton_with<L: Lexicon>(
                 })
                 .map_err(|e| e.to_string())?;
             }
+            Action::ChangeAdjposition { synset, sense, adjposition } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                let sense = sense.resolve(&last_sense_id, wn, &synset)?;
+                let adjposition = adjposition.filter(|a| !a.trim().is_empty());
+                if let Some(a) = &adjposition {
+                    if !matches!(a.as_str(), "a" | "p" | "ip") {
+                        return Err(format!(
+                            "Bad adjposition {}: expected \"a\", \"p\" or \"ip\".", a));
+                    }
+                }
+                wn.update_sense(&sense, |s| s.adjposition = adjposition)
+                    .map_err(|e| e.to_string())?
+                    .ok_or(format!("No sense {}", sense.as_str()))?;
+                last_synset_id = Some(synset);
+            }
             Action::ChangeMembers { synset, members } => {
                 change_manager::change_members(
                     wn,
@@ -1043,6 +1058,17 @@ pub enum Action {
     /// Set `synset`'s source (provenance) note.
     #[serde(rename = "change_source")]
     ChangeSource { synset: SynsetRef, source: String },
+    /// Set the adjective position of one of `synset`'s senses: "a" (attributive), "p"
+    /// (predicative) or "ip" (immediately postnominal). Omit `adjposition` (or give an empty
+    /// string) to clear it.
+    #[serde(rename = "change_adjposition")]
+    ChangeAdjposition {
+        synset: SynsetRef,
+        sense: SenseRef,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        adjposition: Option<String>,
+    },
     /// Add a usage example to `synset`, with an optional `source`.
     #[serde(rename = "add_example")]
     AddExample {
@@ -1303,6 +1329,10 @@ impl Action {
             Action::ChangeSource { synset, source } => {
                 format!("Changed source of {} to \"{}\"", synset.as_str(), source)
             }
+            Action::ChangeAdjposition { synset, adjposition, .. } => match adjposition {
+                Some(a) => format!("Changed adjective position in {} to {}", synset.as_str(), a),
+                None => format!("Cleared adjective position in {}", synset.as_str()),
+            },
             Action::AddExample { synset, example, .. } => {
                 format!("Added example \"{}\" to {}", example, synset.as_str())
             }
@@ -1787,6 +1817,28 @@ mod tests {
             .into_iter()
             .map(|w| w.0)
             .collect()
+    }
+
+    #[test]
+    fn test_change_adjposition_sets_clears_and_validates() {
+        let (mut wn, dog, _animal, _cat) = confidence_fixture();
+        let adjposition = |wn: &LexiconHashMapBackend| {
+            let sense = wn.get_sense_id2("dog", &dog).unwrap().unwrap();
+            wn.get_sense_by_id(&sense).unwrap().unwrap().2.adjposition.clone()
+        };
+        let set = |wn: &mut LexiconHashMapBackend, value: &str| {
+            let yaml = format!(
+                "- change_adjposition:\n    synset: {dog}\n    sense: lemma=dog\n{value}");
+            apply_automaton(parse_actions(&yaml), wn, &mut ChangeList::new())
+        };
+        set(&mut wn, "    adjposition: ip\n").unwrap();
+        assert_eq!(adjposition(&wn).as_deref(), Some("ip"));
+        set(&mut wn, "    adjposition: p\n").unwrap();
+        assert_eq!(adjposition(&wn).as_deref(), Some("p"));
+        assert!(set(&mut wn, "    adjposition: sideways\n").is_err());
+        assert_eq!(adjposition(&wn).as_deref(), Some("p"));
+        set(&mut wn, "").unwrap();
+        assert_eq!(adjposition(&wn), None);
     }
 
     #[test]
