@@ -65,7 +65,12 @@ impl Progress for NullProgress {
 /// Reports at most once per percentage point, so it stays readable even when
 /// `total` is very large (e.g. loading NameNet, which has far more source
 /// files than the base WordNet).
+///
+/// By default it counts "files". After `set_percent_mode(true)` it logs only the percentage,
+/// for a `total` that isn't a meaningful count (e.g. bytes read).
 pub struct LoggingProgress {
+    label: String,
+    percent_mode: bool,
     current: u64,
     total: u64,
     last_logged_percent: u64,
@@ -73,7 +78,18 @@ pub struct LoggingProgress {
 
 impl LoggingProgress {
     pub fn new() -> Self {
-        LoggingProgress { current: 0, total: 0, last_logged_percent: 0 }
+        Self::named("Loading")
+    }
+
+    /// Logs as `"{label}: ..."` instead of `"Loading: ..."`.
+    pub fn named(label: &str) -> Self {
+        LoggingProgress {
+            label: label.to_string(),
+            percent_mode: false,
+            current: 0,
+            total: 0,
+            last_logged_percent: 0,
+        }
     }
 }
 
@@ -88,7 +104,11 @@ impl Progress for LoggingProgress {
         self.current = 0;
         self.total = total;
         self.last_logged_percent = 0;
-        eprintln!("Loading: 0/{} files", total);
+        if self.percent_mode {
+            eprintln!("{}: 0%", self.label);
+        } else {
+            eprintln!("{}: 0/{} files", self.label, total);
+        }
     }
 
     fn inc(&mut self, amount : u64) {
@@ -98,14 +118,27 @@ impl Progress for LoggingProgress {
         }
         let percent = (self.current * 100 / self.total).min(100);
         if percent > self.last_logged_percent || self.current >= self.total {
+            if self.percent_mode {
+                // `current >= total` alone must not repeat a line already logged at 100%.
+                if percent > self.last_logged_percent {
+                    eprintln!("{}: {}%", self.label, percent);
+                }
+            } else {
+                eprintln!("{}: {}/{} files ({}%)", self.label, self.current, self.total, percent);
+            }
             self.last_logged_percent = percent;
-            eprintln!("Loading: {}/{} files ({}%)", self.current, self.total, percent);
         }
     }
 
     fn finish(&mut self) {
-        eprintln!("Loading: done ({} files)", self.current);
+        if self.percent_mode {
+            eprintln!("{}: done", self.label);
+        } else {
+            eprintln!("{}: done ({} files)", self.label, self.current);
+        }
     }
 
-    fn set_percent_mode(&mut self, _percent_mode: bool) {}
+    fn set_percent_mode(&mut self, percent_mode: bool) {
+        self.percent_mode = percent_mode;
+    }
 }
