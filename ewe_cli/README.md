@@ -159,6 +159,7 @@ Individual checks can be turned off:
 - `--skip-duplicate-ili`: duplicate ILIs
 - `--skip-duplicate-definitions`: duplicate definitions
 - `--skip-similar`: `similar` links must join an `a` and an `s` synset
+- `--skip-ili-definition`: non-English lexicons (`language` in `settings.toml`) must give every synset with no ILI an `ili_definition` (or set its `ili` to an empty string)
 - `--skip-hypernym`: hypernym/instance_hypernym checks (cross-POS, instance targets, missing hypernym, hypernym/instance conflict, transitivity)
 
 A project can also turn checks off permanently in the `[validation]` table of its

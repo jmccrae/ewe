@@ -56,6 +56,11 @@ pub struct EweSettings {
     /// should set this to their own project's id prefix.
     #[serde(default = "default_id_prefix")]
     pub id_prefix: String,
+    /// The lexicon's language (BCP 47 code), recorded as `Lexicon/@language` in exported WN-LMF
+    /// XML. For a non-English lexicon, validation also requires every synset with no ILI to
+    /// have an `ili_definition` (see `validation_options`).
+    #[serde(default = "default_language")]
+    pub language: String,
     /// Contact email recorded in exported WN-LMF XML's `<Lexicon>` element
     #[serde(default)]
     pub contact_email: Option<String>,
@@ -187,11 +192,20 @@ fn default_footer() -> String {
         .to_string()
 }
 
+fn default_language() -> String {
+    "en".to_string()
+}
+
 fn default_id_prefix() -> String {
     "oewn".to_string()
 }
 
 impl EweSettings {
+    /// The `[validation]` options, with the lexicon's `language` applied.
+    pub fn validation_options(&self) -> ValidationOptions {
+        self.validation.with_language(&self.language)
+    }
+
     pub fn default() -> Self {
         Self {
             database: "wordnet.db".to_string(),
@@ -208,6 +222,7 @@ impl EweSettings {
             disable_auto_reload: false,
             lexicon_cache_mb: default_lexicon_cache_mb(),
             id_prefix: default_id_prefix(),
+            language: default_language(),
             contact_email: None,
             source_url: None,
             base_url: None,
@@ -401,6 +416,21 @@ mod tests {
             settings.validation,
             ValidationOptions { skip_duplicate_ili: true, ..Default::default() }
         );
+    }
+
+    #[test]
+    fn language_defaults_to_english_and_marks_validation_non_english() {
+        let scratch = ScratchDir::new("language");
+        let settings_path = scratch.0.join("settings.toml");
+        std::fs::write(&settings_path, r#"database = "wordnet.db""#).unwrap();
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+        assert_eq!(settings.language, "en");
+        assert!(!settings.validation_options().non_english);
+
+        std::fs::write(&settings_path, "database = \"wordnet.db\"\nlanguage = \"ga\"\n").unwrap();
+        let settings = EweSettings::load(settings_path.to_str().unwrap()).unwrap();
+        assert_eq!(settings.language, "ga");
+        assert!(settings.validation_options().non_english);
     }
 
     #[test]

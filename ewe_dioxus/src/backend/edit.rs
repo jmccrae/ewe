@@ -319,7 +319,7 @@ pub async fn get_progress() -> Result<Option<ProgressStatus>> {
 /// poll (which needs no lock this call holds) could end up waiting behind it for no reason.
 #[cfg_attr(not(feature = "desktop"), get("/api/edit/validate"))]
 pub async fn validate_lexicon() -> Result<Vec<String>> {
-    let options = crate::db::read_settings().validation;
+    let options = crate::db::read_settings().validation_options();
     let outcome = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
         let lexicon = read_lexicon()?;
         let mut progress = SharedProgress::new("Validating");
@@ -356,7 +356,7 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
     let source = settings.wordnet_source.clone().ok_or_else(|| {
         EweEditError::Save("No wordnet_source is configured - nowhere to save to".to_string())
     })?;
-    let options = settings.validation;
+    let options = settings.validation_options();
 
     // Runs on a blocking thread for the same reason `validate_lexicon` does - this holds the
     // write lock and does two long synchronous passes (validate, then the actual file writes),
