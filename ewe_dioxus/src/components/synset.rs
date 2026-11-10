@@ -368,6 +368,23 @@ fn shared_adjposition(synset: &MemberSynset) -> Option<&str> {
         .then_some(first)
 }
 
+/// Tooltip for the part-of-speech tag: the full name of the part of speech, qualified by the
+/// adjective position when the tag shows one, e.g. "postnominal adjective".
+fn pos_tooltip(pos: &str, adjposition: Option<&str>) -> String {
+    let name = match pos {
+        "n" => "noun",
+        "v" => "verb",
+        "a" => "adjective",
+        "s" => "adjective satellite",
+        "r" => "adverb",
+        other => other,
+    };
+    match adjposition {
+        Some(a) if matches!(pos, "a" | "s") => format!("{} {}", adjposition_name(a), name),
+        _ => name.to_string(),
+    }
+}
+
 /// Tooltip text for an adjective position code.
 fn adjposition_name(adjposition: &str) -> &'static str {
     match adjposition {
@@ -603,7 +620,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                 class: "lemmas",
                                 span {
                                     class: "pos",
-                                    title: shared_adjposition(synset).map(adjposition_name),
+                                    title: pos_tooltip(synset.part_of_speech.value(), shared_adjposition(synset)),
                                     if let Some(adjposition) = shared_adjposition(synset) {
                                         "({synset.part_of_speech}-{adjposition})"
                                     } else {
@@ -1433,6 +1450,14 @@ mod tests {
         let actions = source_actions(&member_synset(&wn, &dog), "");
         apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
         assert_eq!(member_synset(&wn, &dog).source, None);
+    }
+
+    #[test]
+    fn test_pos_tooltip() {
+        assert_eq!(pos_tooltip("n", None), "noun");
+        assert_eq!(pos_tooltip("s", None), "adjective satellite");
+        assert_eq!(pos_tooltip("a", Some("ip")), "postnominal adjective");
+        assert_eq!(pos_tooltip("s", Some("p")), "predicative adjective satellite");
     }
 
     #[test]
