@@ -40,6 +40,12 @@ pub enum XmlExportError {
     Io(#[from] std::io::Error),
     #[error("Could not write WN-LMF XML: {0}")]
     Lexicon(#[from] crate::wordnet::LexiconError),
+    #[error(
+        "Could not write WN-LMF XML: synset {synset} has no ILI and no ili_definition, which a \
+         lexicon in language {language:?} needs (set `ili_definition`, or set `ili` to an \
+         empty string if it deliberately has neither)"
+    )]
+    MissingIliDefinition { synset: String, language: String },
 }
 
 #[derive(Error, Debug)]

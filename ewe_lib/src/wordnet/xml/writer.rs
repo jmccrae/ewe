@@ -328,6 +328,7 @@ fn write_synset<W: std::io::Write>(
         .ili
         .as_ref()
         .map(|i| i.as_str().to_string())
+        // `ili=""` (an empty ILI) is kept as-is: the WN-LMF way to say "deliberately no ILI".
         .unwrap_or_else(|| "in".to_string());
     el.push_attribute(("ili", ili.as_str()));
     let members = synset
@@ -359,25 +360,34 @@ fn write_synset<W: std::io::Write>(
 
     // A synset with no ILI of its own (`ili="in"`, "included") needs an `ILIDefinition` - a
     // standalone English-language gloss for the concept, since the ILI registry itself is
-    // English-language-only. The real release always reuses its (English) first Definition
-    // verbatim for this. That's only actually correct when the lexicon *is* English - there's no
-    // general "the definition, translated to English" field on `Synset` yet (tracked separately;
-    // see the model's `ili_definition` follow-up), so for any other `Lexicon/@language` this
-    // would silently emit a non-English string mislabeled as the concept's English definition.
-    if synset.ili.is_none() {
-        if language != "en" {
-            panic!(
-                "Synset {}: cannot generate ILIDefinition for a non-English lexicon \
-                 (language {language:?}) yet - see ewe#33",
-                synset.id
-            );
-        }
-        if let Some(defn) = synset.definition.first() {
-            let ili_def_el = BytesStart::new("ILIDefinition");
-            writer.write_event(Event::Start(ili_def_el))?;
-            writer.write_event(Event::Text(BytesText::new(defn)))?;
-            writer.write_event(Event::End(BytesEnd::new("ILIDefinition")))?;
-        }
+    // English-language-only. Use the synset's `ili_definition` when it has one. Otherwise an
+    // English lexicon reuses its own first Definition (as the real release does); for any other
+    // language that definition isn't English, so reusing it would mislabel it - that's an error.
+    // (An empty `ili` opts out of both.) An explicit `ili_definition` is also written for a
+    // synset that has a real ILI, since English lexicons may give one.
+    let needs_ili_definition = synset.ili.is_none();
+    let ili_definition = synset
+        .ili_definition
+        .as_deref()
+        .filter(|d| !d.trim().is_empty())
+        .or_else(|| {
+            if needs_ili_definition && language == "en" {
+                synset.definition.first().map(|d| d.as_str())
+            } else {
+                None
+            }
+        });
+    if needs_ili_definition && ili_definition.is_none() && language != "en" {
+        return Err(XmlExportError::MissingIliDefinition {
+            synset: synset.id.to_string(),
+            language: language.to_string(),
+        });
+    }
+    if let Some(defn) = ili_definition {
+        let ili_def_el = BytesStart::new("ILIDefinition");
+        writer.write_event(Event::Start(ili_def_el))?;
+        writer.write_event(Event::Text(BytesText::new(defn)))?;
+        writer.write_event(Event::End(BytesEnd::new("ILIDefinition")))?;
     }
 
     for (rel_type, target, confidence) in synset_relations_xml(prefix, synset) {
@@ -522,13 +532,59 @@ mod tests {
         assert!(!xml.contains("ILIDefinition"), "a synset with a real ILI needs no ILIDefinition");
     }
 
+    fn dog_lexicon(ili: Option<&str>, ili_definition: Option<&str>) -> LexiconHashMapBackend {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut synset = Synset::new(PartOfSpeech::n);
+        synset.definition.push("un animal domestique".to_string());
+        synset.members.push("chien".to_string());
+        synset.ili = ili.map(crate::wordnet::ILIID::new);
+        synset.ili_definition = ili_definition.map(|d| d.to_string());
+        wn.insert_synset("noun.animal".to_string(), SsId::new("00001740-n"), synset).unwrap();
+        wn
+    }
+
+    fn french() -> LexiconMetadata {
+        let mut m = metadata();
+        m.language = "fr".to_string();
+        m
+    }
+
     #[test]
-    #[should_panic(expected = "cannot generate ILIDefinition for a non-English lexicon")]
-    fn test_write_lexicon_xml_panics_for_ili_in_synset_in_non_english_lexicon() {
-        let wn = simple_lexicon();
-        let mut non_english = metadata();
-        non_english.language = "fr".to_string();
-        let _ = write_lexicon_xml(&wn, &non_english);
+    fn test_write_lexicon_xml_errors_for_ili_in_synset_without_ili_definition_in_non_english_lexicon() {
+        let err = write_lexicon_xml(&dog_lexicon(None, None), &french()).unwrap_err();
+        assert!(matches!(err, XmlExportError::MissingIliDefinition { .. }), "{err}");
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_uses_ili_definition_for_non_english_lexicon() {
+        let xml = write_lexicon_xml(&dog_lexicon(None, Some("a domestic animal")), &french()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+        assert!(xml.contains(r#"ili="in""#));
+        assert!(xml.contains("<ILIDefinition>a domestic animal</ILIDefinition>"));
+        assert!(!xml.contains("<ILIDefinition>un animal domestique"));
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_prefers_ili_definition_in_english_lexicon() {
+        let xml = write_lexicon_xml(&dog_lexicon(None, Some("a domestic canine")), &metadata()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+        assert!(xml.contains("<ILIDefinition>a domestic canine</ILIDefinition>"));
+        assert!(!xml.contains("<ILIDefinition>un animal domestique"));
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_writes_explicit_ili_definition_for_synset_with_ili() {
+        let xml = write_lexicon_xml(&dog_lexicon(Some("i12345"), Some("a domestic canine")), &metadata()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+        assert!(xml.contains("<ILIDefinition>a domestic canine</ILIDefinition>"));
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_empty_ili_opts_out_of_ili_definition() {
+        let xml = write_lexicon_xml(&dog_lexicon(Some(""), None), &french()).unwrap();
+        let xml = String::from_utf8(xml).unwrap();
+        assert!(xml.contains(r#"ili="""#));
+        assert!(!xml.contains("ILIDefinition"));
     }
 
     #[test]

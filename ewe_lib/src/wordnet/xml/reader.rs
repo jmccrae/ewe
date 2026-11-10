@@ -151,6 +151,18 @@ pub fn read_lexicon_xml<L: Lexicon, R: Read>(mut lexicon: L, reader: R) -> Resul
 
     let metadata = metadata.ok_or_else(|| XmlImportError::Malformed("missing Lexicon element".to_string()))?;
 
+    // An English lexicon's `ILIDefinition` normally just repeats the synset's own first
+    // definition (the real OEWN release does exactly that, and the writer regenerates it), so
+    // storing it would add a redundant line to every synset. Only a differing one is kept. For
+    // any other language the definition isn't English, so an identical one is still a real value.
+    if metadata.language == "en" {
+        for (_, _, synset) in acc.synsets.iter_mut() {
+            if synset.ili_definition.as_deref() == synset.definition.first().map(|d| d.as_str()) {
+                synset.ili_definition = None;
+            }
+        }
+    }
+
     // Stage 2: apply relations whose canonical direction differs from how they were written,
     // now that every synset/sense exists to apply them to. A target this document never
     // describes is a dangling reference in the source file itself - nothing to apply to, same
@@ -522,6 +534,12 @@ fn parse_synset_children<R: Read>(
                 let text = read_text_until_end(xml, buf, b"Definition")?;
                 synset.definition.push_scored(text, confidence);
             }
+            Event::Start(e) if e.name().as_ref() == b"ILIDefinition" => {
+                let text = read_text_until_end(xml, buf, b"ILIDefinition")?;
+                if !text.trim().is_empty() {
+                    synset.ili_definition = Some(text);
+                }
+            }
             Event::Start(e) if e.name().as_ref() == b"Example" => {
                 let source = attr(&e, "dc:source")?;
                 let confidence = confidence_attr(&e)?;
@@ -702,6 +720,39 @@ mod tests {
   </Lexicon>
 </LexicalResource>
 "#;
+
+    fn ili_definition_fixture(language: &str, ili_definition: &str) -> String {
+        format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<LexicalResource xmlns:dc="https://globalwordnet.github.io/schemas/dc/">
+  <Lexicon id="test" label="Test" language="{language}" email="a@b.c" license="https://creativecommons.org/licenses/by/4.0" version="1" url="https://example.com">
+    <LexicalEntry id="test-dog-n">
+      <Lemma writtenForm="dog" partOfSpeech="n"/>
+      <Sense id="test-dog-n-1" synset="test-00001740-n"/>
+    </LexicalEntry>
+    <Synset id="test-00001740-n" ili="in" partOfSpeech="n" members="test-dog-n" lexfile="noun.animal">
+      <Definition>a domestic canine</Definition>
+      <ILIDefinition>{ili_definition}</ILIDefinition>
+    </Synset>
+  </Lexicon>
+</LexicalResource>"#)
+    }
+
+    #[test]
+    fn test_read_lexicon_xml_keeps_only_ili_definition_that_differs_in_english() {
+        let id = SynsetId::new("00001740-n");
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(),
+            ili_definition_fixture("en", "a domestic canine").as_bytes()).unwrap();
+        assert_eq!(wn.synset_by_id(&id).unwrap().unwrap().ili_definition, None);
+
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(),
+            ili_definition_fixture("en", "a tame dog").as_bytes()).unwrap();
+        assert_eq!(wn.synset_by_id(&id).unwrap().unwrap().ili_definition.as_deref(), Some("a tame dog"));
+
+        // Not English: an identical ILIDefinition is still the only English gloss there is.
+        let (wn, _) = read_lexicon_xml(LexiconHashMapBackend::new(),
+            ili_definition_fixture("fr", "a domestic canine").as_bytes()).unwrap();
+        assert_eq!(wn.synset_by_id(&id).unwrap().unwrap().ili_definition.as_deref(), Some("a domestic canine"));
+    }
 
     #[test]
     fn test_read_lexicon_xml_defaults_lexfile_by_part_of_speech_when_missing() {
