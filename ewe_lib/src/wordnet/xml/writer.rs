@@ -272,10 +272,11 @@ fn sense_relations_xml(
                 }
                 // A `None` target_lemma/target_poskey means the target is a bare synset
                 // (domain_topic/domain_region/exemplifies/other can point at one instead of a
-                // specific sense) - the WN-LMF SenseRelation/@target attribute must reference a
-                // sense, so this can't be expressed here and is skipped, same as the is_X_of
-                // relations above.
+                // specific sense). A SenseRelation/@target may reference a synset, so emit the
+                // synset's own XML id; no lookup is needed (and the synset need not be in the
+                // export, same as for SynsetRelation targets).
                 let (Some(target_lemma), Some(target_poskey)) = (&rel.target_lemma, &rel.target_poskey) else {
+                    out.push(($rel_type, ids::synset_xml_id(prefix, &rel.target_synset), rel.confidence));
                     continue;
                 };
                 let key = (target_lemma.clone(), target_poskey.clone(), rel.target_synset.clone());
@@ -630,6 +631,34 @@ mod tests {
         );
         assert!(xml.contains(r#"adjposition="ip""#));
         assert!(xml.contains(r#"dc:source="Colloquial WordNet""#));
+    }
+
+    #[test]
+    fn test_write_lexicon_xml_emits_sense_to_synset_relation_with_synset_id_target() {
+        // A sense-to-synset `exemplifies` (e.g. "Agene" exemplifies "trade name") is written as
+        // a SenseRelation whose target is the synset's own XML id.
+        let mut wn = simple_lexicon();
+        let mut target_ss = Synset::new(PartOfSpeech::n);
+        target_ss.definition.push("a name given to a product".to_string());
+        target_ss.members.push("trade name".to_string());
+        wn.insert_synset("noun.communication".to_string(), SsId::new("06858649-n"), target_ss)
+            .unwrap();
+        let mut target_entry = Entry::new();
+        target_entry.sense.push(Sense::new(SId::new("trade_name%1:10:00::"), SsId::new("06858649-n")));
+        wn.insert_entry("trade name".to_string(), PosKey::new("n"), target_entry).unwrap();
+        let mut entry = Entry::new();
+        let mut sense = Sense::new(SId::new("dog%1:05:00::"), SsId::new("00001740-n"));
+        sense.exemplifies.push(crate::wordnet::UnresolvedSenseOrSynsetId::Synset(SsId::new("06858649-n")));
+        entry.sense.push(sense);
+        wn.insert_entry("dog".to_string(), PosKey::new("n"), entry).unwrap();
+
+        let xml = String::from_utf8(write_lexicon_xml(&wn, &metadata()).unwrap()).unwrap();
+        assert!(
+            xml.contains(r#"<SenseRelation relType="exemplifies" target="oewn-06858649-n"/>"#),
+            "sense-to-synset exemplifies must be emitted with the synset id as target: {xml}"
+        );
+        // No synset-level backlink (its target would have to be a sense id).
+        assert!(!xml.contains("is_exemplified_by"));
     }
 
     #[test]
