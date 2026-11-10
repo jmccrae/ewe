@@ -663,6 +663,7 @@ mod tests {
             definition: definition.into(),
             example: vec![],
             ili: None,
+            ili_definition: None,
             wikidata: vec![],
             source: None,
             part_of_speech,

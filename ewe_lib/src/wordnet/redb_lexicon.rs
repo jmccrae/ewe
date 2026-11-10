@@ -57,8 +57,9 @@ const SCHEMA_VERSION_KEY: &'static str = "version";
 /// speedy-encoded struct can't be decoded after it: **bump this whenever such a struct
 /// changes**, so `open` reports a clear "rebuild" error rather than garbled data.
 ///
-/// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48).
-pub const SCHEMA_VERSION: u32 = 1;
+/// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48);
+/// 2 = `Synset::ili_definition` (#33).
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
