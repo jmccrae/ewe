@@ -389,6 +389,8 @@ components:
           type: array
           items:
             type: string
+        ili_definition:
+          type: string
         source:
           type: string
 
