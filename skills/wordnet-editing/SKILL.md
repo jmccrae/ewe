@@ -12,7 +12,8 @@ groups:
   `save`, `reload`.
 - **One tool per edit:** `add_synset`, `delete_synset`, `add_entry`, `delete_entry`,
   `move_entry`, `change_members`, `change_definition`, `add_example`, `update_example`,
-  `delete_example`, `change_source`, `change_ili`, `change_wikidata`, `add_relation`,
+  `delete_example`, `change_source`, `change_adjposition`, `change_ili`, `change_wikidata`,
+  `add_relation`,
   `delete_relation`, `reverse_relation`, `update_relations`, `set_confidence`,
   `fix_transitivity`.
 - **Batches:** `apply_automaton`, which takes a list of the same edits (as
@@ -138,7 +139,9 @@ schema, not repeated here. Conventions worth knowing:
   down (or re-check with `lookup_id` in between).
 - An example's `source` is optional - omit it rather than inventing one.
 - `change_source` records where the synset itself came from (its provenance). Set it
-  only when you know the source; don't invent one.
+  only when you know the source; don't invent one. An empty string clears it.
+- `change_adjposition` sets an adjective sense's position - `a` (attributive), `p`
+  (predicative) or `ip` (immediately postnominal) - and clears it when omitted.
 - `change_ili` links the synset to the Interlingual Index; only set an ILI id you have
   confirmed matches this exact sense, since two synsets sharing one is a validation
   error.

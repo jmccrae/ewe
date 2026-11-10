@@ -11,6 +11,7 @@ pub struct RelationProps {
     display_ids: bool,
     display_sensekeys: bool,
     display_subcats: bool,
+    display_sources: bool,
     display_topics: bool,
     display_pronunciations: bool,
 }
@@ -49,6 +50,7 @@ pub fn Relation(props : RelationProps) -> Element {
                                     display_ids: props.display_ids,
                                     display_sensekeys: props.display_sensekeys,
                                     display_subcats: props.display_subcats,
+                                    display_sources: props.display_sources,
                                     display_topics: props.display_topics,
                                     display_pronunciations: props.display_pronunciations,
                                     focus: String::new()

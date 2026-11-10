@@ -114,6 +114,8 @@ pub(crate) fn sense_rel_values<'a>(synset: &'a MemberSynset, key: &str) -> &'a [
         "derivation" => &synset.derivation,
         "exemplifies_sense" => &synset.exemplifies_sense,
         "is_exemplified_by_sense" => &synset.is_exemplified_by_sense,
+        "also_sense" => &synset.also_sense,
+        "similar_sense" => &synset.similar_sense,
         "agent" => &synset.agent,
         "material" => &synset.material,
         "event" => &synset.event,

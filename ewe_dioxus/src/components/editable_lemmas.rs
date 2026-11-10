@@ -16,6 +16,11 @@ pub struct EditableLemmasProps {
     pub confidence: Vec<(String, String)>,
     /// Called with (lemma, draft) when a lemma's confidence input changes.
     pub on_confidence_changed: EventHandler<(String, String)>,
+    /// (lemma, draft) adjective positions ("", "a", "p" or "ip"), only for the lemmas that can
+    /// have one (adjective senses) - a lemma with no entry here gets no position input.
+    pub adjposition: Vec<(String, String)>,
+    /// Called with (lemma, draft) when a lemma's adjective position changes.
+    pub on_adjposition_changed: EventHandler<(String, String)>,
 }
 
 /// The synset's member lemmas, editable as a compact inline list of text tokens (unlike
@@ -32,6 +37,8 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
     let on_drafts_changed = props.on_drafts_changed;
     let confidence = props.confidence;
     let on_confidence_changed = props.on_confidence_changed;
+    let adjposition = props.adjposition;
+    let on_adjposition_changed = props.on_adjposition_changed;
 
     // The index currently being dragged, so `ondrop` on another row knows what to move.
     // Reorders are resolved locally (not via the HTML5 DataTransfer payload) since it's the
@@ -159,6 +166,21 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
                                 on_drafts_changed.call(drafts);
                             }
                         },
+                    }
+                    if let Some((_, current)) = adjposition.iter().find(|(l, _)| l == lemma.trim()) {
+                        select {
+                            class: "adjposition-select",
+                            title: "Adjective position",
+                            value: "{current}",
+                            onchange: {
+                                let lemma = lemma.trim().to_string();
+                                move |e: FormEvent| on_adjposition_changed.call((lemma.clone(), e.value()))
+                            },
+                            option { value: "", selected: current.is_empty(), "position: none" }
+                            option { value: "a", selected: current == "a", "attributive (a)" }
+                            option { value: "p", selected: current == "p", "predicative (p)" }
+                            option { value: "ip", selected: current == "ip", "postnominal (ip)" }
+                        }
                     }
                     if props.show_confidence {
                         ConfidenceInput {
