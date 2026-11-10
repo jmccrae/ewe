@@ -993,6 +993,20 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 props: props.clone()
                                             }
                                         },
+                                        if !synset.also_sense.is_empty() {
+                                             sense_rels {
+                                                name: "See Also",
+                                                rels: synset.also_sense.to_vec(),
+                                                props: props.clone()
+                                            }
+                                        },
+                                        if !synset.similar_sense.is_empty() {
+                                             sense_rels {
+                                                name: "Similar To",
+                                                rels: synset.similar_sense.to_vec(),
+                                                props: props.clone()
+                                            }
+                                        },
                                         if !synset.agent.is_empty() {
                                              sense_rels {
                                                 name: "Agent",
@@ -1343,6 +1357,48 @@ mod tests {
         let actions = source_actions(&member_synset(&wn, &dog), "");
         apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
         assert_eq!(member_synset(&wn, &dog).source, None);
+    }
+
+    #[test]
+    fn test_build_actions_adds_and_deletes_sense_also_and_similar() {
+        let (mut wn, dog, _animal, cat) = fixture();
+        for key in ["also_sense", "similar_sense"] {
+            let info = *SENSE_RELATION_TYPES.iter().find(|i| i.key == key).unwrap();
+            let add = PendingRelation {
+                info, target: cat.clone(), target_display: String::new(),
+                source_lemma: Some("dog".to_string()), target_lemma: Some("cat".to_string()),
+            };
+            let dog_ss = member_synset(&wn, &dog);
+            let members: Vec<String> = dog_ss.members.iter().map(|m| m.lemma.clone()).collect();
+            let definition = dog_ss.definition.first().cloned().unwrap_or_default();
+            let confidence = ConfidenceDrafts::from_synset(&dog_ss);
+            let examples = ExampleDraft::from_examples(&dog_ss.example);
+            let actions = build_actions(&dog_ss, &confidence, &dog, &members, &members, &definition,
+                &definition, &dog_ss.example, &examples, &[], &[add], "", "", &dog_ss.wikidata,
+                &dog_ss.wikidata, "", "").unwrap();
+            apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+
+            let dog_ss = member_synset(&wn, &dog);
+            let added = sense_rel_values(&dog_ss, key);
+            assert_eq!(added.len(), 1, "{key}");
+            assert_eq!((added[0].source_lemma.as_str(), added[0].target_lemma.as_deref().unwrap()), ("dog", "cat"));
+            // Symmetric: stored on the other side as well.
+            let cat_ss = member_synset(&wn, &cat);
+            let back = sense_rel_values(&cat_ss, key);
+            assert_eq!(back.len(), 1, "{key} inverse");
+            assert_eq!((back[0].source_lemma.as_str(), back[0].target_lemma.as_deref().unwrap()), ("cat", "dog"));
+
+            let delete = RelationKey { key: info.key, target: cat.clone(),
+                source_lemma: Some("dog".to_string()), target_lemma: Some("cat".to_string()) };
+            let members: Vec<String> = dog_ss.members.iter().map(|m| m.lemma.clone()).collect();
+            let confidence = ConfidenceDrafts::from_synset(&dog_ss);
+            let actions = build_actions(&dog_ss, &confidence, &dog, &members, &members, &definition,
+                &definition, &dog_ss.example, &examples, &[delete], &[], "", "", &dog_ss.wikidata,
+                &dog_ss.wikidata, "", "").unwrap();
+            apply_automaton(actions, &mut wn, &mut ChangeList::new()).unwrap();
+            assert!(sense_rel_values(&member_synset(&wn, &dog), key).is_empty(), "{key} deleted");
+            assert!(sense_rel_values(&member_synset(&wn, &cat), key).is_empty(), "{key} inverse deleted");
+        }
     }
 
     #[test]

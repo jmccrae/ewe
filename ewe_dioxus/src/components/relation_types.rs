@@ -39,6 +39,13 @@ const fn sense_forward(key: &'static str, label: &'static str) -> RelationTypeIn
     RelationTypeInfo { key, label, is_sense: true, store_as: key, swapped: false }
 }
 
+/// A sense relation whose UI key differs from the relation name it's stored under, without
+/// being a reverse-computed field - e.g. sense-level `also` is `also_sense` here to tell it apart
+/// from the synset-level `also`.
+const fn sense_forward_as(key: &'static str, label: &'static str, store_as: &'static str) -> RelationTypeInfo {
+    RelationTypeInfo { key, label, is_sense: true, store_as, swapped: false }
+}
+
 const fn sense_inverse(key: &'static str, label: &'static str, store_as: &'static str) -> RelationTypeInfo {
     RelationTypeInfo { key, label, is_sense: true, store_as, swapped: true }
 }
@@ -83,6 +90,8 @@ pub const SENSE_RELATION_TYPES: &[RelationTypeInfo] = &[
     sense_forward("derivation", "Derived From"),
     sense_forward("exemplifies_sense", "Is an Example Of"),
     sense_inverse("is_exemplified_by_sense", "Has Example", "exemplifies_sense"),
+    sense_forward_as("also_sense", "See Also", "also"),
+    sense_forward_as("similar_sense", "Similar To", "similar"),
     sense_forward("agent", "Agent"),
     sense_forward("material", "Material"),
     sense_forward("event", "Event"),
