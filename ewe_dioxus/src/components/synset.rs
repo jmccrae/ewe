@@ -357,6 +357,27 @@ fn build_actions(
     Ok(actions)
 }
 
+/// The adjective position (`a`, `p` or `ip`) when every member of the synset has the same one,
+/// so it can be shown on the part-of-speech tag as e.g. "(a-ip)".
+fn shared_adjposition(synset: &MemberSynset) -> Option<&str> {
+    let first = synset.members.first()?.sense.adjposition.as_deref()?;
+    synset
+        .members
+        .iter()
+        .all(|m| m.sense.adjposition.as_deref() == Some(first))
+        .then_some(first)
+}
+
+/// Tooltip text for an adjective position code.
+fn adjposition_name(adjposition: &str) -> &'static str {
+    match adjposition {
+        "a" => "attributive",
+        "p" => "predicative",
+        "ip" => "postnominal",
+        _ => "adjective position",
+    }
+}
+
 /// (lemma, draft position) for each member that can have an adjective position - adjective
 /// senses only (satellites included). Empty draft means none.
 fn adjposition_draft_values(synset: &MemberSynset) -> Vec<(String, String)> {
@@ -386,6 +407,7 @@ pub struct SynsetProps {
     display_ids: bool,
     display_sensekeys: bool,
     display_subcats: bool,
+    display_sources: bool,
     display_topics: bool,
     display_pronunciations: bool,
     focus: String,
@@ -413,6 +435,7 @@ fn synset_rels(name: &'static str, rels: ScoredVec<SynsetId>, props: SynsetProps
             display_ids: props.display_ids,
             display_sensekeys: props.display_sensekeys,
             display_subcats: props.display_subcats,
+            display_sources: props.display_sources,
             display_topics: props.display_topics,
             display_pronunciations: props.display_pronunciations
         }
@@ -428,6 +451,7 @@ fn sense_rels(name: &'static str, rels: Vec<SenseRelation>, props: SynsetProps) 
             display_ids: props.display_ids,
             display_sensekeys: props.display_sensekeys,
             display_subcats: props.display_subcats,
+            display_sources: props.display_sources,
             display_topics: props.display_topics,
             display_pronunciations: props.display_pronunciations
         }
@@ -569,20 +593,6 @@ pub fn Synset(props: SynsetProps) -> Element {
                                             ")"
                                         }
                                     }
-                                    if let Some(ref source) = synset.source {
-                                        span {
-                                            " "
-                                            b {
-                                                class: "synset-id-title",
-                                                "Source: "
-                                            }
-                                            if source.starts_with("http") {
-                                                a { class: "identifier", href: "{source}", "{source}" }
-                                            } else {
-                                                "{source}"
-                                            }
-                                        }
-                                    }
                                 }
                                 hr {}
                             }
@@ -593,7 +603,12 @@ pub fn Synset(props: SynsetProps) -> Element {
                                 class: "lemmas",
                                 span {
                                     class: "pos",
-                                    "({synset.part_of_speech})"
+                                    title: shared_adjposition(synset).map(adjposition_name),
+                                    if let Some(adjposition) = shared_adjposition(synset) {
+                                        "({synset.part_of_speech}-{adjposition})"
+                                    } else {
+                                        "({synset.part_of_speech})"
+                                    }
                                 },
                                 if !editing() {
                                     ConfidenceBadge { value: synset.confidence }
@@ -637,11 +652,14 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 }
                                             }
                                             ConfidenceBadge { value: member.sense.confidence.or(member.entry_confidence) },
-                                            if let Some(ref adjposition) = member.sense.adjposition {
-                                                span {
-                                                    class: "adjposition",
-                                                    title: "Adjective position",
-                                                    " ({adjposition})"
+                                            // Shown on the part-of-speech tag instead when every member agrees.
+                                            if shared_adjposition(synset).is_none() {
+                                                if let Some(ref adjposition) = member.sense.adjposition {
+                                                    span {
+                                                        class: "adjposition",
+                                                        title: adjposition_name(adjposition),
+                                                        " ({adjposition})"
+                                                    }
                                                 }
                                             }
                                             if props.display_sensekeys {
@@ -762,6 +780,19 @@ pub fn Synset(props: SynsetProps) -> Element {
                                         class: "topics",
                                         b { "Topics: " },
                                         "{synset.lexname}"
+                                    }
+                                },
+                                if props.display_sources && !editing() {
+                                    if let Some(ref source) = synset.source {
+                                        div {
+                                            class: "synset-source",
+                                            b { "Source: " }
+                                            if source.starts_with("http") {
+                                                a { class: "identifier", href: "{source}", "{source}" }
+                                            } else {
+                                                "{source}"
+                                            }
+                                        }
                                     }
                                 },
                                 if props.display_subcats {

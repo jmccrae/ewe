@@ -13,6 +13,7 @@ pub struct DisplayOptions {
     pub show_ids: bool,
     pub show_sensekeys: bool,
     pub show_subcats: bool,
+    pub show_sources: bool,
     pub show_topics: bool,
     pub show_pronunciations: bool,
 }
@@ -104,6 +105,14 @@ pub fn DisplayOptionsPanel() -> Element {
                             onchange: move |e| options.write().show_subcats = e.checked(),
                         }
                         "Show Subcategorization Frames"
+                    }
+                    label {
+                        input {
+                            r#type: "checkbox",
+                            checked: options().show_sources,
+                            onchange: move |e| options.write().show_sources = e.checked(),
+                        }
+                        "Show Sources"
                     }
                     label {
                         input {

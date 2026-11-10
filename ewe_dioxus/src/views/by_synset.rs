@@ -19,6 +19,7 @@ pub fn BySynset(synset: ReadSignal<String>) -> Element {
                 display_ids: options().show_ids,
                 display_sensekeys: options().show_sensekeys,
                 display_subcats: options().show_subcats,
+                display_sources: options().show_sources,
                 display_topics: options().show_topics,
                 display_pronunciations: options().show_pronunciations,
                 focus: String::new()
