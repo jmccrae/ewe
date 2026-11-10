@@ -161,6 +161,7 @@ pub async fn add_synset(
         definition_confidence: None,
         id: None,
         ili: None,
+        ili_definition: None,
         definition,
         lexfile,
         pos,

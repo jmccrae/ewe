@@ -81,6 +81,9 @@ An example of the usage of the automaton file is given below
     definition: a member of the genus Canis
     lexfile: noun.animal
     lemmas: [dog]
+- change_ili_definition:      # English gloss written as the XML `ILIDefinition`; needed in
+    synset: 00001740-n         # non-English lexicons for synsets with no ILI
+    ili_definition: a member of the genus Canis
 - delete_synset:
     synset: 00001740-n
     reason: "Duplicate (#123)"

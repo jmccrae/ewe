@@ -12,7 +12,8 @@ groups:
   `save`, `reload`.
 - **One tool per edit:** `add_synset`, `delete_synset`, `add_entry`, `delete_entry`,
   `move_entry`, `change_members`, `change_definition`, `add_example`, `update_example`,
-  `delete_example`, `change_source`, `change_adjposition`, `change_ili`, `change_wikidata`,
+  `delete_example`, `change_source`, `change_adjposition`, `change_ili`, `change_ili_definition`,
+  `change_wikidata`,
   `add_relation`,
   `delete_relation`, `reverse_relation`, `update_relations`, `set_confidence`,
   `fix_transitivity`.
@@ -144,7 +145,12 @@ schema, not repeated here. Conventions worth knowing:
   (predicative) or `ip` (immediately postnominal) - and clears it when omitted.
 - `change_ili` links the synset to the Interlingual Index; only set an ILI id you have
   confirmed matches this exact sense, since two synsets sharing one is a validation
-  error.
+  error. An empty `ili` marks the synset as deliberately having no ILI and no ILI
+  definition.
+- `change_ili_definition` sets a standalone *English* gloss for a synset with no ILI
+  (exported as the XML `ILIDefinition`). Non-English lexicons need one on every such
+  synset; English lexicons fall back to the synset's own definition. An empty string
+  removes it.
 - `change_wikidata` *replaces* the synset's Wikidata Q-ids with the list you give, so
   include any existing ones you want to keep; an empty list removes them all.
 

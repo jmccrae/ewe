@@ -143,6 +143,7 @@ pub fn apply_automaton_with<L: Lexicon>(
                 definition_confidence,
                 id,
                 ili,
+                ili_definition,
             } => {
                 let poses = wn.pos_for_lexfile(&lexfile).map_err(|e| e.to_string())?;
                 let pos = if let Some(pos) = pos {
@@ -196,6 +197,12 @@ pub fn apply_automaton_with<L: Lexicon>(
                         if let Some(ili) = ili {
                             wn.update_synset(&new_id, |s| {
                                 s.ili = Some(ILIID::new(&ili));
+                            })
+                            .map_err(|e| e.to_string())?;
+                        }
+                        if let Some(ili_definition) = ili_definition.filter(|d| !d.trim().is_empty()) {
+                            wn.update_synset(&new_id, |s| {
+                                s.ili_definition = Some(ili_definition);
                             })
                             .map_err(|e| e.to_string())?;
                         }
@@ -620,6 +627,17 @@ pub fn apply_automaton_with<L: Lexicon>(
                 })
                 .map_err(|e| e.to_string())?;
             }
+            Action::ChangeILIDefinition { synset, ili_definition } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                wn.update_synset(&synset, |s| {
+                    s.ili_definition = if ili_definition.trim().is_empty() {
+                        None
+                    } else {
+                        Some(ili_definition)
+                    };
+                })
+                .map_err(|e| e.to_string())?;
+            }
             Action::ChangeSource { synset, source } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 wn.update_synset(&synset, |s| {
@@ -1018,6 +1036,11 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         ili: Option<String>,
+        /// Standalone English-language gloss for the new synset, used as its WN-LMF
+        /// `ILIDefinition`. Omit for none.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ili_definition: Option<String>,
     },
     /// Delete `synset`. With `superseded_by`, its entries, examples and relations are handed to that
     /// synset and a deprecation record is kept; without it the synset is removed outright. `reason`
@@ -1044,9 +1067,17 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         confidence: Option<f64>,
     },
-    /// Set `synset`'s Interlingual Index (ILI) id, e.g. "i12345".
+    /// Set `synset`'s Interlingual Index (ILI) id, e.g. "i12345". An empty string marks the synset
+    /// as deliberately having no ILI and no ILI definition (so validation of non-English lexicons
+    /// does not ask for one).
     #[serde(rename = "change_ili")]
     ChangeILI { synset: SynsetRef, ili: String },
+    /// Set `synset`'s ILI definition: a standalone English-language gloss of the concept, written
+    /// as the WN-LMF `ILIDefinition` for a synset with no ILI of its own. Needed for synsets of
+    /// non-English lexicons (whose own definition isn't English); optional for English ones. An
+    /// empty string removes it.
+    #[serde(rename = "change_ili_definition")]
+    ChangeILIDefinition { synset: SynsetRef, ili_definition: String },
     /// Replace `synset`'s Wikidata links with `wikidata` (one or more Q-ids; an empty list removes
     /// them all).
     #[serde(rename = "change_wikidata")]
@@ -1320,6 +1351,9 @@ impl Action {
             }
             Action::ChangeILI { synset, ili } => {
                 format!("Changed ILI of {} to {}", synset.as_str(), ili)
+            }
+            Action::ChangeILIDefinition { synset, ili_definition } => {
+                format!("Changed ILI definition of {} to \"{}\"", synset.as_str(), ili_definition)
             }
             Action::ChangeWikidata { synset, wikidata } => format!(
                 "Changed Wikidata links of {} to [{}]",
@@ -1631,6 +1665,7 @@ mod tests {
                 definition_confidence: None,
                 id: None,
                 ili: None,
+                ili_definition: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1710,6 +1745,7 @@ mod tests {
                 definition_confidence: None,
                 id: None,
                 ili: None,
+                ili_definition: None,
                 definition: "something or someone".to_string(),
                 lexfile: "noun.animal".to_string(),
                 pos: Some(PosKey::new("n".to_string())),
@@ -1966,6 +2002,28 @@ mod tests {
         let yaml = "- add_synset:\n    definition: x\n    lexfile: noun.animal\n    lemmas: [x]\n    definition_confidence: -1\n";
         assert!(apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).is_err());
         assert_eq!(wn.n_synsets().unwrap(), n);
+    }
+
+    #[test]
+    fn test_ili_definition_actions() {
+        let (mut wn, dog, _animal, _cat) = confidence_fixture();
+        let yaml = format!("- change_ili_definition:\n    synset: {dog}\n    ili_definition: a domestic canine\n");
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(wn.synset_by_id(&dog).unwrap().unwrap().ili_definition.as_deref(), Some("a domestic canine"));
+
+        let yaml = format!("- change_ili_definition:\n    synset: {dog}\n    ili_definition: ''\n");
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(wn.synset_by_id(&dog).unwrap().unwrap().ili_definition, None);
+
+        // An empty ILI is the "no ILI, no ILI definition" marker.
+        let yaml = format!("- change_ili:\n    synset: {dog}\n    ili: ''\n");
+        apply_automaton(parse_actions(&yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        assert_eq!(wn.synset_by_id(&dog).unwrap().unwrap().ili, Some(ILIID::new("")));
+
+        let yaml = "- add_synset:\n    id: 02084071-n\n    ili_definition: a canine\n    definition: un chien\n    lexfile: noun.animal\n    pos: n\n    lemmas: [madra]\n";
+        apply_automaton(parse_actions(yaml), &mut wn, &mut ChangeList::new()).unwrap();
+        let ss = wn.synset_by_id(&SynsetId::new("02084071-n")).unwrap().unwrap();
+        assert_eq!(ss.ili_definition.as_deref(), Some("a canine"));
     }
 
     #[test]
@@ -2338,6 +2396,7 @@ mod tests {
             definition_confidence: None,
             id: None,
             ili: None,
+            ili_definition: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
@@ -2376,6 +2435,7 @@ mod tests {
             definition_confidence: None,
             id: None,
             ili: None,
+            ili_definition: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
@@ -2402,6 +2462,7 @@ mod tests {
             definition_confidence: None,
             id: None,
             ili: None,
+            ili_definition: None,
             definition: "a synset with no hypernym".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),
