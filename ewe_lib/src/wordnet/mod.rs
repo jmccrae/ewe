@@ -37,7 +37,7 @@ pub mod synset_members;
 pub use synset_members::{MemberSynset, SenseRelation};
 
 pub mod xml;
-pub use xml::{LexiconMetadata, XmlExportError, XmlImportError};
+pub use xml::{LexiconMetadata, LmfVersion, XmlExportError, XmlImportError, XmlOutput};
 
 pub mod wndb;
 pub use wndb::{write_wndb, WndbExportError, WndbExportOptions};
@@ -76,8 +76,23 @@ mod tests {
                     SynsetId::new("00001740-n")
                 )],
                 form: Vec::new(),
-                pronunciation: Vec::new()
+                pronunciation: Vec::new(),
+                reconstructed: false
             });
+    }
+
+    #[test]
+    fn test_entry_reconstructed_yaml_roundtrip() {
+        let entry_str = "    reconstructed: true
+    sense:
+    - id: 'foo%1:01:00::'
+      synset: 00001740-n
+";
+        let parsed = serde_yaml::from_str::<Entry>(entry_str).unwrap();
+        assert!(parsed.reconstructed);
+        let mut gen_str : Vec<u8> = Vec::new();
+        parsed.save(&mut gen_str).unwrap();
+        assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
 
     #[test]
@@ -95,7 +110,8 @@ mod tests {
                 SynsetId::new("00001740-n")
             )],
             form: Vec::new(),
-            pronunciation: Vec::new()
+            pronunciation: Vec::new(),
+            reconstructed: false
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
@@ -125,7 +141,8 @@ mod tests {
             confidence: None,
             sense: vec![sense],
             form: Vec::new(),
-            pronunciation: Vec::new()
+            pronunciation: Vec::new(),
+            reconstructed: false
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }
@@ -283,7 +300,8 @@ partOfSpeech: n";
             confidence: None,
             sense: vec![sense],
             form: Vec::new(),
-            pronunciation: Vec::new()
+            pronunciation: Vec::new(),
+            reconstructed: false
         }.save(&mut gen_str).unwrap();
         assert_eq!(entry_str, String::from_utf8(gen_str).unwrap());
     }

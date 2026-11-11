@@ -278,7 +278,10 @@ pub struct Member {
     pub entry_no : Option<u32>,
     /// The confidence of the whole lexical entry (as opposed to `sense.confidence`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_confidence : Option<f64>
+    pub entry_confidence : Option<f64>,
+    /// The entry is a reconstructed (unattested) form; shown with a leading `*`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reconstructed : bool
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
@@ -337,7 +340,8 @@ impl MemberSynset {
                         pronunciation: entry.pronunciation.clone(),
                         poskey: poskey.clone(),
                         entry_no: poskey.entry_no(),
-                        entry_confidence: entry.confidence
+                        entry_confidence: entry.confidence,
+                        reconstructed: entry.reconstructed
                     });
                     macro_rules! extract_sense_rel {
                         ($rel:ident,$name:ident) => {

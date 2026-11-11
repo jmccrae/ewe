@@ -59,8 +59,8 @@ const SCHEMA_VERSION_KEY: &'static str = "version";
 ///
 /// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48);
 /// 2 = `Synset::ili_definition` (#33); 3 = script-aware entry sections (#34), which changes
-/// which section a lemma is filed under.
-pub const SCHEMA_VERSION: u32 = 3;
+/// which section a lemma is filed under; 4 = `Entry::reconstructed`, `Member::reconstructed` (#54).
+pub const SCHEMA_VERSION: u32 = 4;
 
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,

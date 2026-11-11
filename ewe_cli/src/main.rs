@@ -156,6 +156,7 @@ fn main() {
                     version,
                     url,
                     confidence,
+                    lmf_version,
                 },
         }) => {
             let metadata = LexiconMetadata {
@@ -168,6 +169,7 @@ fn main() {
                 version: version.clone(),
                 url: url.clone(),
                 confidence: *confidence,
+                lmf_version: *lmf_version,
             };
             commands::export::run_xml(path, metadata, cli.wordnet);
         }
@@ -209,6 +211,7 @@ fn main() {
                     url: url.clone().or_else(|| Some(site.clone())),
                     // RDF has nowhere to put a lexicon-level confidence.
                     confidence: None,
+                    lmf_version: Default::default(),
                 },
             };
             commands::export::run_rdf(path, options, cli.wordnet);

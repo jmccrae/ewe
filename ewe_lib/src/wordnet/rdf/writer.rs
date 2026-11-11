@@ -750,6 +750,7 @@ mod tests {
             site: "https://example.com/".to_owned(),
             metadata: LexiconMetadata {
                 confidence: None,
+                lmf_version: Default::default(),
                 id_prefix: String::new(),
                 label: "Example Wordnet".to_owned(),
                 language: "en".to_owned(),
@@ -775,6 +776,7 @@ mod tests {
             pronunciation: Vec::<Pronunciation>::new(),
             poskey: PosKey::new(poskey),
             entry_no: None,
+            reconstructed: false,
         }
     }
 

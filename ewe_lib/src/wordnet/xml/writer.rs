@@ -20,7 +20,7 @@
 //! one has no defined order at all).
 
 use super::ids;
-use super::{LexiconMetadata, XmlExportError, WN_LMF_DOCTYPE};
+use super::{LexiconMetadata, LmfVersion, XmlExportError, XmlOutput};
 use crate::wordnet::util::format_confidence;
 use crate::wordnet::entry::Entries;
 use crate::wordnet::synset_members::Member;
@@ -37,6 +37,12 @@ type SenseKeyLookup = HashMap<(String, PosKey, SynsetId), SenseId>;
 
 /// Export every synset in `wn` as a single self-contained WN-LMF document.
 pub fn write_lexicon_xml<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Result<Vec<u8>> {
+    Ok(write_lexicon_xml_report(wn, metadata)?.bytes)
+}
+
+/// As [`write_lexicon_xml`], also returning warnings about data the target
+/// [`LexiconMetadata::lmf_version`] could not represent.
+pub fn write_lexicon_xml_report<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Result<XmlOutput> {
     let mut synsets = Vec::new();
     for lexfile in wn.synsets_iter()? {
         let (_, syns) = lexfile?;
@@ -64,7 +70,7 @@ pub fn write_lexicon_xml<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Resu
         }
     }
 
-    write_lexicon_xml_subset(&synsets, metadata, &frames, &sense_rank)
+    write_lexicon_xml_subset_report(&synsets, metadata, &frames, &sense_rank)
 }
 
 struct EntryAcc<'a> {
@@ -86,6 +92,18 @@ pub fn write_lexicon_xml_subset(
     frames: &[(String, String)],
     sense_rank: &HashMap<SenseId, usize>,
 ) -> Result<Vec<u8>> {
+    Ok(write_lexicon_xml_subset_report(synsets, metadata, frames, sense_rank)?.bytes)
+}
+
+/// As [`write_lexicon_xml_subset`], also returning data-loss warnings.
+pub fn write_lexicon_xml_subset_report(
+    synsets: &[MemberSynset],
+    metadata: &LexiconMetadata,
+    frames: &[(String, String)],
+    sense_rank: &HashMap<SenseId, usize>,
+) -> Result<XmlOutput> {
+    let version = metadata.lmf_version;
+    let mut warnings = Vec::new();
     let prefix = metadata.id_prefix.as_str();
 
     let mut entries: BTreeMap<(String, PosKey), EntryAcc> = BTreeMap::new();
@@ -127,7 +145,7 @@ pub fn write_lexicon_xml_subset(
 
     let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
-    writer.write_event(Event::DocType(BytesText::from_escaped(WN_LMF_DOCTYPE)))?;
+    writer.write_event(Event::DocType(BytesText::from_escaped(version.doctype())))?;
 
     let mut lexical_resource = BytesStart::new("LexicalResource");
     lexical_resource.push_attribute(("xmlns:dc", "https://globalwordnet.github.io/schemas/dc/"));
@@ -145,7 +163,7 @@ pub fn write_lexicon_xml_subset(
     writer.write_event(Event::Start(lexicon))?;
 
     for (_, (lemma, poskey), acc) in &entries_sorted {
-        write_lexical_entry(&mut writer, prefix, lemma, poskey, acc, &sense_id_lookup)?;
+        write_lexical_entry(&mut writer, prefix, lemma, poskey, acc, &sense_id_lookup, version)?;
     }
 
     for synset in &synsets_sorted {
@@ -162,7 +180,17 @@ pub fn write_lexicon_xml_subset(
     writer.write_event(Event::End(BytesEnd::new("Lexicon")))?;
     writer.write_event(Event::End(BytesEnd::new("LexicalResource")))?;
 
-    Ok(writer.into_inner())
+    if !version.supports_reconstructed() {
+        let n = entries.values().filter(|a| a.representative.reconstructed).count();
+        if n > 0 {
+            warnings.push(format!(
+                "{n} reconstructed lemma(s) were exported without the `reconstructed` flag: \
+                 WN-LMF {} has no such attribute (use WN-LMF 1.5 to keep it)",
+                version.as_str()
+            ));
+        }
+    }
+    Ok(XmlOutput { bytes: writer.into_inner(), warnings })
 }
 
 fn write_lexical_entry<W: std::io::Write>(
@@ -172,6 +200,7 @@ fn write_lexical_entry<W: std::io::Write>(
     poskey: &PosKey,
     acc: &EntryAcc,
     sense_id_lookup: &SenseKeyLookup,
+    version: LmfVersion,
 ) -> Result<()> {
     let mut entry = BytesStart::new("LexicalEntry");
     entry.push_attribute(("id", ids::entry_xml_id(prefix, lemma, poskey).as_str()));
@@ -182,6 +211,9 @@ fn write_lexical_entry<W: std::io::Write>(
     let mut lemma_el = BytesStart::new("Lemma");
     lemma_el.push_attribute(("writtenForm", lemma));
     lemma_el.push_attribute(("partOfSpeech", pos));
+    if acc.representative.reconstructed && version.supports_reconstructed() {
+        lemma_el.push_attribute(("reconstructed", "true"));
+    }
     if acc.representative.pronunciation.is_empty() {
         writer.write_event(Event::Empty(lemma_el))?;
     } else {
@@ -490,6 +522,7 @@ mod tests {
     fn metadata() -> LexiconMetadata {
         LexiconMetadata {
             confidence: None,
+            lmf_version: Default::default(),
             id_prefix: "oewn".to_string(),
             label: "Test Wordnet".to_string(),
             language: "en".to_string(),
@@ -530,6 +563,39 @@ mod tests {
         let xml = String::from_utf8(xml).unwrap();
         assert!(xml.contains(r#"ili="i12345""#));
         assert!(!xml.contains("ILIDefinition"), "a synset with a real ILI needs no ILIDefinition");
+    }
+
+    fn reconstructed_lexicon() -> LexiconHashMapBackend {
+        let mut wn = simple_lexicon();
+        wn.update_entry("dog", &PosKey::new("n"), |e| e.reconstructed = true).unwrap();
+        wn
+    }
+
+    #[test]
+    fn test_reconstructed_written_in_1_5() {
+        let mut m = metadata();
+        m.lmf_version = LmfVersion::V1_5;
+        let out = write_lexicon_xml_report(&reconstructed_lexicon(), &m).unwrap();
+        let xml = String::from_utf8(out.bytes).unwrap();
+        assert!(xml.contains("WN-LMF-1.5.dtd"));
+        assert!(xml.contains(r#"<Lemma writtenForm="dog" partOfSpeech="n" reconstructed="true"/>"#), "{xml}");
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_reconstructed_dropped_with_warning_in_1_4() {
+        let out = write_lexicon_xml_report(&reconstructed_lexicon(), &metadata()).unwrap();
+        let xml = String::from_utf8(out.bytes).unwrap();
+        assert!(xml.contains("WN-LMF-1.4.dtd"));
+        assert!(!xml.contains("reconstructed"));
+        assert_eq!(out.warnings.len(), 1);
+        assert!(out.warnings[0].starts_with("1 reconstructed lemma"), "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn test_no_warning_without_reconstructed_entries() {
+        let out = write_lexicon_xml_report(&simple_lexicon(), &metadata()).unwrap();
+        assert!(out.warnings.is_empty());
     }
 
     fn dog_lexicon(ili: Option<&str>, ili_definition: Option<&str>) -> LexiconHashMapBackend {

@@ -141,8 +141,17 @@ An example of the usage of the automaton file is given below
 - set_confidence:            # omitting `confidence` clears it (i.e. back to 1.0)
     synset: 00001740-n
     example: 1
+- change_reconstructed:      # mark a lemma as a reconstructed (unattested) form, shown as `*lemma`
+    synset: 00001740-n       # (`reconstructed: false` clears it; add_entry takes the flag too)
+    lemma: dog
+    reconstructed: true
 - validate
 ```
+
+Reconstructed forms are stored as a flag on the entry (`reconstructed: true` in the YAML), never
+as an asterisk in the lemma. `ewe export xml --lmf-version 1.5` writes it as WN-LMF 1.5's
+`Lemma/@reconstructed`; the default, `--lmf-version 1.4`, has no such attribute, so it is
+omitted and a warning is printed with the number of lemmas affected.
 
 ## Non-interactive validation (CI)
 

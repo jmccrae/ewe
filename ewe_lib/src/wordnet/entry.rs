@@ -299,8 +299,15 @@ pub struct Entry {
     pub pronunciation : Vec<Pronunciation>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub confidence : Option<f64>
+    pub confidence : Option<f64>,
+    /// A reconstructed (unattested) form, WN-LMF 1.5 `Lemma/@reconstructed`. Displayed with a
+    /// leading `*`; the stored lemma never contains the asterisk.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_false")]
+    pub reconstructed : bool
 }
+
+fn is_false(b : &bool) -> bool { !*b }
 
 impl Entry {
     pub fn new() -> Entry { Entry::default() }
@@ -308,6 +315,9 @@ impl Entry {
     pub(crate) fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         if let Some(c) = self.confidence {
             write!(w, "    confidence: {}\n", format_confidence(c))?;
+        }
+        if self.reconstructed {
+            write!(w, "    reconstructed: true\n")?;
         }
         if !self.form.is_empty() {
             write!(w,"    form:")?;

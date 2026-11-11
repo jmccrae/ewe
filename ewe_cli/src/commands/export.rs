@@ -3,8 +3,8 @@
 use crate::common::locate_wordnet;
 use clap::Subcommand;
 use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
-use ewe_lib::wordnet::xml::write_lexicon_xml;
-use ewe_lib::wordnet::{write_wndb, LexiconMetadata, WndbExportOptions};
+use ewe_lib::wordnet::xml::write_lexicon_xml_report;
+use ewe_lib::wordnet::{write_wndb, LexiconMetadata, LmfVersion, WndbExportOptions};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -42,6 +42,11 @@ pub(crate) enum ExportFormat {
         /// which WN-LMF treats as 1.0
         #[arg(long, value_parser = parse_confidence)]
         confidence: Option<f64>,
+        /// The WN-LMF schema version to target: 1.4 (the newest published) or 1.5 (unreleased;
+        /// adds `Lemma/@reconstructed`). Data the chosen version cannot represent is dropped,
+        /// with a warning
+        #[arg(long, default_value = "1.4")]
+        lmf_version: LmfVersion,
     },
     /// Export as the classic WNDB (Princeton WordNet database) file set
     /// (data.*/index.*/index.sense/*.exc)
@@ -187,15 +192,18 @@ pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, wordnet: Optio
             })
             .unwrap_or_else(|| "en".to_string());
     }
-    let xml = write_lexicon_xml(&wn, &metadata).unwrap_or_else(|e| {
+    let output = write_lexicon_xml_report(&wn, &metadata).unwrap_or_else(|e| {
         eprintln!("Could not generate XML: {}", e);
         exit(-1);
     });
-    std::fs::write(path, xml).unwrap_or_else(|e| {
+    for w in &output.warnings {
+        eprintln!("Warning: {}", w);
+    }
+    std::fs::write(path, output.bytes).unwrap_or_else(|e| {
         eprintln!("Could not write {}: {}", path.display(), e);
         exit(-1);
     });
-    println!("Wrote {}", path.display());
+    println!("Wrote {} (WN-LMF {})", path.display(), metadata.lmf_version.as_str());
 }
 
 pub(crate) fn run_rdf(path: &Path, options: RdfExportOptions, wordnet: Option<PathBuf>) {
