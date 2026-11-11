@@ -78,12 +78,16 @@ static SETUP_ERROR: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(N
 #[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 struct SharedSetupProgress {
     current: u64,
+    total: u64,
+    /// Report `current`/`total` as a percentage (out of 100) rather than raw - for a source
+    /// whose natural unit (bytes read) isn't meaningful to show.
+    percent: bool,
 }
 
 #[cfg(all(feature = "edit", any(feature = "server", feature = "desktop")))]
 impl SharedSetupProgress {
     fn new() -> Self {
-        Self { current: 0 }
+        Self { current: 0, total: 0, percent: false }
     }
 }
 
@@ -91,12 +95,19 @@ impl SharedSetupProgress {
 impl ewe_lib::progress::Progress for SharedSetupProgress {
     fn start(&mut self, total: u64) {
         self.current = 0;
-        *SETUP_PROGRESS.write().unwrap() = Some(SetupProgress { current: 0, total });
+        self.total = total;
+        let shown_total = if self.percent && total > 0 { 100 } else { total };
+        *SETUP_PROGRESS.write().unwrap() = Some(SetupProgress { current: 0, total: shown_total });
     }
     fn inc(&mut self, amount: u64) {
         self.current += amount;
+        let shown = if self.percent && self.total > 0 {
+            (self.current * 100 / self.total).min(100)
+        } else {
+            self.current
+        };
         if let Some(status) = SETUP_PROGRESS.write().unwrap().as_mut() {
-            status.current = self.current;
+            status.current = shown;
         }
     }
     // Deliberately does *not* clear `SETUP_PROGRESS` - `Lexicon::load` calls this the moment
@@ -110,7 +121,9 @@ impl ewe_lib::progress::Progress for SharedSetupProgress {
     // until then it just stays frozen at its last known `current`/`total` (accurate: there's
     // nothing more granular to report for the corpus/swap steps, but the operation is not done).
     fn finish(&mut self) {}
-    fn set_percent_mode(&mut self, _percent_mode: bool) {}
+    fn set_percent_mode(&mut self, percent_mode: bool) {
+        self.percent = percent_mode;
+    }
 }
 
 /// Polled by the desktop setup screen while a `configure_wordnet_source` load is running.
@@ -271,7 +284,9 @@ async fn run_configure(new_settings: crate::settings::EweSettings) -> Result<(),
     } else {
         let settings_for_corpus = new_settings.clone();
         let result = tokio::task::spawn_blocking(move || {
-            crate::db::open_corpus(&settings_for_corpus).map_err(|e| e.to_string())
+            let mut progress = SharedSetupProgress::new();
+            crate::db::open_corpus_with_progress(&settings_for_corpus, &mut progress)
+                .map_err(|e| e.to_string())
         })
         .await;
         match result {

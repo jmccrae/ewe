@@ -163,7 +163,37 @@ fn latest_source_mtime(source: &str) -> Result<SystemTime, Box<dyn std::error::E
 /// Either way, a search index on the configured key layer (see [`key_layer_name`]) is
 /// guaranteed to exist by the time this returns, so sense lookups don't have to scan
 /// every document.
+///
+/// Rebuild progress goes to stderr as a percentage via [`LoggingProgress`]. See
+/// [`open_corpus_with_progress`] for the general form (used by `backend::setup` to report
+/// progress back to the client instead).
 pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
+    open_corpus_with_progress(settings, &mut LoggingProgress::named("Loading corpus"))
+}
+
+/// A `Read` that reports every byte it hands out to a [`Progress`], so loading a corpus file can
+/// show how far through it we are even though teanga's YAML reader has no progress hook of its
+/// own.
+struct ProgressReader<'a, R, Pr: Progress> {
+    inner: R,
+    progress: &'a mut Pr,
+}
+
+impl<R: std::io::Read, Pr: Progress> std::io::Read for ProgressReader<'_, R, Pr> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.progress.inc(n as u64);
+        Ok(n)
+    }
+}
+
+/// [`open_corpus`], reporting progress through `progress` while the database is rebuilt from
+/// its source. The unit is bytes of source read (a percentage, so it's put in percent mode); it
+/// isn't called at all when the existing database is up to date and just gets opened.
+pub fn open_corpus_with_progress<Pr: Progress>(
+    settings: &EweSettings,
+    progress: &mut Pr,
+) -> Result<DiskCorpus<RedbDb>, Box<dyn std::error::Error>> {
     let mut corpus = if let Some(source) = &settings.corpus_source {
         let files = corpus_source_files(source)?;
         if is_corpus_stale(&settings.corpus_database, source, &files, settings.disable_auto_reload)? {
@@ -175,13 +205,23 @@ pub fn open_corpus(settings: &EweSettings) -> Result<DiskCorpus<RedbDb>, Box<dyn
                 std::fs::remove_file(&settings.corpus_database)?;
             }
             let mut corpus = DiskCorpus::<RedbDb>::new(&settings.corpus_database)?;
+            let mut total = 0;
+            for path in &files {
+                total += std::fs::metadata(path)?.len();
+            }
+            progress.set_percent_mode(true);
+            progress.start(total);
             for path in &files {
                 eprintln!("Loading corpus file {}", path.display());
                 // Buffered, since teanga's YAML reader pulls the input a byte at a time.
-                let file = std::io::BufReader::new(std::fs::File::open(path)?);
+                let file = std::io::BufReader::with_capacity(
+                    64 * 1024,
+                    ProgressReader { inner: std::fs::File::open(path)?, progress: &mut *progress },
+                );
                 teanga::read_yaml(file, &mut corpus)?;
             }
             corpus.commit()?;
+            progress.finish();
             corpus
         } else {
             DiskCorpus::<RedbDb>::new(&settings.corpus_database)?
@@ -328,6 +368,71 @@ mod tests {
         std::fs::remove_file(source.join("b.yml")).unwrap();
         let files = corpus_source_files(&source_str).unwrap();
         assert!(is_corpus_stale(&settings.corpus_database, &source_str, &files, false).unwrap());
+    }
+
+    /// Records every `Progress` call, to check what a corpus rebuild reports.
+    #[derive(Default)]
+    struct Recorder {
+        started_with: Vec<u64>,
+        incremented: u64,
+        finished: usize,
+        percent_mode: bool,
+    }
+
+    impl Progress for Recorder {
+        fn start(&mut self, total: u64) {
+            self.started_with.push(total);
+        }
+        fn inc(&mut self, amount: u64) {
+            self.incremented += amount;
+        }
+        fn finish(&mut self) {
+            self.finished += 1;
+        }
+        fn set_percent_mode(&mut self, percent_mode: bool) {
+            self.percent_mode = percent_mode;
+        }
+    }
+
+    #[test]
+    fn test_open_corpus_reports_progress_in_bytes_only_when_rebuilding() {
+        let scratch = ScratchDir::new("corpus-progress");
+        let source = scratch.0.join("corpus");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("a.yaml"), format!("{META}ecWc:
+    text: This is an example
+    tokens: [[0, 4], [5, 7], [8, 10], [11, 18]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        std::fs::write(source.join("b.yaml"), format!("{META}Kjco:
+    text: This is a document.
+    tokens: [[0, 4], [5, 7], [8, 9], [10, 18], [18, 19]]
+    test_key: [[3, \"test-00001740-n\"]]
+")).unwrap();
+        let total: u64 = ["a.yaml", "b.yaml"]
+            .iter()
+            .map(|f| std::fs::metadata(source.join(f)).unwrap().len())
+            .sum();
+
+        let mut settings = EweSettings::default();
+        settings.id_prefix = "test".to_string();
+        settings.corpus_source = Some(source.to_string_lossy().to_string());
+        settings.corpus_database = scratch.0.join("corpus.db").to_string_lossy().to_string();
+
+        // First open builds the database: bytes read add up to the size of the sources.
+        let mut progress = Recorder::default();
+        drop(open_corpus_with_progress(&settings, &mut progress).unwrap());
+        assert_eq!(progress.started_with, vec![total]);
+        assert_eq!(progress.incremented, total);
+        assert_eq!(progress.finished, 1);
+        assert!(progress.percent_mode);
+
+        // Second open finds it up to date, so there is nothing to report.
+        let mut progress = Recorder::default();
+        drop(open_corpus_with_progress(&settings, &mut progress).unwrap());
+        assert!(progress.started_with.is_empty());
+        assert_eq!(progress.incremented, 0);
+        assert_eq!(progress.finished, 0);
     }
 
     #[test]
