@@ -363,7 +363,7 @@ pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<V
     let lexicon = read_lexicon()?;
     let mut results = Vec::new();
 
-    for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
+    for lemma in lexicon.lemma_complete(&query, max_results)? {
         results.push(SearchResult {
             display: lemma.clone(),
             kind: SearchResultKind::Lemma,

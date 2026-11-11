@@ -510,7 +510,7 @@ impl EweMcpServer {
     }
 
     #[tool(
-        description = "Find lemmas starting with the given prefix (for autocomplete-style lookups)."
+        description = "Find lemmas starting with the given prefix (for autocomplete-style lookups). If there are fewer than max_results prefix matches, fuzzy matches (ignoring case, accents and separators, matching words inside multiword lemmas, tolerating small typos) are appended."
     )]
     fn search_prefix(
         &self,
@@ -522,7 +522,7 @@ impl EweMcpServer {
         let state = self.state.lock().unwrap();
         let matches = state
             .wn
-            .lemma_by_prefix(&prefix, max_results)
+            .lemma_complete(&prefix, max_results.unwrap_or(100))
             .map_err(|e| e.to_string())?;
         serde_json::to_string(&matches).map_err(|e| e.to_string())
     }

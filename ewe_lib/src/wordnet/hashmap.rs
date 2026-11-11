@@ -22,7 +22,8 @@ pub struct LexiconHashMapBackend {
     deprecations : Vec<DeprecationRecord>,
     frames : Vec<(String, String)>,
     changelog : Vec<(u64, String)>,
-    last_saved_changelog_id : Option<u64>
+    last_saved_changelog_id : Option<u64>,
+    lemma_index : crate::wordnet::lemma_index::LemmaIndexCache
 }
 
 impl LexiconHashMapBackend {
@@ -37,7 +38,8 @@ impl LexiconHashMapBackend {
             deprecations : Vec::new(),
             frames : Vec::new(),
             changelog : Vec::new(),
-            last_saved_changelog_id : None
+            last_saved_changelog_id : None,
+            lemma_index : Default::default()
         }
     }
     #[cfg(test)]
@@ -54,7 +56,11 @@ impl Lexicon for LexiconHashMapBackend {
     fn entries_get<'a>(&'a self, key : char) -> Result<Option<Cow<'a, BTEntries>>> {
         Ok(self.entries.get(&key).map(|x| Cow::Borrowed(x)))
     }
+    fn lemma_index_cache(&self) -> &crate::wordnet::lemma_index::LemmaIndexCache {
+        &self.lemma_index
+    }
     fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()> {
+        self.lemma_index.invalidate();
         self.entries.insert(key, entries);
         Ok(())
     }
@@ -62,6 +68,7 @@ impl Lexicon for LexiconHashMapBackend {
         Ok(self.entries.iter().map(|(k, v)| Ok((*k, Cow::Borrowed(v)))))
     }
     fn entries_update<X>(&mut self, key : char, f : impl FnOnce(&mut BTEntries) -> X) -> Result<X> {
+        self.lemma_index.invalidate();
         if let Some(e) = self.entries.get_mut(&key) {
             Ok(f(e))
         } else {

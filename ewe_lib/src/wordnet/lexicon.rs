@@ -112,6 +112,8 @@ pub trait Lexicon: Sized {
     fn entries_iter<'a>(&'a self)
         -> Result<impl Iterator<Item = Result<(char, Cow<'a, Self::E>)>>>;
     fn entries_update<X>(&mut self, key: char, f: impl FnOnce(&mut Self::E) -> X) -> Result<X>;
+    /// Cache holding the fuzzy lemma search index (invalidated by `entries_insert/update`)
+    fn lemma_index_cache(&self) -> &crate::wordnet::lemma_index::LemmaIndexCache;
     fn synsets_get<'a>(&'a self, lexname: &str) -> Result<Option<Cow<'a, Self::S>>>;
     fn synsets_insert(&mut self, lexname: String, synsets: BTSynsets) -> Result<()>;
     fn synsets_iter<'a>(
@@ -1199,6 +1201,34 @@ pub trait Lexicon: Sized {
         }
     }
 
+    /// Fuzzy lemma search: case, diacritic and separator insensitive, matches words inside
+    /// multiword lemmas and tolerates small typos. Best matches (exact, prefix, word, fuzzy)
+    /// come first.
+    fn lemma_search(&self, query: &str, max_results: Option<usize>) -> Result<Vec<String>> {
+        let index = self
+            .lemma_index_cache()
+            .get_or_build(|| crate::wordnet::lemma_index::LemmaIndex::build(self))?;
+        Ok(index.search(query, max_results.unwrap_or(usize::MAX)))
+    }
+
+    /// Autocomplete: the fast exact-prefix matches first, topped up with fuzzy matches
+    /// (see `lemma_search`) only if there are fewer than `max_results` of them.
+    fn lemma_complete(&self, query: &str, max_results: usize) -> Result<Vec<String>> {
+        let mut results = self.lemma_by_prefix(query, Some(max_results))?;
+        if results.len() < max_results {
+            let mut seen: std::collections::HashSet<String> = results.iter().cloned().collect();
+            for l in self.lemma_search(query, Some(max_results))? {
+                if results.len() >= max_results {
+                    break;
+                }
+                if seen.insert(l.clone()) {
+                    results.push(l);
+                }
+            }
+        }
+        Ok(results)
+    }
+
     /// Get the list of entries starting with a prefix
     fn lemma_by_prefix(&self, prefix: &str, max_results: Option<usize>) -> Result<Vec<String>> {
         let limit = max_results.unwrap_or(usize::MAX);
@@ -1501,6 +1531,18 @@ pub(crate) fn finalize_bulk_load<L: Lexicon>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_lemma_search_and_invalidation() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let pos = PosKey::new("n".to_string());
+        lexicon.insert_entry("ice-cream".to_string(), pos.clone(), Entry::new()).unwrap();
+        assert_eq!(lexicon.lemma_search("icecream", None).unwrap(), vec!["ice-cream"]);
+        lexicon.insert_entry("café".to_string(), pos.clone(), Entry::new()).unwrap();
+        assert_eq!(lexicon.lemma_search("cafe", None).unwrap(), vec!["café"]);
+        assert_eq!(lexicon.lemma_complete("ice", 5).unwrap(), vec!["ice-cream"]);
+        assert_eq!(lexicon.lemma_complete("icecrem", 5).unwrap(), vec!["ice-cream"]);
+    }
 
     #[test]
     fn test_non_english_sections_roundtrip() {

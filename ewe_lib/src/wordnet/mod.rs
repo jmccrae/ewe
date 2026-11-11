@@ -1,4 +1,5 @@
 pub(crate) mod section;
+pub mod lemma_index;
 pub mod lexicon;
 pub use lexicon::{Lexicon, Result};
 
