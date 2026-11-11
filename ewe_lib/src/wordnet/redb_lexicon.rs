@@ -65,6 +65,7 @@ pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
     synsets: HashMap<String, ReDBSynsets>,
+    lemma_index: crate::wordnet::lemma_index::LemmaIndexCache,
 }
 
 impl ReDBLexicon {
@@ -125,6 +126,7 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets,
+            lemma_index: Default::default(),
         })
     }
 
@@ -184,6 +186,7 @@ impl ReDBLexicon {
             txn_manager,
             entries,
             synsets: HashMap::new(),
+            lemma_index: Default::default(),
         })
     }
 }
@@ -195,7 +198,11 @@ impl Lexicon for ReDBLexicon {
     fn entries_get<'a>(&'a self, key : char) -> Result<Option<Cow<'a, ReDBEntries>>> {
         Ok(self.entries.get(&key).map(|x| Cow::Borrowed(x)))
     }
+    fn lemma_index_cache(&self) -> &crate::wordnet::lemma_index::LemmaIndexCache {
+        &self.lemma_index
+    }
     fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()> {
+        self.lemma_index.invalidate();
         for entry in entries.into_entries()? {
             let (lemma, pos, entry) = entry?;
             if !self.entries.contains_key(&key) {
@@ -211,6 +218,7 @@ impl Lexicon for ReDBLexicon {
         Ok(self.entries.iter().map(|(k, v)| Ok((*k, Cow::Borrowed(v)))))
     }
     fn entries_update<X>(&mut self, key : char, f : impl FnOnce(&mut Self::E) -> X) -> Result<X> {
+        self.lemma_index.invalidate();
         if let Some(e) = self.entries.get_mut(&key) {
             Ok(f(e))
         } else {

@@ -18,6 +18,10 @@ pub(crate) fn run(word: &str, ignore_case: bool, sense_ids: bool, wordnet: Optio
     };
     if entries.is_empty() {
         println!("No entries found for '{}'", word);
+        let suggestions = wn.lemma_search(word, Some(10)).unwrap_or_default();
+        if !suggestions.is_empty() {
+            println!("Did you mean: {}", suggestions.join(", "));
+        }
     } else {
         for entry in entries {
             for sense in &entry.sense {

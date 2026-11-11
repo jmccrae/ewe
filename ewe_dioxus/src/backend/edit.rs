@@ -87,7 +87,7 @@ pub async fn search_synsets(
     let max_results = max_results.unwrap_or(20);
 
     let mut synset_ids: Vec<SynsetId> = Vec::new();
-    'lemmas: for lemma in lexicon.lemma_by_prefix(&query, Some(max_results))? {
+    'lemmas: for lemma in lexicon.lemma_complete(&query, max_results)? {
         for entry in lexicon.entry_by_lemma(&lemma)? {
             for sense in entry.sense.iter() {
                 if !synset_ids.contains(&sense.synset) {
