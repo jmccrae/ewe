@@ -15,7 +15,19 @@ use std::result;
 /// all yet, so also accept `frames.yaml` - unlike any particular `entries-*.yaml`, `Lexicon::save`
 /// always writes that one, empty or not.
 pub(crate) fn looks_like_wordnet_dir(path: &Path) -> bool {
-    path.join("entries-a.yaml").exists() || path.join("frames.yaml").exists()
+    path.join("frames.yaml").exists() || has_entries_file(path)
+}
+
+/// Whether the directory contains any `entries-*.yaml` file (the sections depend on the language)
+fn has_entries_file(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|d| {
+            d.flatten().any(|f| {
+                let n = f.file_name().to_string_lossy().to_string();
+                n.starts_with("entries-") && n.ends_with(".yaml")
+            })
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn locate_wordnet(

@@ -3,6 +3,7 @@ use crate::rels::{SenseRelType, SynsetRelType};
 use crate::sense_keys::get_sense_key;
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::util::{escape_yaml_string, LexiconSaveError};
+use crate::wordnet::section::{entry_key, key_to_name, name_to_key};
 use crate::wordnet::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -244,11 +245,10 @@ pub trait Lexicon: Sized {
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
-                let key = file_name[8..9]
-                    .chars()
-                    .into_iter()
-                    .next()
-                    .expect("Unreachable as file_name must be at least 10 chars long");
+                let key = match name_to_key(&file_name["entries-".len()..file_name.len() - ".yaml".len()]) {
+                    Some(k) => k,
+                    None => continue,
+                };
                 let entries2: BTEntries =
                     serde_yaml::from_reader(File::open(&file).map_err(|e| {
                         WordNetYAMLIOError::Io(format!("Error reading {} due to {}", file_name, e))
@@ -310,23 +310,36 @@ pub trait Lexicon: Sized {
         bar: &mut Bar,
     ) -> result::Result<(), LexiconSaveError> {
         bar.start(73);
-        // `entry_key` only ever produces '0' or 'a'..='z', so this is the complete, fixed set of
-        // entries-*.yaml files a project can have. Always write all of them - even a bucket with
-        // no entries at all yet, as every one of them is for a brand new project - rather than
-        // only whichever ones entries_iter() happens to have populated, matching the real OEWN
-        // layout (entries-0.yaml..entries-z.yaml always present) instead of leaving some missing
-        // until their first entry.
+        // Only the sections that have entries are written, except that a lexicon using only
+        // '0' and 'a'..='z' (including a brand new, empty one) always gets the complete set
+        // entries-0.yaml..entries-z.yaml, matching the real OEWN layout.
+        let mut written_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut written_keys: std::collections::HashSet<char> = std::collections::HashSet::new();
         for entries in self.entries_iter()? {
             let (ekey, entries) = entries?;
-            let mut w = File::create(folder.as_ref().join(format!("entries-{}.yaml", ekey)))?;
+            let name = format!("entries-{}.yaml", key_to_name(ekey));
+            let mut w = File::create(folder.as_ref().join(&name))?;
             entries.save(&mut w)?;
+            written_names.insert(name);
             written_keys.insert(ekey);
             bar.inc(1);
         }
-        for key in std::iter::once('0').chain('a'..='z') {
-            if !written_keys.contains(&key) {
-                File::create(folder.as_ref().join(format!("entries-{}.yaml", key)))?;
+        if written_keys.iter().all(|k| *k == '0' || ('a'..='z').contains(k)) {
+            for key in std::iter::once('0').chain('a'..='z') {
+                if !written_keys.contains(&key) {
+                    let name = format!("entries-{}.yaml", key);
+                    File::create(folder.as_ref().join(&name))?;
+                    written_names.insert(name);
+                }
+            }
+        }
+        // Remove entries files for sections that no longer exist, as load() would read them back
+        if let Ok(dir) = std::fs::read_dir(folder.as_ref()) {
+            for f in dir.flatten() {
+                let n = f.file_name().to_string_lossy().to_string();
+                if n.starts_with("entries-") && n.ends_with(".yaml") && !written_names.contains(&n) {
+                    std::fs::remove_file(f.path())?;
+                }
             }
         }
         for synsets in self.synsets_iter()? {
@@ -410,30 +423,15 @@ pub trait Lexicon: Sized {
 
     /// Get the entry data (with the part of speech key) for a lemma
     fn entry_by_lemma_with_pos<'a>(&'a self, lemma: &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
-        match lemma.chars().nth(0) {
-            Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
-                let key = c.to_ascii_lowercase();
-                Ok(match self.entries_get(key)? {
-                    Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma)?,
-                    Some(Cow::Owned(v)) => v
-                        .entry_by_lemma_with_pos(lemma)?
-                        .into_iter()
-                        .map(|(p, e)| (p, Cow::Owned(e.into_owned())))
-                        .collect(),
-                    _ => Vec::new(),
-                })
-            }
-            Some(_) => Ok(match self.entries_get('0')? {
-                Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma)?,
-                Some(Cow::Owned(v)) => v
-                    .entry_by_lemma_with_pos(lemma)?
-                    .into_iter()
-                    .map(|(p, e)| (p, Cow::Owned(e.into_owned())))
-                    .collect(),
-                _ => Vec::new(),
-            }),
-            None => Ok(Vec::new()),
-        }
+        Ok(match self.entries_get(entry_key(lemma))? {
+            Some(Cow::Borrowed(v)) => v.entry_by_lemma_with_pos(lemma)?,
+            Some(Cow::Owned(v)) => v
+                .entry_by_lemma_with_pos(lemma)?
+                .into_iter()
+                .map(|(p, e)| (p, Cow::Owned(e.into_owned())))
+                .collect(),
+            _ => Vec::new(),
+        })
     }
 
     /// Get the sense by lemma and synset id
@@ -1204,18 +1202,11 @@ pub trait Lexicon: Sized {
     /// Get the list of entries starting with a prefix
     fn lemma_by_prefix(&self, prefix: &str, max_results: Option<usize>) -> Result<Vec<String>> {
         let limit = max_results.unwrap_or(usize::MAX);
-        Ok(match prefix.chars().nth(0) {
-            Some(c) if c.to_ascii_lowercase() >= 'a' && c.to_ascii_lowercase() <= 'z' => {
-                let key = c.to_ascii_lowercase();
-                match self.entries_get(key)? {
-                    Some(e) => e.lemma_by_prefix(prefix, limit)?,
-                    None => Vec::new(),
-                }
-            }
-            Some(_) => match self.entries_get('0')? {
-                Some(e) => e.lemma_by_prefix(prefix, limit)?,
-                None => Vec::new(),
-            },
+        if prefix.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(match self.entries_get(entry_key(prefix))? {
+            Some(e) => e.lemma_by_prefix(prefix, limit)?,
             None => Vec::new(),
         })
     }
@@ -1507,18 +1498,30 @@ pub(crate) fn finalize_bulk_load<L: Lexicon>(
     Ok(())
 }
 
-pub(crate) fn entry_key(lemma: &str) -> char {
-    let key = lemma.to_lowercase().chars().next().expect("Empty lemma!");
-    if key < 'a' || key > 'z' {
-        '0'
-    } else {
-        key
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_non_english_sections_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_sections_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut lexicon = LexiconHashMapBackend::new();
+        let pos = PosKey::new("n".to_string());
+        for lemma in ["σοφία", "漢字"] {
+            lexicon.insert_entry(lemma.to_string(), pos.clone(), Entry::new()).unwrap();
+        }
+        let mut bar = crate::progress::NullProgress;
+        lexicon.save(&dir, &mut bar).unwrap();
+        assert!(dir.join("entries-σ.yaml").is_file());
+        assert!(dir.join("entries-cjk.yaml").is_file());
+        assert!(!dir.join("entries-a.yaml").exists());
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        assert_eq!(reloaded.n_entries().unwrap(), 2);
+        assert_eq!(reloaded.entry_by_lemma("漢字").unwrap().len(), 1);
+        assert_eq!(reloaded.lemma_by_prefix("σο", None).unwrap(), vec!["σοφία".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_save_writes_frames_yaml_and_load_recovers_it() {
