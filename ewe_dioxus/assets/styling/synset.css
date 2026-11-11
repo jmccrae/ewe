@@ -262,6 +262,11 @@
     font-size: 0.85em;
 }
 
+.synset-ili-definition-input {
+    font-size: 1em;
+    width: 24em;
+}
+
 .synset-source-input {
     font-size: 1em;
     width: 16em;
@@ -298,6 +303,7 @@
 .lemma-input,
 .ili-input,
 .synset-source-input,
+.synset-ili-definition-input,
 .wikidata-input,
 .relation-search-input,
 .relation-type-select,
@@ -315,6 +321,7 @@
 .lemma-input:focus,
 .ili-input:focus,
 .synset-source-input:focus,
+.synset-ili-definition-input:focus,
 .wikidata-input:focus,
 .relation-search-input:focus,
 .relation-type-select:focus,

@@ -22,9 +22,10 @@ pub(crate) enum ExportFormat {
         /// The `Lexicon/@label`
         #[arg(long, default_value = "Open English Wordnet")]
         label: String,
-        /// The `Lexicon/@language` (BCP 47 code)
-        #[arg(long, default_value = "en")]
-        language: String,
+        /// The `Lexicon/@language` (BCP 47 code). Defaults to the `language` in the project's
+        /// `settings.toml`, or `en` if there is none
+        #[arg(long)]
+        language: Option<String>,
         /// The `Lexicon/@email` contact address
         #[arg(long)]
         email: Option<String>,
@@ -173,11 +174,19 @@ pub(crate) fn run_wndb(path: &Path, license_file: Option<PathBuf>, wordnet: Opti
     println!("Wrote {}", path.display());
 }
 
-pub(crate) fn run_xml(path: &Path, metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
-    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
+pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
+    let (wordnet_path, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
     });
+    if metadata.language.is_empty() {
+        metadata.language = ewe_lib::validate::ValidationOptions::language_for_wordnet(Path::new(&wordnet_path))
+            .unwrap_or_else(|e| {
+                eprintln!("{}", e);
+                exit(2);
+            })
+            .unwrap_or_else(|| "en".to_string());
+    }
     let xml = write_lexicon_xml(&wn, &metadata).unwrap_or_else(|e| {
         eprintln!("Could not generate XML: {}", e);
         exit(-1);

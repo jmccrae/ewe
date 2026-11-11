@@ -29,6 +29,14 @@ pub struct ValidationOptions {
     /// Skip hypernym/instance_hypernym checks (`CrossPOSHyper`, `HypernymTargetIsInstance`,
     /// `NoHypernym`, `HypernymInstanceConflict`, `Transitivity`).
     pub skip_hypernym: bool,
+    /// Skip the check that a synset with no ILI has an `ili_definition` in a non-English lexicon
+    /// (`MissingILIDefinition`).
+    pub skip_ili_definition: bool,
+    /// Whether the lexicon's language is not English (so a synset with no ILI needs an
+    /// `ili_definition`). Not a `[validation]` key: it comes from the top-level `language` of
+    /// `settings.toml`, see [`ValidationOptions::with_language`]. Defaults to English.
+    #[serde(skip)]
+    pub non_english: bool,
 }
 
 /// The part of a `settings.toml` that `ValidationOptions` reads - every other top-level key
@@ -37,6 +45,13 @@ pub struct ValidationOptions {
 struct SettingsFile {
     #[serde(default)]
     validation: ValidationOptions,
+    #[serde(default)]
+    language: Option<String>,
+}
+
+/// Whether a BCP 47 language code is English (`en`, `en-GB`, ...).
+fn is_english(language: &str) -> bool {
+    language.split(|c| c == '-' || c == '_').next().is_some_and(|l| l.eq_ignore_ascii_case("en"))
 }
 
 impl ValidationOptions {
@@ -44,8 +59,33 @@ impl ValidationOptions {
     /// gives the default (run every check).
     pub fn from_settings_str(contents: &str) -> std::result::Result<Self, String> {
         toml::from_str::<SettingsFile>(contents)
-            .map(|s| s.validation)
+            .map(|s| match s.language {
+                Some(language) => s.validation.with_language(&language),
+                None => s.validation,
+            })
             .map_err(|e| e.to_string())
+    }
+
+    /// These options for a lexicon in `language` (a BCP 47 code; `settings.toml`'s `language`).
+    pub fn with_language(self, language: &str) -> Self {
+        ValidationOptions { non_english: !is_english(language), ..self }
+    }
+
+    /// The top-level `language` of the project's `settings.toml`, found the same way as
+    /// [`ValidationOptions::for_wordnet`]. `None` if there is no `settings.toml` or it sets none.
+    pub fn language_for_wordnet(yaml_dir: &Path) -> std::result::Result<Option<String>, String> {
+        let start = yaml_dir.canonicalize().unwrap_or_else(|_| yaml_dir.to_path_buf());
+        for dir in start.ancestors().take(3) {
+            let candidate = dir.join("settings.toml");
+            if candidate.is_file() {
+                let contents = std::fs::read_to_string(&candidate)
+                    .map_err(|e| format!("Could not read {}: {}", candidate.display(), e))?;
+                return toml::from_str::<SettingsFile>(&contents)
+                    .map(|s| s.language)
+                    .map_err(|e| format!("Invalid {}: {}", candidate.display(), e));
+            }
+        }
+        Ok(None)
     }
 
     /// Reads the `[validation]` table from the `settings.toml` at `path`.
@@ -80,6 +120,8 @@ impl ValidationOptions {
             skip_duplicate_definitions: self.skip_duplicate_definitions || other.skip_duplicate_definitions,
             skip_similar: self.skip_similar || other.skip_similar,
             skip_hypernym: self.skip_hypernym || other.skip_hypernym,
+            skip_ili_definition: self.skip_ili_definition || other.skip_ili_definition,
+            non_english: self.non_english || other.non_english,
         }
     }
 }
@@ -277,7 +319,8 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
                         ili: ili.clone()
                     });
                 }
-                if ili.as_str() != "in" && !opts.skip_duplicate_ili {
+                // An empty ILI deliberately means "no ILI", so many synsets may share it.
+                if ili.as_str() != "in" && !ili.as_str().is_empty() && !opts.skip_duplicate_ili {
                     match ili_index.get(ili.as_str()) {
                         Some(prev) => {
                             errors.push(ValidationError::DuplicateILI {
@@ -292,7 +335,15 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
                     }
                 }
             },
-            None => {}
+            None => {
+                // No ILI of its own: WN-LMF needs a standalone English `ILIDefinition`. An
+                // English lexicon can fall back to the synset's own definition; others can't.
+                if opts.non_english && !opts.skip_ili_definition
+                    && synset.ili_definition.as_deref().map_or(true, |d| d.trim().is_empty())
+                {
+                    errors.push(ValidationError::MissingILIDefinition { id: synset_id.clone() });
+                }
+            }
         }
 
         for qid in synset.wikidata.iter() {
@@ -609,7 +660,8 @@ fn is_valid_synset_id(synset_id : &SynsetId) -> bool {
 }
 
 fn is_valid_ili(iliid : &ILIID) -> bool {
-    VALID_ILI.is_match(iliid.as_str())
+    // An empty ILI is the deliberate "no ILI and no ILI definition" marker.
+    iliid.as_str().is_empty() || VALID_ILI.is_match(iliid.as_str())
 }
 
 fn is_valid_wikidata_id(qid : &str) -> bool {
@@ -633,6 +685,7 @@ pub enum ValidationError {
     InvalidSynsetId { id : SynsetId },
     EmptySynset { id : SynsetId },
     InvalidILIId { id : SynsetId, ili: ILIID },
+    MissingILIDefinition { id : SynsetId },
     NoSenses { lemma : String, poskey : PosKey },
     CrossPOSHyper { source : SynsetId, target : SynsetId },
     SenseRelTargetMissing { id : SenseId, rel : SenseRelType, target : UnresolvedSenseOrSynsetId },
@@ -708,6 +761,9 @@ impl fmt::Display for ValidationError {
                 write!(f, "Empty synset: {}", id.as_str()),
             ValidationError::InvalidILIId { id, ili } =>
                 write!(f, "Synset {} has an invalid ILI identifier {}", id.as_str(), ili.as_str()),
+            ValidationError::MissingILIDefinition { id } =>
+                write!(f, "Synset {} has no ILI and no ILI definition, which a non-English lexicon needs \
+                           (set an ili_definition, or set the ILI to an empty string to opt out)", id.as_str()),
             ValidationError::NoSenses { lemma, poskey } =>
                 write!(f, "Entry for {} ({}) has no senses", lemma, poskey.as_str()),
             ValidationError::CrossPOSHyper { source, target } =>
@@ -831,6 +887,7 @@ pub fn fix<L : Lexicon>(wn : &mut L,
         ValidationError::InvalidSynsetId { .. } => false,
         ValidationError::EmptySynset { .. } => false,
         ValidationError::InvalidILIId { .. } => false,
+        ValidationError::MissingILIDefinition { .. } => false,
         ValidationError::NoSenses { .. } => false,
         ValidationError::CrossPOSHyper { .. } => false,
         ValidationError::SenseRelTargetMissing { .. } => false,
@@ -976,6 +1033,53 @@ mod tests {
             ValidationError::DuplicateILI { id1, id2, ili } if
                 ili.as_str() == "i12345" &&
                 ((*id1 == a && *id2 == b) || (*id1 == b && *id2 == a)))));
+    }
+
+    #[test]
+    fn test_missing_ili_definition_in_non_english_lexicon() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let bare = add_noun(&mut wn, "00000060-n", "bare synset", 'n', &mut change_list);
+        let defined = add_noun(&mut wn, "00000061-n", "defined synset", 'n', &mut change_list);
+        let real = add_noun(&mut wn, "00000062-n", "real ili synset", 'n', &mut change_list);
+        let opted_out = add_noun(&mut wn, "00000063-n", "opted out one", 'n', &mut change_list);
+        let opted_out2 = add_noun(&mut wn, "00000064-n", "opted out two", 'n', &mut change_list);
+        wn.update_synset(&defined, |ss| { ss.ili_definition = Some("an english gloss".to_string()); }).unwrap();
+        wn.update_synset(&real, |ss| { ss.ili = Some(ILIID::new("i4321")); }).unwrap();
+        wn.update_synset(&opted_out, |ss| { ss.ili = Some(ILIID::new("")); }).unwrap();
+        wn.update_synset(&opted_out2, |ss| { ss.ili = Some(ILIID::new("")); }).unwrap();
+
+        let run = |opts: &ValidationOptions| validate_with(&wn, &mut NullProgress, opts).unwrap();
+        let missing = |errors: &[ValidationError]| -> Vec<SynsetId> {
+            errors.iter().filter_map(|e| match e {
+                ValidationError::MissingILIDefinition { id } => Some(id.clone()),
+                _ => None,
+            }).collect()
+        };
+
+        // English (the default): the synset's own definition stands in, so nothing is missing.
+        assert!(missing(&run(&ValidationOptions::default())).is_empty());
+        assert!(missing(&run(&ValidationOptions::default().with_language("en-GB"))).is_empty());
+
+        // Any other language: only the bare synset is flagged. A real ILI, an ili_definition
+        // and the empty-ILI opt-out (which also isn't a duplicate or invalid ILI) all pass.
+        let french = ValidationOptions::default().with_language("fr");
+        let errors = run(&french);
+        assert_eq!(missing(&errors), vec![bare.clone()]);
+        assert!(!errors.iter().any(|e| matches!(e,
+            ValidationError::InvalidILIId { .. } | ValidationError::DuplicateILI { .. })));
+
+        assert!(missing(&run(&ValidationOptions { skip_ili_definition: true, ..french })).is_empty());
+    }
+
+    #[test]
+    fn test_language_comes_from_the_top_level_of_settings() {
+        let opts = ValidationOptions::from_settings_str("language = \"fr\"\n[validation]\nskip_similar = true\n").unwrap();
+        assert!(opts.non_english && opts.skip_similar);
+        assert!(!ValidationOptions::from_settings_str("language = \"en\"").unwrap().non_english);
+        assert!(!ValidationOptions::from_settings_str("").unwrap().non_english);
+        // `language` is not a `[validation]` key.
+        assert!(ValidationOptions::from_settings_str("[validation]\nnon_english = true\n").is_err());
     }
 
     #[test]

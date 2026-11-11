@@ -1251,7 +1251,7 @@ pub trait Lexicon: Sized {
             let (_, synsets) = v?;
             for entry in synsets.iter()? {
                 let (id, synset) = entry?;
-                if let Some(ili) = synset.ili.as_ref() {
+                if let Some(ili) = synset.ili.as_ref().filter(|i| !i.as_str().is_empty()) {
                     if ili.as_str().starts_with(prefix) {
                         results.push((ili.as_str().to_string(), id));
                         if results.len() >= limit {

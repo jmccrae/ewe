@@ -46,14 +46,14 @@ pub async fn lemma_xml(lemma: String) -> Result<Response<Body>> {
 }
 
 /// `ewe_lib`'s writer has no notion of a running app's settings, so translate this app's
-/// `EweSettings` into the standalone metadata it expects. Language/license/version aren't
-/// currently user-configurable in `EweSettings`, so these carry forward the same hardcoded
-/// values the exporter has always used.
+/// `EweSettings` into the standalone metadata it expects. License/version aren't currently
+/// user-configurable in `EweSettings`, so these carry forward the same hardcoded values the
+/// exporter has always used.
 fn metadata(settings: &EweSettings) -> LexiconMetadata {
     LexiconMetadata {
         id_prefix: settings.id_prefix.clone(),
         label: settings.project_name.clone(),
-        language: "en".to_string(),
+        language: settings.language.clone(),
         email: settings.contact_email.clone(),
         license: "https://creativecommons.org/licenses/by/4.0".to_string(),
         version: "2024".to_string(),

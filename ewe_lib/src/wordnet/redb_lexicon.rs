@@ -57,8 +57,9 @@ const SCHEMA_VERSION_KEY: &'static str = "version";
 /// speedy-encoded struct can't be decoded after it: **bump this whenever such a struct
 /// changes**, so `open` reports a clear "rebuild" error rather than garbled data.
 ///
-/// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48).
-pub const SCHEMA_VERSION: u32 = 1;
+/// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48);
+/// 2 = `Synset::ili_definition` (#33).
+pub const SCHEMA_VERSION: u32 = 2;
 
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
@@ -242,7 +243,7 @@ impl Lexicon for ReDBLexicon {
             for synset in synsets.into_iter()? {
                 let (id, synset) = synset?;
                 lexfile_table.insert(id.to_string(), lexname.clone())?;
-                if let Some(ili) = synset.ili.as_ref() {
+                if let Some(ili) = synset.ili.as_ref().filter(|i| !i.as_str().is_empty()) {
                     ili_table.insert(ili.as_str().to_string(), id.to_string())?;
                 }
                 synsets_table.insert((lexname.clone(), id.to_string()), serialize_synset(&synset)?)?;
@@ -944,7 +945,7 @@ impl ReDBSynsets {
         let txn = manager.begin_write()?;
         let mut table = txn.open_table(SYNSETS_TABLE)?;
         table.insert((lexname, synset_id.to_string()), serialize_synset(&synset)?)?;
-        if let Some(ili) = synset.ili.as_ref() {
+        if let Some(ili) = synset.ili.as_ref().filter(|i| !i.as_str().is_empty()) {
             let mut ili_table = txn.open_table(ILI_TO_SYNSET_ID)?;
             ili_table.insert(ili.as_str().to_string(), synset_id.to_string())?;
         }
@@ -957,7 +958,7 @@ impl ReDBSynsets {
         let mut table = txn.open_table(SYNSETS_TABLE)?;
         let res = if let Some(s) = table.remove((lexname, synset_id.to_string()))? {
             let synset = deserialize_synset(s.value())?;
-            if let Some(ili) = synset.ili.as_ref() {
+            if let Some(ili) = synset.ili.as_ref().filter(|i| !i.as_str().is_empty()) {
                 let mut ili_table = txn.open_table(ILI_TO_SYNSET_ID)?;
                 ili_table.remove(ili.as_str().to_string())?;
             }
@@ -980,7 +981,7 @@ impl ReDBSynsets {
                 return Err(LexiconError::SynsetIdNotFound(id.clone()));
             }
         };
-        let old_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string());
+        let old_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string()).filter(|i| !i.is_empty());
 
         // Step 2: run the user callback *without* holding the lock
         let res = f(&mut synset);
@@ -993,7 +994,7 @@ impl ReDBSynsets {
             (self.lexname.clone(), id.to_string()),
             serialize_synset(&synset)?,
         )?;
-        let new_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string());
+        let new_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string()).filter(|i| !i.is_empty());
         if old_ili != new_ili {
             let mut ili_table = txn.open_table(ILI_TO_SYNSET_ID)?;
             if let Some(old_ili) = old_ili {

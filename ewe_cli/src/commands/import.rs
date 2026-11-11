@@ -32,6 +32,9 @@ fn generate_settings_toml(metadata: &LexiconMetadata) -> String {
     out.push_str("database = \"wordnet.db\"\n");
     out.push_str("wordnet_source = \"src/yaml/\"\n");
     out.push_str(&format!("id_prefix = \"{}\"\n", toml_escape(&metadata.id_prefix)));
+    if !metadata.language.is_empty() {
+        out.push_str(&format!("language = \"{}\"\n", toml_escape(&metadata.language)));
+    }
     if !metadata.label.is_empty() {
         out.push_str(&format!("project_name = \"{}\"\n", toml_escape(&metadata.label)));
     }

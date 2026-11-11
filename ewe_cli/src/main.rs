@@ -88,6 +88,11 @@ enum Command {
         #[arg(long)]
         skip_similar: bool,
 
+        /// Skip the check that a synset with no ILI has an `ili_definition` (only applies to
+        /// lexicons whose `settings.toml` `language` is not English)
+        #[arg(long)]
+        skip_ili_definition: bool,
+
         /// Skip hypernym/instance_hypernym checks (cross-POS, instance targets, missing
         /// hypernym, hypernym/instance conflict, transitivity)
         #[arg(long)]
@@ -156,7 +161,8 @@ fn main() {
             let metadata = LexiconMetadata {
                 id_prefix: id_prefix.clone(),
                 label: label.clone(),
-                language: language.clone(),
+                // Empty means "not given": `run_xml` falls back to the project's settings.
+                language: language.clone().unwrap_or_default(),
                 email: email.clone(),
                 license: license.clone(),
                 version: version.clone(),
@@ -234,6 +240,7 @@ fn main() {
             skip_duplicate_ili,
             skip_duplicate_definitions,
             skip_similar,
+            skip_ili_definition,
             skip_hypernym,
         }) => {
             commands::validate::run(
@@ -244,6 +251,8 @@ fn main() {
                     skip_duplicate_definitions: *skip_duplicate_definitions,
                     skip_similar: *skip_similar,
                     skip_hypernym: *skip_hypernym,
+                    skip_ili_definition: *skip_ili_definition,
+                    ..Default::default()
                 },
             );
         }

@@ -633,6 +633,7 @@ mod tests {
             definition_confidence: None,
             id: None,
             ili: None,
+            ili_definition: None,
             definition: "a test synset".to_string(),
             lexfile: "noun.animal".to_string(),
             pos: Some(PosKey::new("n".to_string())),

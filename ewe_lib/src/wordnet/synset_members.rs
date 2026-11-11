@@ -23,6 +23,8 @@ pub struct MemberSynset {
     pub example : Vec<Example>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ili : Option<ILIID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ili_definition : Option<String>,
     #[serde(default, deserialize_with = "string_or_vec")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub wikidata : Vec<String>,
@@ -459,6 +461,7 @@ impl MemberSynset {
             definition: synset.definition,
             example: synset.example,
             ili: synset.ili,
+            ili_definition: synset.ili_definition,
             wikidata: synset.wikidata,
             source: synset.source,
             confidence: synset.confidence,
@@ -548,6 +551,7 @@ impl MemberSynset {
             definition: self.definition,
             example: self.example,
             ili: self.ili,
+            ili_definition: self.ili_definition,
             wikidata: self.wikidata,
             source: self.source,
             confidence: self.confidence,

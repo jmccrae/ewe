@@ -176,6 +176,28 @@ partOfSpeech: n";
     }
 
     #[test]
+    fn test_ili_definition_and_empty_ili_round_trip() {
+        let mut ss = Synset::new(PartOfSpeech::n);
+        ss.definition.push("une chose".to_owned());
+        ss.ili_definition = Some("a thing: of any kind".to_owned());
+        ss.members.push("chose".to_owned());
+        let mut out : Vec<u8> = Vec::new();
+        ss.save(&mut out).unwrap();
+        let yaml = String::from_utf8(out).unwrap();
+        assert!(yaml.contains("ili_definition:"), "{yaml}");
+        let back : Synset = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.ili_definition.as_deref(), Some("a thing: of any kind"));
+        assert_eq!(back.ili, None);
+
+        ss.ili_definition = None;
+        ss.ili = Some(ILIID::new(""));
+        let mut out : Vec<u8> = Vec::new();
+        ss.save(&mut out).unwrap();
+        let back : Synset = serde_yaml::from_str(&String::from_utf8(out).unwrap()).unwrap();
+        assert_eq!(back.ili, Some(ILIID::new("")));
+    }
+
+    #[test]
     fn test_save_synset() {
         let synset_str = "
   definition:

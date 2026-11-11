@@ -87,6 +87,10 @@ pub struct Synset {
     pub example : Vec<Example>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ili : Option<ILIID>,
+    /// A standalone English-language gloss for the concept, written as the WN-LMF `ILIDefinition`
+    /// of a synset with no ILI of its own. Independent of `definition`, which may not be English.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ili_definition : Option<String>,
     #[serde(default, deserialize_with = "string_or_vec")]
     pub wikidata : Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,6 +146,7 @@ impl Synset {
             definition : Vec::new().into(),
             example : Vec::new(),
             ili : None,
+            ili_definition : None,
             wikidata : Vec::new(),
             source : None,
             confidence : None,
@@ -396,8 +401,19 @@ impl Synset {
         write_prop_synset(w, &self.feminine, "feminine")?;
         write_prop_synset(w, &self.hypernym, "hypernym")?;
         match &self.ili {
+            // An empty ILI is a deliberate "no ILI and no ILI definition" marker, so it must be
+            // quoted: a bare `ili:` would read back as null, i.e. as "no ILI set".
+            Some(s) if s.as_str().is_empty() => {
+                write!(w, "\n  ili: ''")?;
+            },
             Some(s) => { 
                 write!(w, "\n  ili: {}", s.as_str())?;
+            },
+            None => {}
+        }
+        match &self.ili_definition {
+            Some(s) => {
+                write!(w, "\n  ili_definition: {}", escape_yaml_string(s, 4, 4))?;
             },
             None => {}
         }

@@ -81,6 +81,9 @@ An example of the usage of the automaton file is given below
     definition: a member of the genus Canis
     lexfile: noun.animal
     lemmas: [dog]
+- change_ili_definition:      # English gloss written as the XML `ILIDefinition`; needed in
+    synset: 00001740-n         # non-English lexicons for synsets with no ILI
+    ili_definition: a member of the genus Canis
 - delete_synset:
     synset: 00001740-n
     reason: "Duplicate (#123)"
@@ -156,6 +159,7 @@ Individual checks can be turned off:
 - `--skip-duplicate-ili`: duplicate ILIs
 - `--skip-duplicate-definitions`: duplicate definitions
 - `--skip-similar`: `similar` links must join an `a` and an `s` synset
+- `--skip-ili-definition`: non-English lexicons (`language` in `settings.toml`) must give every synset with no ILI an `ili_definition` (or set its `ili` to an empty string)
 - `--skip-hypernym`: hypernym/instance_hypernym checks (cross-POS, instance targets, missing hypernym, hypernym/instance conflict, transitivity)
 
 A project can also turn checks off permanently in the `[validation]` table of its
