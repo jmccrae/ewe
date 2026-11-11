@@ -34,6 +34,7 @@ pub(crate) fn run(path: &Path) {
         email: input_optional("Contact email"),
         url: input_optional("Source/homepage URL"),
         confidence: None,
+        lmf_version: Default::default(),
     };
 
     write_project_structure(&LexiconHashMapBackend::new(), &metadata, path);

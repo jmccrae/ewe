@@ -237,6 +237,7 @@ fn parse_lexicon_metadata(e: &BytesStart) -> Result<LexiconMetadata> {
         version: attr(e, "version")?.unwrap_or_default(),
         url: attr(e, "url")?.filter(|s| !s.is_empty()),
         confidence: confidence_attr(e)?,
+        lmf_version: Default::default(),
     })
 }
 
@@ -294,6 +295,7 @@ fn parse_lexical_entry<R: Read>(
 ) -> Result<()> {
     let mut lemma: Option<String> = None;
     let mut pos_letter: Option<char> = None;
+    let mut reconstructed = false;
     let mut forms: Vec<String> = Vec::new();
     let mut pronunciations: Vec<Pronunciation> = Vec::new();
     let mut senses: Vec<Sense> = Vec::new();
@@ -305,11 +307,13 @@ fn parse_lexical_entry<R: Read>(
             Event::Start(e) if e.name().as_ref() == b"Lemma" => {
                 lemma = Some(require_attr(&e, "writtenForm", "Lemma")?);
                 pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next();
+                reconstructed = is_true(attr(&e, "reconstructed")?.as_deref());
                 pronunciations = parse_pronunciations(xml, buf)?;
             }
             Event::Empty(e) if e.name().as_ref() == b"Lemma" => {
                 lemma = Some(require_attr(&e, "writtenForm", "Lemma")?);
                 pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next();
+                reconstructed = is_true(attr(&e, "reconstructed")?.as_deref());
             }
             Event::Empty(e) if e.name().as_ref() == b"Form" => {
                 forms.push(require_attr(&e, "writtenForm", "Form")?);
@@ -355,11 +359,17 @@ fn parse_lexical_entry<R: Read>(
         form: forms,
         pronunciation: pronunciations,
         confidence,
+        reconstructed,
     };
     acc.entry_index.insert((lemma.clone(), poskey.clone()), acc.entries.len());
     acc.entries.push((lemma, poskey, entry));
 
     Ok(())
+}
+
+/// WN-LMF boolean attribute (`reconstructed="true"`).
+fn is_true(v: Option<&str>) -> bool {
+    matches!(v.map(|s| s.trim().to_ascii_lowercase()).as_deref(), Some("true") | Some("1"))
 }
 
 fn parse_pronunciations<R: Read>(xml: &mut Reader<BufReader<R>>, buf: &mut Vec<u8>) -> Result<Vec<Pronunciation>> {
@@ -857,6 +867,7 @@ mod tests {
         wn.insert_entry("animal".to_string(), PosKey::new("n"), animal_entry).unwrap();
 
         let metadata = Meta {
+            lmf_version: Default::default(),
             confidence: None,
             id_prefix: "test".to_string(),
             label: "Test".to_string(),
@@ -954,6 +965,7 @@ mod tests {
         let wn = confidence_lexicon();
         assert_confidences(&wn);
         let metadata = Meta {
+            lmf_version: Default::default(),
             id_prefix: "test".to_string(),
             label: "Test".to_string(),
             language: "en".to_string(),
@@ -1158,6 +1170,7 @@ mod tests {
 
         let metadata = LexiconMetadata {
             confidence: None,
+            lmf_version: Default::default(),
             id_prefix: "oewn".to_string(),
             label: "Open English Wordnet".to_string(),
             language: "en".to_string(),
@@ -1231,5 +1244,35 @@ mod tests {
             }
         }
         assert_eq!(entries_compared, ground_truth.n_entries().unwrap());
+    }
+
+    #[test]
+    fn test_reconstructed_round_trip() {
+        use super::super::{LmfVersion, writer::write_lexicon_xml_report};
+        use crate::wordnet::{Entry, LexiconMetadata as Meta, PartOfSpeech, Sense};
+        let mut wn = LexiconHashMapBackend::new();
+        let mut synset = Synset::new(PartOfSpeech::n);
+        synset.members.push("dog".to_string());
+        synset.definition.push("d".to_string());
+        wn.insert_synset("noun.animal".to_string(), SynsetId::new("00001740-n"), synset).unwrap();
+        let mut entry = Entry::new();
+        entry.reconstructed = true;
+        entry.sense.push(Sense::new(SenseId::new("dog%1:05:00::"), SynsetId::new("00001740-n")));
+        wn.insert_entry("dog".to_string(), PosKey::new("n"), entry).unwrap();
+        let metadata = Meta {
+            lmf_version: LmfVersion::V1_5,
+            confidence: None,
+            id_prefix: "test".to_string(),
+            label: "Test".to_string(),
+            language: "en".to_string(),
+            email: None,
+            license: "l".to_string(),
+            version: "1".to_string(),
+            url: None,
+        };
+        let xml = write_lexicon_xml_report(&wn, &metadata).unwrap().bytes;
+        let (back, _) = read_lexicon_xml(LexiconHashMapBackend::new(), xml.as_slice()).unwrap();
+        let e = back.entry_by_lemma_with_pos("dog").unwrap();
+        assert!(e[0].1.reconstructed);
     }
 }

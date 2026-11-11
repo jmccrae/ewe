@@ -295,6 +295,8 @@ pub fn move_entry<L : Lexicon>(wn : &mut L,
     let links_to   = wn.sense_links_to(&lemma, &pos, &synset_id)?;
     let forms = wn.get_forms(&lemma, &pos)?;
     let pronunciations = wn.get_pronunciations(&lemma, &pos)?;
+    let reconstructed = wn.entry_by_lemma_with_pos(&lemma)?.iter()
+        .any(|(p, e)| p == &pos && e.reconstructed);
     let subcat : Vec<String> = wn.get_sense(&lemma, &synset_id)?.get(0)
         .map(|s| s.subcat.clone())
         .unwrap_or(Vec::new());
@@ -328,6 +330,9 @@ pub fn move_entry<L : Lexicon>(wn : &mut L,
     }
     for pron in pronunciations {
         wn.add_pronunciation(&lemma, &pos, pron)?;
+    }
+    if reconstructed {
+        wn.update_entry(&lemma, &pos, |e| e.reconstructed = true)?;
     }
     Ok(())
 }
@@ -681,5 +686,18 @@ mod tests {
         let sense = entry.iter().next().unwrap().sense.iter()
             .filter(|sense| sense.synset == target_synset_id).next().unwrap();
         assert_eq!(sense.id, SenseId::new("test%1:17:00::".to_owned()));
+    }
+
+    #[test]
+    fn test_move_entry_keeps_reconstructed() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut cl = ChangeList::new();
+        let pos = PosKey::new("n".to_owned());
+        let a = add_synset(&mut wn, "a".to_owned(), "noun.object".to_owned(), pos.clone(), None, &mut cl).unwrap();
+        let b = add_synset(&mut wn, "b".to_owned(), "noun.object".to_owned(), pos.clone(), None, &mut cl).unwrap();
+        add_entry(&mut wn, a.clone(), "star".to_owned(), pos.clone(), Vec::new(), None, &mut cl).unwrap();
+        wn.update_entry("star", &pos, |e| e.reconstructed = true).unwrap();
+        move_entry(&mut wn, a, b, "star".to_owned(), pos.clone(), &mut cl).unwrap();
+        assert!(wn.entry_by_lemma("star").unwrap().iter().all(|e| e.reconstructed));
     }
 }

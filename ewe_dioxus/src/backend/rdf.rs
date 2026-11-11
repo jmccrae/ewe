@@ -30,6 +30,7 @@ fn rdf_export_options(format: RdfFormat) -> RdfExportOptions {
             version: String::new(),
             url: Some("https://en-word.net/".to_owned()),
             confidence: None,
+            lmf_version: Default::default(),
         },
     }
 }

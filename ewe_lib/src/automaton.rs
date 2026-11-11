@@ -58,8 +58,10 @@ pub fn apply_automaton_with<L: Lexicon>(
                 subcat,
                 confidence,
                 entry_confidence,
+                reconstructed,
             } => {
                 let synset = synset.resolve(&last_synset_id)?;
+                let entry_pos = pos.clone();
                 last_sense_id = change_manager::add_entry(
                     wn,
                     synset.clone(),
@@ -74,6 +76,10 @@ pub fn apply_automaton_with<L: Lexicon>(
                     let sense = last_sense_id.clone()
                         .ok_or(format!("No sense was added for {} to score", lemma))?;
                     set_confidence(wn, &synset, ConfidenceTarget::Sense(sense), Some(c), changes)?;
+                }
+                if reconstructed {
+                    wn.update_entry(&lemma, &entry_pos, |e| e.reconstructed = true)
+                        .map_err(|e| e.to_string())?;
                 }
                 if let Some(c) = entry_confidence {
                     set_confidence(wn, &synset, ConfidenceTarget::Entry(lemma), Some(c), changes)?;
@@ -646,6 +652,16 @@ pub fn apply_automaton_with<L: Lexicon>(
                 })
                 .map_err(|e| e.to_string())?;
             }
+            Action::ChangeReconstructed { synset, lemma, reconstructed } => {
+                let synset = synset.resolve(&last_synset_id)?;
+                let pos = wn
+                    .pos_for_entry_synset(&lemma, &synset)
+                    .map_err(|e| e.to_string())?
+                    .ok_or(format!("Entry {} not found in synset {}", lemma, synset.as_str()))?;
+                wn.update_entry(&lemma, &pos, |e| e.reconstructed = reconstructed)
+                    .map_err(|e| e.to_string())?;
+                last_synset_id = Some(synset);
+            }
             Action::ChangeAdjposition { synset, sense, adjposition } => {
                 let synset = synset.resolve(&last_synset_id)?;
                 let sense = sense.resolve(&last_sense_id, wn, &synset)?;
@@ -987,6 +1003,10 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         entry_confidence: Option<f64>,
+        /// Mark the entry as a reconstructed (unattested) form, shown with a leading `*`.
+        #[serde(default)]
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        reconstructed: bool,
     },
     /// Remove `lemma` from `synset`, deleting its sense there.
     #[serde(rename = "delete_entry")]
@@ -1099,6 +1119,14 @@ pub enum Action {
         #[serde(default)]
         #[serde(skip_serializing_if = "Option::is_none")]
         adjposition: Option<String>,
+    },
+    /// Mark `lemma` (in `synset`) as a reconstructed (unattested) form, or clear the mark with
+    /// `reconstructed: false`. The lemma is stored without any asterisk.
+    #[serde(rename = "change_reconstructed")]
+    ChangeReconstructed {
+        synset: SynsetRef,
+        lemma: String,
+        reconstructed: bool,
     },
     /// Add a usage example to `synset`, with an optional `source`.
     #[serde(rename = "add_example")]
@@ -1363,6 +1391,9 @@ impl Action {
             Action::ChangeSource { synset, source } => {
                 format!("Changed source of {} to \"{}\"", synset.as_str(), source)
             }
+            Action::ChangeReconstructed { synset, lemma, reconstructed } => format!(
+                "Marked {} in {} as {}", lemma, synset.as_str(),
+                if *reconstructed { "reconstructed" } else { "attested" }),
             Action::ChangeAdjposition { synset, adjposition, .. } => match adjposition {
                 Some(a) => format!("Changed adjective position in {} to {}", synset.as_str(), a),
                 None => format!("Cleared adjective position in {}", synset.as_str()),
@@ -1646,6 +1677,7 @@ mod tests {
             Action::AddEntry {
                 confidence: None,
                 entry_confidence: None,
+                reconstructed: false,
                 synset: SynsetRef::id("00001740-n"),
                 lemma: "bar".to_string(),
                 pos: PosKey::new("n".to_string()),
@@ -1853,6 +1885,24 @@ mod tests {
             .into_iter()
             .map(|w| w.0)
             .collect()
+    }
+
+    #[test]
+    fn test_change_reconstructed_sets_and_clears() {
+        let (mut wn, dog, _animal, _cat) = confidence_fixture();
+        let flag = |wn: &LexiconHashMapBackend| {
+            wn.entry_by_lemma_with_pos("dog").unwrap().iter().any(|(_, e)| e.reconstructed)
+        };
+        let set = |wn: &mut LexiconHashMapBackend, v: bool| {
+            let yaml = format!(
+                "- change_reconstructed:\n    synset: {dog}\n    lemma: dog\n    reconstructed: {v}\n");
+            apply_automaton(parse_actions(&yaml), wn, &mut ChangeList::new())
+        };
+        assert!(!flag(&wn));
+        set(&mut wn, true).unwrap();
+        assert!(flag(&wn));
+        set(&mut wn, false).unwrap();
+        assert!(!flag(&wn));
     }
 
     #[test]

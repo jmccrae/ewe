@@ -21,6 +21,10 @@ pub struct EditableLemmasProps {
     pub adjposition: Vec<(String, String)>,
     /// Called with (lemma, draft) when a lemma's adjective position changes.
     pub on_adjposition_changed: EventHandler<(String, String)>,
+    /// (lemma, reconstructed) flags, keyed by lemma. A lemma with no entry is not reconstructed.
+    pub reconstructed: Vec<(String, bool)>,
+    /// Called with (lemma, reconstructed) when a lemma's reconstructed checkbox changes.
+    pub on_reconstructed_changed: EventHandler<(String, bool)>,
 }
 
 /// The synset's member lemmas, editable as a compact inline list of text tokens (unlike
@@ -39,6 +43,8 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
     let on_confidence_changed = props.on_confidence_changed;
     let adjposition = props.adjposition;
     let on_adjposition_changed = props.on_adjposition_changed;
+    let reconstructed = props.reconstructed;
+    let on_reconstructed_changed = props.on_reconstructed_changed;
 
     // The index currently being dragged, so `ondrop` on another row knows what to move.
     // Reorders are resolved locally (not via the HTML5 DataTransfer payload) since it's the
@@ -166,6 +172,19 @@ pub fn EditableLemmas(props: EditableLemmasProps) -> Element {
                                 on_drafts_changed.call(drafts);
                             }
                         },
+                    }
+                    label {
+                        class: "reconstructed-toggle",
+                        title: "Reconstructed (unattested) form, shown with a leading *",
+                        input {
+                            r#type: "checkbox",
+                            checked: reconstructed.iter().any(|(l, r)| l == lemma.trim() && *r),
+                            onchange: {
+                                let lemma = lemma.trim().to_string();
+                                move |e: FormEvent| on_reconstructed_changed.call((lemma.clone(), e.checked()))
+                            },
+                        }
+                        "*"
                     }
                     if let Some((_, current)) = adjposition.iter().find(|(l, _)| l == lemma.trim()) {
                         select {
