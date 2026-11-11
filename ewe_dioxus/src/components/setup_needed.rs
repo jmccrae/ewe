@@ -60,6 +60,9 @@ fn SetupNeededDetail(
                 "The configured " code { "wordnet_source" } " folder ('{source}') could not be "
                 "loaded."
             }
+            if let Some(error) = &status.error {
+                p { strong { "Error: " } "{error}" }
+            }
             p { "Check the path in " code { "settings.toml" } " and restart the server." }
         } else {
             p {
