@@ -58,8 +58,9 @@ const SCHEMA_VERSION_KEY: &'static str = "version";
 /// changes**, so `open` reports a clear "rebuild" error rather than garbled data.
 ///
 /// History: 0 = unversioned (anything before this table existed); 1 = confidence scores (#48);
-/// 2 = `Synset::ili_definition` (#33).
-pub const SCHEMA_VERSION: u32 = 2;
+/// 2 = `Synset::ili_definition` (#33); 3 = script-aware entry sections (#34), which changes
+/// which section a lemma is filed under.
+pub const SCHEMA_VERSION: u32 = 3;
 
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
@@ -97,7 +98,8 @@ impl ReDBLexicon {
                 });
             }
         }
-        // Intialize entries as '0' and 'a'..'z'
+        // Intialize entries as '0' and 'a'..'z', plus any other section already in the database
+        // (non-Latin scripts, see `section::entry_key`)
         //
         let mut entries = HashMap::new();
         for c in INITIAL_CHARS.iter() {
@@ -105,6 +107,27 @@ impl ReDBLexicon {
             // Create an entries for each initial character
             //
             entries.insert(*c, ReDBEntries::new(txn_manager.clone(), *c));
+        }
+        {
+            let mut manager = txn_manager.lock().unwrap();
+            let txn = manager.begin_read()?;
+            let table = txn.open_table(ENTRIES_TABLE)?;
+            let mut next = '\0';
+            loop {
+                let first = table.range((next, String::new())..)?.next();
+                let section = match first {
+                    Some(kv) => kv?.0.value().0,
+                    None => break,
+                };
+                entries
+                    .entry(section)
+                    .or_insert_with(|| ReDBEntries::new(txn_manager.clone(), section));
+                next = match section as u32 {
+                    0xD7FF => '\u{E000}',
+                    0x10FFFF => break,
+                    n => char::from_u32(n + 1).unwrap(),
+                };
+            }
         }
         // Read all the lexnames from the DB
         //
@@ -1246,6 +1269,23 @@ mod tests {
         assert_eq!(pos_order, vec!["a".to_string(), "n".to_string(), "s".to_string()]);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_open_finds_non_latin_sections() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_redb_sections_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("test.redb");
+        let mut lexicon = ReDBLexicon::create(&db_path, 1024 * 1024).unwrap();
+        lexicon.insert_entry("σοφία".to_string(), PosKey::new("n".to_string()), Entry::new()).unwrap();
+        lexicon.insert_entry("漢字".to_string(), PosKey::new("n".to_string()), Entry::new()).unwrap();
+        drop(lexicon);
+        let lexicon = ReDBLexicon::open(&db_path, 1024 * 1024).unwrap();
+        assert_eq!(lexicon.n_entries().unwrap(), 2);
+        assert_eq!(lexicon.entry_by_lemma("σοφία").unwrap().len(), 1);
+        assert_eq!(lexicon.entry_by_lemma("漢字").unwrap().len(), 1);
+        drop(lexicon);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

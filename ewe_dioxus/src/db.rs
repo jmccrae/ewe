@@ -123,17 +123,69 @@ pub fn open_lexicon_with_progress<Pr: Progress>(
     progress: &mut Pr,
 ) -> Result<ReDBLexicon, Box<dyn std::error::Error>> {
     let cache_size_bytes = settings.lexicon_cache_mb * 1024 * 1024;
+    let rebuild = |progress: &mut Pr, source: &str| -> Result<ReDBLexicon, Box<dyn std::error::Error>> {
+        let lexicon = ReDBLexicon::create(&settings.database, cache_size_bytes)?;
+        Ok(lexicon.load(source, progress)?)
+    };
     if let Some(source) = &settings.wordnet_source {
         if is_stale(&settings.database, source, settings.disable_auto_reload)? {
             eprintln!(
                 "Wordnet source at {} is newer than {}, rebuilding database",
                 source, settings.database
             );
-            let lexicon = ReDBLexicon::create(&settings.database, cache_size_bytes)?;
-            return Ok(lexicon.load(source, progress)?);
+            return rebuild(progress, source);
         }
     }
-    Ok(ReDBLexicon::open(&settings.database, cache_size_bytes)?)
+    match open_existing(&settings.database, cache_size_bytes) {
+        Ok(lexicon) => match (&settings.wordnet_source, lexicon.n_entries()) {
+            (Some(source), Ok(0)) => {
+                eprintln!("Database {} contains no entries, rebuilding from {}", settings.database, source);
+                drop(lexicon);
+                rebuild(progress, source)
+            }
+            _ => Ok(lexicon),
+        },
+        Err(e) if e.is_database_locked() => Err(format!(
+            "The database {} is in use by another process (is another ewe server still running?). \
+             Stop it and try again.",
+            settings.database
+        )
+        .into()),
+        Err(e) => match &settings.wordnet_source {
+            Some(source) => {
+                // Outdated schema or corrupted file: keep the old file as a backup (it may hold
+                // unsaved edits) and rebuild from the YAML source.
+                let backup = format!("{}.bak", settings.database);
+                eprintln!(
+                    "Could not use database {} ({}); moving it to {} and rebuilding from {}",
+                    settings.database, e, backup, source
+                );
+                std::fs::rename(&settings.database, &backup)?;
+                rebuild(progress, source)
+            }
+            None => Err(format!(
+                "Could not use database {}: {}. No wordnet_source is configured to rebuild it from.",
+                settings.database, e
+            )
+            .into()),
+        },
+    }
+}
+
+/// `ReDBLexicon::open`, waiting a few seconds if the database is locked: after a rebuild of the
+/// dev server the previous process can still be shutting down while the new one starts.
+fn open_existing(database: &str, cache_size_bytes: usize) -> ewe_lib::wordnet::Result<ReDBLexicon> {
+    let mut attempts = 0;
+    loop {
+        match ReDBLexicon::open(database, cache_size_bytes) {
+            Err(e) if e.is_database_locked() && attempts < 10 => {
+                attempts += 1;
+                eprintln!("Database {} is locked, retrying ({}/10)", database, attempts);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            r => return r,
+        }
+    }
 }
 
 /// True if the database at `database` doesn't exist, or if `disable_auto_reload` is unset
@@ -433,6 +485,53 @@ mod tests {
         assert!(progress.started_with.is_empty());
         assert_eq!(progress.incremented, 0);
         assert_eq!(progress.finished, 0);
+    }
+
+    fn lexicon_settings(scratch: &ScratchDir, with_source: bool) -> EweSettings {
+        let mut settings = EweSettings::default();
+        settings.database = scratch.0.join("wn.db").to_string_lossy().to_string();
+        if with_source {
+            let source = scratch.0.join("yaml");
+            std::fs::create_dir_all(&source).unwrap();
+            std::fs::write(source.join("entries-a.yaml"), "{}\n").unwrap();
+            settings.wordnet_source = Some(source.to_string_lossy().to_string());
+        }
+        settings
+    }
+
+    #[test]
+    fn test_corrupt_database_is_backed_up_and_rebuilt() {
+        let scratch = ScratchDir::new("lexicon-corrupt");
+        let mut settings = lexicon_settings(&scratch, true);
+        settings.disable_auto_reload = true;
+        std::fs::write(&settings.database, vec![0xAB; 4096]).unwrap();
+        let lexicon = open_lexicon_with_progress(&settings, &mut Recorder::default()).unwrap();
+        assert_eq!(lexicon.n_entries().unwrap(), 0);
+        drop(lexicon);
+        assert!(Path::new(&format!("{}.bak", settings.database)).exists());
+        // The rebuilt database opens normally
+        drop(open_lexicon_with_progress(&settings, &mut Recorder::default()).unwrap());
+    }
+
+    #[test]
+    fn test_corrupt_database_without_source_is_an_error() {
+        let scratch = ScratchDir::new("lexicon-corrupt-nosrc");
+        let settings = lexicon_settings(&scratch, false);
+        std::fs::write(&settings.database, vec![0xAB; 4096]).unwrap();
+        let err = open_lexicon_with_progress(&settings, &mut Recorder::default()).err().unwrap();
+        assert!(err.to_string().contains("No wordnet_source"), "{err}");
+        assert!(Path::new(&settings.database).exists());
+    }
+
+    #[test]
+    fn test_locked_database_gives_clear_error() {
+        let scratch = ScratchDir::new("lexicon-locked");
+        let settings = lexicon_settings(&scratch, true);
+        let _held = ReDBLexicon::create(&settings.database, 1024 * 1024).unwrap();
+        let mut settings = settings;
+        settings.disable_auto_reload = true;
+        let err = open_lexicon_with_progress(&settings, &mut Recorder::default()).err().unwrap();
+        assert!(err.to_string().contains("in use by another process"), "{err}");
     }
 
     #[test]

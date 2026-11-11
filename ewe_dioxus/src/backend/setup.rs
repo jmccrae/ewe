@@ -25,6 +25,9 @@ pub struct SetupStatus {
     pub configured: bool,
     pub settings_toml_exists: bool,
     pub wordnet_source: Option<String>,
+    /// Why the lexicon failed to open, if it did
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[cfg_attr(not(feature = "desktop"), get("/api/setup_status"))]
@@ -34,6 +37,10 @@ pub async fn get_setup_status() -> Result<SetupStatus> {
         configured: crate::db::read_lexicon().is_ok(),
         settings_toml_exists: std::path::Path::new("settings.toml").exists(),
         wordnet_source: settings.wordnet_source.clone(),
+        #[cfg(any(feature = "server", feature = "desktop"))]
+        error: crate::LEXICON_ERROR.lock().unwrap().clone(),
+        #[cfg(not(any(feature = "server", feature = "desktop")))]
+        error: None,
     })
 }
 

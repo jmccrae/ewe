@@ -179,6 +179,10 @@ static DOWNLOADS: SyncLazy<DownloadsConfig> = SyncLazy::new(|| {
 // to open at startup isn't a permanent dead end: `backend::setup::configure_wordnet_source` can
 // hot-swap a freshly-opened lexicon into the `Some` slot later, without ever needing to
 // re-touch this `Lazy` itself (which only ever initializes once).
+/// Why the lexicon failed to open at startup (shown by the setup screen), if it did.
+#[cfg(any(feature = "server", feature = "desktop"))]
+static LEXICON_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 #[cfg(any(feature = "server", feature = "desktop"))]
 static LEXICON: SyncLazy<RwLock<Option<ReDBLexicon>>> = SyncLazy::new(|| {
     let settings = SETTINGS.get().read().unwrap();
@@ -191,6 +195,7 @@ static LEXICON: SyncLazy<RwLock<Option<ReDBLexicon>>> = SyncLazy::new(|| {
             Ok(lexicon) => Some(lexicon),
             Err(e) => {
                 eprintln!("Failed to open lexicon: {}", e);
+                *LEXICON_ERROR.lock().unwrap() = Some(e.to_string());
                 None
             }
         }

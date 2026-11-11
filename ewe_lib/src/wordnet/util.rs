@@ -200,6 +200,14 @@ pub enum LexiconError {
     SchemaVersionMismatch { path: String, found: u32, expected: u32 },
 }
 
+#[cfg(feature="redb")]
+impl LexiconError {
+    /// True if the database file is locked by another open handle (another process, or this one)
+    pub fn is_database_locked(&self) -> bool {
+        matches!(self, LexiconError::DBDatabaseError(redb::DatabaseError::DatabaseAlreadyOpen))
+    }
+}
+
 #[derive(Error,Debug)]
 pub enum LexiconSaveError {
     #[error("Could not save WordNet: {0}")]
