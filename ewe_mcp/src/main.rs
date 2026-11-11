@@ -38,11 +38,23 @@ struct Cli {
 /// it. Small and self-contained enough that it's duplicated in miniature from `ewe_cli`'s
 /// `locate_wordnet` rather than shared via `ewe_lib` - the two callers want different
 /// error-reporting shapes (CLI eprintln+exit vs. an MCP startup error).
+/// Whether the directory contains any `entries-*.yaml` file (sections depend on the language)
+fn has_entries_file(path: &Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|d| {
+            d.flatten().any(|f| {
+                let n = f.file_name().to_string_lossy().to_string();
+                n.starts_with("entries-") && n.ends_with(".yaml")
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBackend), String> {
     let path = if let Some(path) = path {
-        if path.join("entries-a.yaml").exists() {
+        if has_entries_file(&path) {
             path.to_string_lossy().to_string()
-        } else if path.join("src/yaml/entries-a.yaml").exists() {
+        } else if has_entries_file(&path.join("src/yaml")) {
             path.join("src/yaml/").to_string_lossy().to_string()
         } else {
             return Err(format!(
@@ -50,9 +62,9 @@ fn locate_wordnet(path: Option<PathBuf>) -> Result<(String, LexiconHashMapBacken
                 path.to_string_lossy()
             ));
         }
-    } else if Path::new("./src/yaml/entries-a.yaml").exists() {
+    } else if has_entries_file(Path::new("./src/yaml")) {
         "./src/yaml/".to_owned()
-    } else if Path::new("./entries-a.yaml").exists() {
+    } else if has_entries_file(Path::new(".")) {
         "./".to_owned()
     } else {
         return Err("Could not find a WordNet - pass --wordnet PATH".to_string());

@@ -198,6 +198,9 @@ impl Lexicon for ReDBLexicon {
     fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()> {
         for entry in entries.into_entries()? {
             let (lemma, pos, entry) = entry?;
+            if !self.entries.contains_key(&key) {
+                self.entries.insert(key, ReDBEntries::new(self.txn_manager.clone(), key));
+            }
             if let Some(e) = self.entries.get_mut(&key) {
                 e.insert_entry(lemma, pos, entry)?;
             }
