@@ -392,7 +392,10 @@ pub async fn autocomplete(query: String, max_results: Option<usize>) -> Result<V
     }
 
     let mut results = results.into_iter().take(max_results).collect::<Vec<_>>();
-    results.sort_by(|a, b| match a.display.to_lowercase().cmp(&b.display.to_lowercase()) {
+    // Lemmas are already ranked, closest match first, and stay that way, ahead of the synset
+    // and ILI ids, which are listed in alphabetical order.
+    let n_lemmas = results.iter().take_while(|r| r.kind == SearchResultKind::Lemma).count();
+    results[n_lemmas..].sort_by(|a, b| match a.display.to_lowercase().cmp(&b.display.to_lowercase()) {
         std::cmp::Ordering::Equal => a.display.cmp(&b.display).reverse(),
         x => x,
     });
