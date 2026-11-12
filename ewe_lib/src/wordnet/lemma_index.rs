@@ -198,8 +198,11 @@ impl LemmaIndex {
                 break;
             }
         }
-        self.push_tier(exact, &mut seen, &mut out);
-        self.push_tier(prefix, &mut seen, &mut out);
+        // An exact match in the case that was typed ("Smith" for "Smith", "smith" for "smith")
+        // comes before the same word in another case.
+        let typed = query.trim();
+        self.push_tier(exact, &mut seen, &mut out, |i| (self.lemmas[i as usize] != typed) as usize);
+        self.push_tier(prefix, &mut seen, &mut out, |_| 0);
 
         // Tier 3: every query word is the prefix of some word of the lemma
         if out.len() < limit {
@@ -217,7 +220,16 @@ impl LemmaIndex {
                     cands.push(*i);
                 }
             }
-            self.push_tier(cands, &mut seen, &mut out);
+            // Closest to the query first: a lemma containing the query as a whole word
+            // ("Adam Smith") before one where it only starts a longer word ("Smithfield",
+            // "Agropyron smithii"), then the earlier the word the better, then shorter lemmas.
+            let rank = |i: u32| {
+                let ws = &self.words[i as usize];
+                let whole = ws.iter().position(|w| w == first);
+                let start = ws.iter().position(|w| w.starts_with(first.as_str())).unwrap_or(0);
+                (whole.is_none() as usize) * 1000 + whole.unwrap_or(start)
+            };
+            self.push_tier(cands, &mut seen, &mut out, rank);
         }
 
         // Tier 4: typos
@@ -273,11 +285,14 @@ impl LemmaIndex {
             .collect()
     }
 
-    fn push_tier(&self, mut ids: Vec<u32>, seen: &mut HashSet<u32>, out: &mut Vec<u32>) {
+    /// Append a tier of matches, ordered by `rank`, then by length (the closer in length to
+    /// the query, the better) and finally alphabetically
+    fn push_tier(&self, mut ids: Vec<u32>, seen: &mut HashSet<u32>, out: &mut Vec<u32>,
+                 rank: impl Fn(u32) -> usize) {
         ids.sort_by(|a, b| {
-            self.lemmas[*a as usize]
-                .len()
-                .cmp(&self.lemmas[*b as usize].len())
+            rank(*a)
+                .cmp(&rank(*b))
+                .then(self.lemmas[*a as usize].len().cmp(&self.lemmas[*b as usize].len()))
                 .then(self.lemmas[*a as usize].cmp(&self.lemmas[*b as usize]))
         });
         for i in ids {
@@ -370,6 +385,23 @@ mod tests {
         // prefix before word match before fuzzy
         let r = i.search("ca", 10);
         assert_eq!(&r[..2], &["cat".to_string(), "café".to_string()]);
+    }
+
+    #[test]
+    fn test_closest_matches_first() {
+        let i = LemmaIndex::from_lemmas(
+            ["Adam Smith", "Agropyron smithii", "Smith", "smith", "smithy", "Smithfield", "Will Smith",
+             "Smith Sound", "blacksmith", "goldsmith"]
+                .iter().map(|s| s.to_string()).collect(),
+        );
+        // The typed case first, then longer lemmas starting with the query, then lemmas with the
+        // query as a whole word (earlier word first), then those where it only begins a word.
+        assert_eq!(
+            i.search("smith", 20),
+            vec!["smith", "Smith", "smithy", "Smithfield", "Smith Sound", "Adam Smith", "Will Smith",
+                 "Agropyron smithii"]
+        );
+        assert_eq!(&i.search("Smith", 2), &["Smith", "smith"]);
     }
 
     #[test]

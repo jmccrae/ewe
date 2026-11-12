@@ -1274,20 +1274,13 @@ pub trait Lexicon: Sized {
         Ok(index.search(query, max_results.unwrap_or(usize::MAX)))
     }
 
-    /// Autocomplete: the fast exact-prefix matches first, topped up with fuzzy matches
-    /// (see `lemma_search`) only if there are fewer than `max_results` of them.
+    /// Autocomplete: the best matches for what has been typed, closest first (see
+    /// `lemma_search`). Queries with nothing to normalise (only punctuation) fall back to a
+    /// plain prefix lookup.
     fn lemma_complete(&self, query: &str, max_results: usize) -> Result<Vec<String>> {
-        let mut results = self.lemma_by_prefix(query, Some(max_results))?;
-        if results.len() < max_results {
-            let mut seen: std::collections::HashSet<String> = results.iter().cloned().collect();
-            for l in self.lemma_search(query, Some(max_results))? {
-                if results.len() >= max_results {
-                    break;
-                }
-                if seen.insert(l.clone()) {
-                    results.push(l);
-                }
-            }
+        let results = self.lemma_search(query, Some(max_results))?;
+        if results.is_empty() {
+            return self.lemma_by_prefix(query, Some(max_results));
         }
         Ok(results)
     }
@@ -1605,6 +1598,24 @@ mod tests {
         assert_eq!(lexicon.lemma_search("cafe", None).unwrap(), vec!["café"]);
         assert_eq!(lexicon.lemma_complete("ice", 5).unwrap(), vec!["ice-cream"]);
         assert_eq!(lexicon.lemma_complete("icecrem", 5).unwrap(), vec!["ice-cream"]);
+    }
+
+    #[test]
+    fn test_lemma_complete_ranks_closest_matches_first() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let pos = PosKey::new("n".to_string());
+        for lemma in ["Adam Smith", "Agropyron smithii", "smith", "Smith", "smithy", "Smithfield"] {
+            lexicon.insert_entry(lemma.to_string(), pos.clone(), Entry::new()).unwrap();
+        }
+        // not alphabetical: "Adam Smith" and "Agropyron smithii" are further from "smith"
+        assert_eq!(
+            lexicon.lemma_complete("smith", 100).unwrap(),
+            vec!["smith", "Smith", "smithy", "Smithfield", "Adam Smith", "Agropyron smithii"]
+        );
+        assert_eq!(lexicon.lemma_complete("smith", 2).unwrap(), vec!["smith", "Smith"]);
+        // nothing to normalise: plain prefix lookup
+        lexicon.insert_entry("-ish".to_string(), pos.clone(), Entry::new()).unwrap();
+        assert_eq!(lexicon.lemma_complete("-i", 5).unwrap(), vec!["-ish"]);
     }
 
     #[test]
