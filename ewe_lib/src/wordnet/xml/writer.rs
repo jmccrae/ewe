@@ -167,7 +167,7 @@ pub fn write_lexicon_xml_subset_report(
     }
 
     for synset in &synsets_sorted {
-        write_synset(&mut writer, prefix, synset, &metadata.language)?;
+        write_synset(&mut writer, prefix, synset, &metadata.language, version)?;
     }
 
     for (id, subcategorization_frame) in frames {
@@ -180,6 +180,16 @@ pub fn write_lexicon_xml_subset_report(
     writer.write_event(Event::End(BytesEnd::new("Lexicon")))?;
     writer.write_event(Event::End(BytesEnd::new("LexicalResource")))?;
 
+    if version < LmfVersion::V1_5 {
+        let n = synsets.iter().filter(|s| s.part_of_speech.is_new_in_lmf_1_5()).count();
+        if n > 0 {
+            warnings.push(format!(
+                "{n} synset(s) with a part of speech introduced in WN-LMF 1.5 (e.g. names, `e`) \
+                 were exported with the closest WN-LMF {} value (use WN-LMF 1.5 to keep them)",
+                version.as_str()
+            ));
+        }
+    }
     if !version.supports_reconstructed() {
         let n = entries.values().filter(|a| a.representative.reconstructed).count();
         if n > 0 {
@@ -207,7 +217,7 @@ fn write_lexical_entry<W: std::io::Write>(
     push_confidence(&mut entry, acc.representative.entry_confidence);
     writer.write_event(Event::Start(entry))?;
 
-    let pos = poskey.to_part_of_speech().map(|p| p.value()).unwrap_or("n");
+    let pos = poskey.to_part_of_speech().map(|pos| version.pos_code(pos)).unwrap_or("n");
     let mut lemma_el = BytesStart::new("Lemma");
     lemma_el.push_attribute(("writtenForm", lemma));
     lemma_el.push_attribute(("partOfSpeech", pos));
@@ -353,6 +363,7 @@ fn write_synset<W: std::io::Write>(
     prefix: &str,
     synset: &MemberSynset,
     language: &str,
+    version: LmfVersion,
 ) -> Result<()> {
     let mut el = BytesStart::new("Synset");
     el.push_attribute(("id", ids::synset_xml_id(prefix, &synset.id).as_str()));
@@ -372,7 +383,7 @@ fn write_synset<W: std::io::Write>(
     if !members.is_empty() {
         el.push_attribute(("members", members.as_str()));
     }
-    el.push_attribute(("partOfSpeech", synset.part_of_speech.value()));
+    el.push_attribute(("partOfSpeech", version.pos_code(synset.part_of_speech)));
     el.push_attribute(("lexfile", synset.lexname.as_str()));
     if let Some(source) = &synset.source {
         el.push_attribute(("dc:source", source.as_str()));

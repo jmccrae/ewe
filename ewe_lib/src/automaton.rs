@@ -154,8 +154,8 @@ pub fn apply_automaton_with<L: Lexicon>(
                 let poses = wn.pos_for_lexfile(&lexfile).map_err(|e| e.to_string())?;
                 let pos = if let Some(pos) = pos {
                     match pos.to_part_of_speech() {
-                        Some(p) => {
-                            if !poses.iter().any(|p2| p == *p2) {
+                        Some(pos_value) => {
+                            if !poses.iter().any(|p2| pos_value == *p2) {
                                 return Err(format!(
                                     "Wrong POS for lexicographer file {} : {}",
                                     lexfile,

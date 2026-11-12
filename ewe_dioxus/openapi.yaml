@@ -247,14 +247,19 @@ components:
     PosKey:
       type: string
       description: >
-        A part-of-speech bucket key, normally a single letter (n/v/a/r/s);
+        A part-of-speech bucket key, normally a single letter (n/v/a/r/s/e/...);
         may have a numeric suffix (e.g. "n1") for a synset's non-first
         homograph entry.
       example: "n"
     PartOfSpeech:
       type: string
-      enum: [n, v, a, r, s]
-      description: noun/verb/adjective/adverb/satellite-adjective.
+      enum: [n, v, a, r, s, c, p, x, u, z, b, d, e, h, i, l, m, o, y]
+      description: >
+        WN-LMF 1.5 part of speech: noun/verb/adjective/adverb/satellite-adjective,
+        and conjunction (c), adposition (p), other (x), unknown (u), phrase (z; the
+        deprecated "t" is read as z), number (b), determiner (d), proper noun/name (e),
+        auxiliary (h), pronoun (i), particle (l), punctuation (m), subordinating
+        conjunction (o) and symbol (y).
 
     SearchResultKind:
       type: string

@@ -57,3 +57,10 @@ adjectives and adverbs are each a single catch-all file.
 - `adj.pert` — relational adjectives (pertains to a noun, e.g. "presidential")
 - `adj.ppl` — participial adjectives
 - `adv.all` — general adverbs
+
+## Names
+
+Names (proper nouns, part of speech `e`, ids ending in `-e`) are kept in their own lexfiles,
+`name.*` (e.g. `name.person`, `name.location`, `name.animal`). Each uses the sense key lexfile
+number of the `noun.*` file of the same name, so `name.location` sense keys contain `15`. Name
+entries live in `entries-<LETTER>-name.yaml`, apart from the common vocabulary.

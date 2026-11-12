@@ -51,6 +51,25 @@ pub(crate) fn key_to_name(key: char) -> String {
     }
 }
 
+/// The suffix of the files holding name entries (part of speech `e`): `entries-A-name.yaml`
+pub(crate) const NAME_SUFFIX: &str = "-name";
+
+/// The file name stem (`entries-<stem>.yaml`) of the file holding the names of a section.
+/// Names are kept apart from the common vocabulary, and their files use the upper case letter.
+pub(crate) fn name_file_stem(key: char) -> String {
+    let base = if key == CJK_KEY {
+        "cjk".to_string()
+    } else {
+        key.to_uppercase().collect()
+    };
+    format!("{base}{NAME_SUFFIX}")
+}
+
+/// Whether an entries file stem (`A-name`) is a file of names
+pub(crate) fn is_name_file_stem(stem: &str) -> bool {
+    stem.ends_with(NAME_SUFFIX)
+}
+
 /// Inverse of `key_to_name`
 pub(crate) fn name_to_key(name: &str) -> Option<char> {
     if name == "cjk" {
@@ -103,5 +122,16 @@ mod tests {
         assert_eq!(name_to_key("σ"), Some('σ'));
         assert_eq!(name_to_key("ab"), None);
         assert_eq!(name_to_key(&key_to_name('e')), Some('e'));
+    }
+
+    #[test]
+    fn test_name_files() {
+        assert_eq!(name_file_stem('a'), "A-name");
+        assert_eq!(name_file_stem('0'), "0-name");
+        assert_eq!(name_file_stem(CJK_KEY), "cjk-name");
+        assert_eq!(name_file_stem('σ'), "Σ-name");
+        assert!(is_name_file_stem("A-name"));
+        assert!(!is_name_file_stem("a"));
+        assert_eq!(name_to_key("A-name"), None);
     }
 }

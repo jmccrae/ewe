@@ -558,6 +558,10 @@ impl SynsetId {
     pub fn new(s : &str) -> SynsetId { SynsetId(s.to_string()) }
     pub fn new_owned(s : String) -> SynsetId { SynsetId(s) }
     pub fn as_str(&self) -> &str { &self.0 }
+    /// The part of speech this id ends with (`00001740-n`, `08337853-e`)
+    pub fn part_of_speech(&self) -> Option<PartOfSpeech> {
+        self.0.rsplit_once('-').and_then(|(_, pos)| PartOfSpeech::from_code(pos))
+    }
 }
 
 impl AsRef<str> for SynsetId {

@@ -241,30 +241,15 @@ fn parse_lexicon_metadata(e: &BytesStart) -> Result<LexiconMetadata> {
     })
 }
 
-fn part_of_speech_from_str(s: &str) -> Option<PartOfSpeech> {
-    match s {
-        "n" => Some(PartOfSpeech::n),
-        "v" => Some(PartOfSpeech::v),
-        "a" => Some(PartOfSpeech::a),
-        "r" => Some(PartOfSpeech::r),
-        "s" => Some(PartOfSpeech::s),
-        _ => None,
-    }
+/// The deprecated `t` is stored as `z`; other letters are kept as they are
+fn canonical_pos_letter(c: char) -> char {
+    PartOfSpeech::from_letter(c).map_or(c, |pos| pos.value().chars().next().unwrap_or(c))
 }
 
 /// `Synset/@lexfile` is an OEWN/ewe convention (used to split `entries.yaml` files by
 /// lexicographer file), not something the WN-LMF schema itself requires - so a synset without
 /// one is still a valid document. When it's missing, fall back to one lexfile per part of
 /// speech rather than failing the import.
-fn default_lexname(pos: &PartOfSpeech) -> &'static str {
-    match pos {
-        PartOfSpeech::n => "noun.all",
-        PartOfSpeech::v => "verb.all",
-        PartOfSpeech::a | PartOfSpeech::s => "adj.all",
-        PartOfSpeech::r => "adv.all",
-    }
-}
-
 /// A `Synset` with zero definitions can't round-trip through YAML: `Synset::save` only emits
 /// the `definition:` key when the list is non-empty, but the field has no `#[serde(default)]`,
 /// so re-loading it fails with "missing field `definition`". A single empty string is already
@@ -306,13 +291,13 @@ fn parse_lexical_entry<R: Read>(
             Event::Eof => return Err(XmlImportError::Malformed("unexpected EOF inside <LexicalEntry>".to_string())),
             Event::Start(e) if e.name().as_ref() == b"Lemma" => {
                 lemma = Some(require_attr(&e, "writtenForm", "Lemma")?);
-                pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next();
+                pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next().map(canonical_pos_letter);
                 reconstructed = is_true(attr(&e, "reconstructed")?.as_deref());
                 pronunciations = parse_pronunciations(xml, buf)?;
             }
             Event::Empty(e) if e.name().as_ref() == b"Lemma" => {
                 lemma = Some(require_attr(&e, "writtenForm", "Lemma")?);
-                pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next();
+                pos_letter = require_attr(&e, "partOfSpeech", "Lemma")?.chars().next().map(canonical_pos_letter);
                 reconstructed = is_true(attr(&e, "reconstructed")?.as_deref());
             }
             Event::Empty(e) if e.name().as_ref() == b"Form" => {
@@ -491,9 +476,9 @@ fn build_synset(
     let id_attr = require_attr(e, "id", "Synset")?;
     let id = SynsetId::new_owned(ids::strip_prefix_id(prefix, &id_attr));
     let pos_attr = require_attr(e, "partOfSpeech", "Synset")?;
-    let pos = part_of_speech_from_str(&pos_attr)
+    let pos = PartOfSpeech::from_code(&pos_attr)
         .ok_or_else(|| XmlImportError::Malformed(format!("Synset {id_attr}: unrecognized partOfSpeech {pos_attr:?}")))?;
-    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| default_lexname(&pos).to_string());
+    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| pos.default_lexname().to_string());
 
     let mut synset = Synset::new(pos);
     if let Some(ili) = attr(e, "ili")? {
@@ -699,7 +684,7 @@ mod tests {
         );
     }
 
-    /// `Synset/@lexfile` isn't part of the WN-LMF schema itself (see `default_lexname`), so a
+    /// `Synset/@lexfile` isn't part of the WN-LMF schema itself (see `PartOfSpeech::default_lexname`), so a
     /// document that omits it must still import cleanly, landing each synset in a fallback
     /// lexfile keyed by part of speech (including the noun/adjective-satellite split).
     const FIXTURE_NO_LEXFILE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -833,6 +818,47 @@ mod tests {
         let reloaded_synset = reloaded.synset_by_id(&SynsetId::new("00001740-n")).unwrap().unwrap();
         assert_eq!(reloaded_synset.definition, vec!["".to_string()]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_new_parts_of_speech_round_trip_in_lmf_1_5_and_fall_back_in_1_4() {
+        use crate::wordnet::{Entry, LexiconMetadata as Meta, PartOfSpeech, Sense};
+        use crate::wordnet::xml::{write_lexicon_xml_report, LmfVersion};
+
+        let mut wn = LexiconHashMapBackend::new();
+        let mut paris = Synset::new(PartOfSpeech::e);
+        paris.definition.push("the capital of France".to_string());
+        paris.members.push("Paris".to_string());
+        wn.insert_synset("name.location".to_string(), SynsetId::new("00001740-e"), paris).unwrap();
+        let mut entry = Entry::new();
+        entry.sense.push(Sense::new(SenseId::new("paris%1:15:00::"), SynsetId::new("00001740-e")));
+        wn.insert_entry("Paris".to_string(), PosKey::new("e"), entry).unwrap();
+
+        let metadata = |lmf_version| Meta {
+            lmf_version,
+            confidence: None,
+            id_prefix: "test".to_string(),
+            label: "Test".to_string(),
+            language: "en".to_string(),
+            email: None,
+            license: "https://creativecommons.org/licenses/by/4.0".to_string(),
+            version: "1".to_string(),
+            url: None,
+        };
+
+        let xml = write_lexicon_xml(&wn, &metadata(LmfVersion::V1_5)).unwrap();
+        let text = String::from_utf8(xml.clone()).unwrap();
+        assert!(text.contains("partOfSpeech=\"e\""));
+        let (reimported, _) = read_lexicon_xml(LexiconHashMapBackend::new(), xml.as_slice()).unwrap();
+        let ss = reimported.synset_by_id(&SynsetId::new("00001740-e")).unwrap().unwrap();
+        assert_eq!(ss.part_of_speech, PartOfSpeech::e);
+        assert_eq!(entry_for(&reimported, "Paris", &PosKey::new("e")).sense.len(), 1);
+
+        // WN-LMF 1.4 has no `e`: names are written as nouns, with a warning
+        let out = write_lexicon_xml_report(&wn, &metadata(LmfVersion::V1_4)).unwrap();
+        let text = String::from_utf8(out.bytes).unwrap();
+        assert!(!text.contains("partOfSpeech=\"e\""));
+        assert!(out.warnings.iter().any(|w| w.contains("1.5")));
     }
 
     #[test]
