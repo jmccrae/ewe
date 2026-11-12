@@ -74,54 +74,55 @@ pub enum PartOfSpeech {
 /// Everything that is known about one part of speech. This is the only place the set of parts
 /// of speech is listed, other code should use the methods on `PartOfSpeech`.
 struct PosInfo {
-    letter: char,
+    pos: PartOfSpeech,
+    /// The one letter code
+    code: &'static str,
     /// The name used in JSON and RDF
     long: &'static str,
     /// Human readable name
     label: &'static str,
+    /// The heading for a list of things of this part of speech (shared by `a` and `s`)
+    heading: &'static str,
+    /// The prefix of the lexicographer files (`noun.person`) holding this part of speech.
+    /// Where there is a Universal Dependencies UPOS tag, this is its lower case name
+    /// (https://universaldependencies.org/u/pos/); the Princeton ones keep their traditional names.
+    lexfile: &'static str,
     /// The `ss_type` used in sense keys (None if the part of speech has no sense keys)
     ss_type: Option<u32>,
     /// The name of the WNDB file (None if it is not part of the WNDB format)
     wndb_file: Option<&'static str>,
-    /// The part of speech this one is interchangeable with in relations and lexfiles
+    /// The part of speech this one is interchangeable with in relations
     base: PartOfSpeech,
 }
 
-const fn info(letter: char, long: &'static str, label: &'static str, ss_type: Option<u32>,
+#[allow(clippy::too_many_arguments)]
+const fn info(pos: PartOfSpeech, code: &'static str, long: &'static str, label: &'static str,
+              heading: &'static str, lexfile: &'static str, ss_type: Option<u32>,
               wndb_file: Option<&'static str>, base: PartOfSpeech) -> PosInfo {
-    PosInfo { letter, long, label, ss_type, wndb_file, base }
+    PosInfo { pos, code, long, label, heading, lexfile, ss_type, wndb_file, base }
 }
 
-/// Indexed by the discriminant of `PartOfSpeech`
+/// In the order of `PartOfSpeech::ALL` (checked by a test)
 const POS_INFO: [PosInfo; 19] = [
-    info('n', "noun", "noun", Some(1), Some("noun"), PartOfSpeech::n),
-    info('v', "verb", "verb", Some(2), Some("verb"), PartOfSpeech::v),
-    info('a', "adjective", "adjective", Some(3), Some("adj"), PartOfSpeech::a),
-    info('r', "adverb", "adverb", Some(4), Some("adv"), PartOfSpeech::r),
-    info('s', "adjective_satellite", "adjective satellite", Some(5), Some("adj"), PartOfSpeech::a),
-    info('c', "conjunction", "conjunction", None, None, PartOfSpeech::c),
-    info('p', "adposition", "adposition", None, None, PartOfSpeech::p),
-    info('x', "other", "other", None, None, PartOfSpeech::x),
-    info('u', "unknown", "unknown", None, None, PartOfSpeech::u),
-    info('z', "phrase", "phrase", None, None, PartOfSpeech::z),
-    info('b', "number", "number", None, None, PartOfSpeech::b),
-    info('d', "determiner", "determiner", None, None, PartOfSpeech::d),
-    info('e', "proper_noun", "name", Some(1), None, PartOfSpeech::n),
-    info('h', "auxiliary", "auxiliary", None, None, PartOfSpeech::h),
-    info('i', "pronoun", "pronoun", None, None, PartOfSpeech::i),
-    info('l', "particle", "particle", None, None, PartOfSpeech::l),
-    info('m', "punctuation", "punctuation", None, None, PartOfSpeech::m),
-    info('o', "subordinating_conjunction", "subordinating conjunction", None, None, PartOfSpeech::o),
-    info('y', "symbol", "symbol", None, None, PartOfSpeech::y),
-];
-
-/// Lexicographer file prefixes (`noun.person`) and the parts of speech they hold
-const LEXFILE_PREFIXES: [(&str, &[PartOfSpeech]); 5] = [
-    ("noun.", &[PartOfSpeech::n]),
-    ("verb.", &[PartOfSpeech::v]),
-    ("adj.", &[PartOfSpeech::a, PartOfSpeech::s]),
-    ("adv.", &[PartOfSpeech::r]),
-    ("name.", &[PartOfSpeech::e]),
+    info(PartOfSpeech::n, "n", "noun", "noun", "Nouns", "noun", Some(1), Some("noun"), PartOfSpeech::n),
+    info(PartOfSpeech::v, "v", "verb", "verb", "Verbs", "verb", Some(2), Some("verb"), PartOfSpeech::v),
+    info(PartOfSpeech::a, "a", "adjective", "adjective", "Adjectives", "adj", Some(3), Some("adj"), PartOfSpeech::a),
+    info(PartOfSpeech::r, "r", "adverb", "adverb", "Adverbs", "adv", Some(4), Some("adv"), PartOfSpeech::r),
+    info(PartOfSpeech::s, "s", "adjective_satellite", "adjective satellite", "Adjectives", "adj", Some(5), Some("adj"), PartOfSpeech::a),
+    info(PartOfSpeech::c, "c", "conjunction", "conjunction", "Conjunctions", "cconj", None, None, PartOfSpeech::c),
+    info(PartOfSpeech::p, "p", "adposition", "adposition", "Adpositions", "adp", None, None, PartOfSpeech::p),
+    info(PartOfSpeech::x, "x", "other", "other", "Other", "other", None, None, PartOfSpeech::x),
+    info(PartOfSpeech::u, "u", "unknown", "unknown", "Unknown", "unknown", None, None, PartOfSpeech::u),
+    info(PartOfSpeech::z, "z", "phrase", "phrase", "Phrases", "phrase", None, None, PartOfSpeech::z),
+    info(PartOfSpeech::b, "b", "number", "number", "Numbers", "num", None, None, PartOfSpeech::b),
+    info(PartOfSpeech::d, "d", "determiner", "determiner", "Determiners", "det", None, None, PartOfSpeech::d),
+    info(PartOfSpeech::e, "e", "proper_noun", "name", "Names", "name", Some(1), None, PartOfSpeech::n),
+    info(PartOfSpeech::h, "h", "auxiliary", "auxiliary", "Auxiliaries", "aux", None, None, PartOfSpeech::h),
+    info(PartOfSpeech::i, "i", "pronoun", "pronoun", "Pronouns", "pron", None, None, PartOfSpeech::i),
+    info(PartOfSpeech::l, "l", "particle", "particle", "Particles", "part", None, None, PartOfSpeech::l),
+    info(PartOfSpeech::m, "m", "punctuation", "punctuation", "Punctuation", "punct", None, None, PartOfSpeech::m),
+    info(PartOfSpeech::o, "o", "subordinating_conjunction", "subordinating conjunction", "Subordinating conjunctions", "sconj", None, None, PartOfSpeech::o),
+    info(PartOfSpeech::y, "y", "symbol", "symbol", "Symbols", "sym", None, None, PartOfSpeech::y),
 ];
 
 impl PartOfSpeech {
@@ -133,16 +134,24 @@ impl PartOfSpeech {
         PartOfSpeech::l, PartOfSpeech::m, PartOfSpeech::o, PartOfSpeech::y,
     ];
 
+    /// Position in `ALL` and `POS_INFO`
+    fn pos_idx(&self) -> usize {
+        match self {
+            PartOfSpeech::n => 0, PartOfSpeech::v => 1, PartOfSpeech::a => 2, PartOfSpeech::r => 3,
+            PartOfSpeech::s => 4, PartOfSpeech::c => 5, PartOfSpeech::p => 6, PartOfSpeech::x => 7,
+            PartOfSpeech::u => 8, PartOfSpeech::z => 9, PartOfSpeech::b => 10, PartOfSpeech::d => 11,
+            PartOfSpeech::e => 12, PartOfSpeech::h => 13, PartOfSpeech::i => 14, PartOfSpeech::l => 15,
+            PartOfSpeech::m => 16, PartOfSpeech::o => 17, PartOfSpeech::y => 18,
+        }
+    }
+
     fn info(&self) -> &'static PosInfo {
-        &POS_INFO[*self as usize]
+        &POS_INFO[self.pos_idx()]
     }
 
     /// The one letter code
     pub fn value(&self) -> &'static str {
-        // The letters are ASCII so a one byte slice of a static string works
-        const LETTERS: &str = "nvarscpxuzbdehilmoy";
-        let i = *self as usize;
-        &LETTERS[i..i + 1]
+        self.info().code
     }
 
     /// Parse a one letter code. The deprecated `t` is read as `z`.
@@ -150,7 +159,7 @@ impl PartOfSpeech {
         if c == 't' {
             return Some(PartOfSpeech::z);
         }
-        POS_INFO.iter().position(|i| i.letter == c).map(|i| PartOfSpeech::ALL[i])
+        POS_INFO.iter().find(|i| i.code.starts_with(c)).map(|i| i.pos)
     }
 
     /// Parse a one letter code
@@ -223,24 +232,22 @@ impl PartOfSpeech {
     }
 
     /// The parts of speech a lexicographer file may contain, judged by its prefix
+    /// (`noun.person` holds nouns, `adj.all` adjectives and satellites, ...)
     pub fn for_lexfile(lexfile: &str) -> Vec<PartOfSpeech> {
-        LEXFILE_PREFIXES
-            .iter()
-            .find(|(prefix, _)| lexfile.starts_with(prefix))
-            .map(|(_, poses)| poses.to_vec())
-            .unwrap_or_default()
+        let Some((prefix, _)) = lexfile.split_once('.') else {
+            return Vec::new();
+        };
+        POS_INFO.iter().filter(|i| i.lexfile == prefix).map(|i| i.pos).collect()
     }
 
     /// The name of the lexicographer file new synsets of this part of speech go to by default
-    pub fn default_lexname(&self) -> &'static str {
-        match self {
-            PartOfSpeech::n => "noun.all",
-            PartOfSpeech::v => "verb.all",
-            PartOfSpeech::a | PartOfSpeech::s => "adj.all",
-            PartOfSpeech::r => "adv.all",
-            PartOfSpeech::e => "name.all",
-            _ => "other.all",
-        }
+    pub fn default_lexname(&self) -> String {
+        format!("{}.all", self.info().lexfile)
+    }
+
+    /// The heading for a list of things of this part of speech ("Nouns", "Names", ...)
+    pub fn heading(&self) -> &'static str {
+        self.info().heading
     }
 }
 
@@ -256,9 +263,11 @@ mod tests {
 
     #[test]
     fn test_letters_round_trip() {
-        for pos in PartOfSpeech::ALL {
+        for (i, pos) in PartOfSpeech::ALL.iter().enumerate() {
+            let pos = *pos;
+            assert_eq!(pos.pos_idx(), i);
+            assert_eq!(POS_INFO[i].pos, pos);
             assert_eq!(PartOfSpeech::from_code(pos.value()), Some(pos));
-            assert_eq!(POS_INFO[pos as usize].letter.to_string(), pos.value());
             assert_eq!(pos.to_pos_key().to_part_of_speech(), Some(pos));
         }
         assert_eq!(PartOfSpeech::from_letter('q'), None);
@@ -325,7 +334,25 @@ mod tests {
         assert_eq!(PartOfSpeech::for_lexfile("adj.all"), vec![PartOfSpeech::a, PartOfSpeech::s]);
         assert_eq!(PartOfSpeech::for_lexfile("adv.manner"), vec![PartOfSpeech::r]);
         assert_eq!(PartOfSpeech::for_lexfile("name.location"), vec![PartOfSpeech::e]);
+        assert_eq!(PartOfSpeech::for_lexfile("det.all"), vec![PartOfSpeech::d]);
+        assert_eq!(PartOfSpeech::for_lexfile("sconj.all"), vec![PartOfSpeech::o]);
         assert!(PartOfSpeech::for_lexfile("contrib.colloq").is_empty());
+        assert!(PartOfSpeech::for_lexfile("noun").is_empty());
         assert!(PartOfSpeech::for_lexfile("nounish").is_empty());
+    }
+
+    #[test]
+    fn test_every_pos_has_its_own_lexfile_and_heading() {
+        // Every part of speech can be put in a default lexfile that maps back to it
+        for pos in PartOfSpeech::ALL {
+            assert!(PartOfSpeech::for_lexfile(&pos.default_lexname()).contains(&pos), "{pos}");
+            assert!(!pos.heading().is_empty());
+        }
+        assert_eq!(PartOfSpeech::d.default_lexname(), "det.all");
+        assert_eq!(PartOfSpeech::s.heading(), PartOfSpeech::a.heading());
+        // the other parts of speech are not dumped into one lexfile
+        let lexnames: std::collections::HashSet<_> =
+            PartOfSpeech::ALL.iter().filter(|pos| **pos != PartOfSpeech::s).map(|pos| pos.default_lexname()).collect();
+        assert_eq!(lexnames.len(), PartOfSpeech::ALL.len() - 1);
     }
 }

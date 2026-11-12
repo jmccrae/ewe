@@ -64,3 +64,13 @@ Names (proper nouns, part of speech `e`, ids ending in `-e`) are kept in their o
 `name.*` (e.g. `name.person`, `name.location`, `name.animal`). Each uses the sense key lexfile
 number of the `noun.*` file of the same name, so `name.location` sense keys contain `15`. Name
 entries live in `entries-<LETTER>-name.yaml`, apart from the common vocabulary.
+
+## Other parts of speech
+
+The other WN-LMF parts of speech have lexfiles named after their Universal Dependencies UPOS
+tag, e.g. `cconj.all` (conjunctions), `sconj.all` (subordinating conjunctions), `adp.all`
+(adpositions), `det.all` (determiners), `num.all` (numbers), `pron.all` (pronouns), `part.all`
+(particles), `aux.all` (auxiliaries), `punct.all` (punctuation), `sym.all` (symbols), plus
+`phrase.all`, `other.all` and `unknown.all`. The prefix before the dot decides which part of
+speech `add_synset` accepts for the file.
+

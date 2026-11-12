@@ -478,7 +478,7 @@ fn build_synset(
     let pos_attr = require_attr(e, "partOfSpeech", "Synset")?;
     let pos = PartOfSpeech::from_code(&pos_attr)
         .ok_or_else(|| XmlImportError::Malformed(format!("Synset {id_attr}: unrecognized partOfSpeech {pos_attr:?}")))?;
-    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| pos.default_lexname().to_string());
+    let lexname = attr(e, "lexfile")?.unwrap_or_else(|| pos.default_lexname());
 
     let mut synset = Synset::new(pos);
     if let Some(ili) = attr(e, "ili")? {

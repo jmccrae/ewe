@@ -7,7 +7,7 @@
 use super::tables::PRINCETON_FRAMES;
 use super::{WndbExportError, WndbExportOptions};
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::sense_keys::{extract_lex_id, lex_filenum};
+use crate::sense_keys::{extract_lex_id, LEX_FILENUMS};
 use crate::wordnet::xml::ids::escape_lemma;
 use crate::wordnet::{Lexicon, PartOfSpeech, PosKey, Sense, SenseId, Synset, SynsetId};
 use std::collections::HashMap;
@@ -116,8 +116,8 @@ fn wndb_pos_char_no_satellite(pos: &PartOfSpeech) -> &'static str {
 }
 
 fn lex_name_number(lexname: &str, extra: &mut HashMap<String, usize>) -> usize {
-    if let Some(n) = lex_filenum(lexname) {
-        return n;
+    if let Some(n) = LEX_FILENUMS.get(lexname) {
+        return *n;
     }
     if let Some(n) = extra.get(lexname) {
         return *n;

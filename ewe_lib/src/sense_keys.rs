@@ -55,20 +55,25 @@ lazy_static! {
         map.insert("verb.stative", 42);
         map.insert("verb.weather", 43);
         map.insert("adj.ppl", 44);
+        // Names use the number of the noun file of the same name
+        map.insert("name.act", 4);
+        map.insert("name.animal", 5);
+        map.insert("name.artifact", 6);
+        map.insert("name.cognition", 9);
+        map.insert("name.communication", 10);
+        map.insert("name.event", 11);
+        map.insert("name.group", 14);
+        map.insert("name.location", 15);
+        map.insert("name.object", 17);
+        map.insert("name.person", 18);
+        map.insert("name.plant", 20);
+        map.insert("name.possession", 21);
+        map.insert("name.state", 26);
+        map.insert("name.time", 28);
         map.insert("contrib.colloq", 50);
         map.insert("contrib.plwn", 51);
         map
     };
-}
-
-/// The lexicographer file number used in sense keys. Names (`name.location`) use the number of
-/// the corresponding noun file (`noun.location`).
-pub(crate) fn lex_filenum(lex_name: &str) -> Option<usize> {
-    match lex_name.strip_prefix("name.") {
-        Some(rest) => LEX_FILENUMS.get(format!("noun.{rest}").as_str()),
-        None => LEX_FILENUMS.get(lex_name),
-    }
-    .copied()
 }
 
 lazy_static! {
@@ -204,7 +209,8 @@ pub fn get_sense_key<L: Lexicon>(
         .ok_or_else(|| LexiconError::NoSenseKeyType(synset.part_of_speech.value().to_string()))?;
     let lex_filenum = wn
         .lex_name_for(synset_id)?
-        .and_then(|lex_name| lex_filenum(&lex_name))
+        .and_then(|lex_name| LEX_FILENUMS.get(lex_name.as_str()))
+        .map(|x| *x)
         .unwrap_or(99);
     let lex_id = match sense_key {
         Some(sense_key) => extract_lex_id(sense_key),

@@ -3,28 +3,21 @@ use crate::components::{WordNet, Synset, DisplayOptions, DownloadLinks, ProjectN
 use crate::backend::api::{get_lemma, get_lemma_description};
 use ewe_lib::wordnet::{PartOfSpeech, SynsetId};
 
-/// The headings synsets are grouped under, with the parts of speech each one holds, in
-/// display order. Synsets of any other part of speech are shown under "Other".
-const POS_GROUPS: [(&str, &[PartOfSpeech]); 5] = [
-    ("Nouns", &[PartOfSpeech::n]),
-    ("Verbs", &[PartOfSpeech::v]),
-    ("Adjectives", &[PartOfSpeech::a, PartOfSpeech::s]),
-    ("Adverbs", &[PartOfSpeech::r]),
-    ("Names", &[PartOfSpeech::e]),
-];
-
-/// Group synset ids under their part of speech heading, leaving out empty groups
+/// Group synset ids under the heading of their part of speech (satellites with the adjectives),
+/// in the order of `PartOfSpeech::ALL`, leaving out empty groups. Ids with no recognisable part
+/// of speech go under the heading of "other".
 fn group_by_pos<'a>(synsets: impl IntoIterator<Item = &'a SynsetId>) -> Vec<(&'static str, Vec<&'a SynsetId>)> {
-    let mut groups: Vec<(&'static str, Vec<&'a SynsetId>)> =
-        POS_GROUPS.iter().map(|(heading, _)| (*heading, Vec::new())).collect();
-    groups.push(("Other", Vec::new()));
+    let mut groups: Vec<(&'static str, Vec<&'a SynsetId>)> = Vec::new();
+    for pos in PartOfSpeech::ALL {
+        if !groups.iter().any(|(heading, _)| *heading == pos.heading()) {
+            groups.push((pos.heading(), Vec::new()));
+        }
+    }
     for synset in synsets {
-        let pos = synset.part_of_speech();
-        let i = POS_GROUPS
-            .iter()
-            .position(|(_, poses)| pos.is_some_and(|pos| poses.contains(&pos)))
-            .unwrap_or(POS_GROUPS.len());
-        groups[i].1.push(synset);
+        let heading = synset.part_of_speech().unwrap_or(PartOfSpeech::x).heading();
+        if let Some((_, group)) = groups.iter_mut().find(|(h, _)| *h == heading) {
+            group.push(synset);
+        }
     }
     groups.retain(|(_, group)| !group.is_empty());
     groups
@@ -91,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_group_by_pos() {
-        let ids: Vec<SynsetId> = ["00000001-s", "00000002-n", "00000003-e", "00000004-a", "00000005-d", "00000006-n"]
+        let ids: Vec<SynsetId> = ["00000001-s", "00000002-n", "00000003-e", "00000004-a", "00000005-d", "00000006-n", "00000007-q"]
             .iter().map(|s| SynsetId::new(s)).collect();
         let groups = group_by_pos(&ids);
         let summary: Vec<(&str, Vec<&str>)> = groups.iter()
@@ -100,8 +93,9 @@ mod tests {
         assert_eq!(summary, vec![
             ("Nouns", vec!["00000002-n", "00000006-n"]),
             ("Adjectives", vec!["00000001-s", "00000004-a"]),
+            ("Other", vec!["00000007-q"]),
+            ("Determiners", vec!["00000005-d"]),
             ("Names", vec!["00000003-e"]),
-            ("Other", vec!["00000005-d"]),
         ]);
     }
 }
