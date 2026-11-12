@@ -6,12 +6,29 @@ use std::borrow::Cow;
 use std::cmp::max;
 use std::collections::HashMap;
 
+const ADV_LEXFILES: [&str; 9] = [
+    "adv.manner",
+    "adv.speaker_oriented",
+    "adv.frequency",
+    "adv.temporal",
+    "adv.spatial",
+    "adv.degree",
+    "adv.domain",
+    "adv.focus",
+    "adv.contrast",
+];
+
 lazy_static! {
     pub(crate) static ref LEX_FILENUMS: HashMap<&'static str, usize> = {
         let mut map = HashMap::new();
         map.insert("adj.all", 0);
         map.insert("adj.pert", 1);
         map.insert("adv.all", 2);
+        // The adverb lexfiles introduced by english-wordnet#1411 all keep `adv.all`'s file
+        // number so that no sense keys change.
+        for name in ADV_LEXFILES {
+            map.insert(name, 2);
+        }
         map.insert("noun.Tops", 3);
         map.insert("noun.act", 4);
         map.insert("noun.animal", 5);
@@ -246,6 +263,34 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn test_adverb_lexfiles_share_file_number_02() {
+        assert_eq!(LEX_FILENUMS.get("adv.all"), Some(&2));
+        for name in ADV_LEXFILES {
+            assert_eq!(LEX_FILENUMS.get(name), Some(&2), "{name}");
+        }
+        for name in ADV_LEXFILES {
+            let mut lexicon = LexiconHashMapBackend::new();
+            let synset = Synset::new(PartOfSpeech::r);
+            lexicon
+                .insert_entry(
+                    "zestily".to_string(),
+                    PosKey::new("r".to_string()),
+                    Entry::new(),
+                )
+                .unwrap();
+            lexicon
+                .insert_synset(name.to_string(), SynsetId::new("00001740-r"), synset.clone())
+                .unwrap();
+            assert_eq!(
+                SenseId::new("zestily%4:02:00::".to_owned()),
+                get_sense_key(&lexicon, "zestily", None, &synset, &SynsetId::new("00001740-r"))
+                    .unwrap(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
