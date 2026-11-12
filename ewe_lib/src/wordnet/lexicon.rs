@@ -187,6 +187,7 @@ pub trait Lexicon: Sized {
         links_to: HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
     ) -> Result<()>;
     fn sense_id_to_lemma_pos_get(&self, sense_id: &SenseId) -> Result<Option<(String, PosKey)>>;
+    fn sense_id_to_lemma_pos_remove(&mut self, sense_id: &SenseId) -> Result<()>;
     fn sense_id_to_lemma_pos_insert(
         &mut self,
         sense_id: SenseId,
@@ -1080,30 +1081,59 @@ pub trait Lexicon: Sized {
         }
     }
 
+    /// Rename a sense, keeping everything that refers to it consistent: the entry, the sense
+    /// index, relations from other senses to it (with their confidence) and the backlink index.
     fn update_sense_key(&mut self, old_key: &SenseId, new_key: &SenseId) -> Result<()> {
-        let mut lemma_pos = None;
-        match self.sense_id_to_lemma_pos_get(old_key)? {
-            Some((lemma, pos)) => {
-                lemma_pos = Some((lemma.clone(), pos.clone()));
-            }
-            None => {}
-        };
-        if let Some((lemma, pos)) = lemma_pos {
-            self.entries_update(entry_key(&lemma), |e| {
-                e.update_sense_key(&lemma, &pos, old_key, new_key)
-            })??;
+        if old_key == new_key {
+            return Ok(());
         }
-        match self.sense_links_to_get(old_key)?.map(|x| x.clone()) {
-            Some(links_to) => {
-                let old_key_target = SenseOrSynsetId::Sense(old_key.clone());
-                for (rel, source) in links_to.into_owned() {
-                    let confidence = self.sense_rel_confidence(&source, &rel, &old_key_target)?;
-                    self.remove_sense_rel(&source, &old_key_target)?;
-                    self.add_sense_rel(&source, rel.clone(), &old_key_target)?;
-                    self.set_sense_rel_confidence(&source, &rel, &old_key_target, confidence)?;
-                }
+        let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(old_key)? else {
+            return Ok(());
+        };
+        // Gather everything that refers to the old key before touching anything
+        let outgoing = self.sense_links_from_id(old_key)?;
+        let incoming = self
+            .sense_links_to_get(old_key)?
+            .map(|x| x.into_owned())
+            .unwrap_or_default();
+
+        self.entries_update(entry_key(&lemma), |e| {
+            e.update_sense_key(&lemma, &pos, old_key, new_key)
+        })??;
+        self.sense_id_to_lemma_pos_insert(new_key.clone(), (lemma, pos))?;
+        self.sense_id_to_lemma_pos_remove(old_key)?;
+
+        // Backlinks of our own targets name us as the source
+        for (_, target) in outgoing {
+            if let UnresolvedSenseOrSynsetId::Sense(t) = target {
+                let t = if t == *old_key { new_key.clone() } else { t };
+                self.sense_links_to_update(&t, |v| {
+                    for x in v.iter_mut() {
+                        if x.1 == *old_key {
+                            x.1 = new_key.clone();
+                        }
+                    }
+                })?;
             }
-            None => {}
+        }
+
+        // Relations stored on other senses that target us
+        for (rel, source) in incoming.iter() {
+            let (stored_on_source, _) = rel.clone().to_canonical();
+            if stored_on_source {
+                let source = if source == old_key { new_key } else { source };
+                self.update_sense(source, |s| s.rename_rel_target(old_key, new_key))?;
+            }
+        }
+
+        // Move the backlink index
+        let moved: Vec<(SenseRelType, SenseId)> = incoming
+            .into_iter()
+            .map(|(r, s)| (r, if s == *old_key { new_key.clone() } else { s }))
+            .collect();
+        if !moved.is_empty() {
+            self.sense_links_to_update(new_key, |v| v.extend(moved))?;
+            self.sense_links_to_update(old_key, |v| v.clear())?;
         }
         Ok(())
     }

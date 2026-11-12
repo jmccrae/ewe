@@ -194,6 +194,10 @@ impl Lexicon for LexiconHashMapBackend {
     fn sense_id_to_lemma_pos_get(&self, sense_id : &SenseId) -> Result<Option<(String, PosKey)>> {
         Ok(self.sense_id_to_lemma_pos.get(sense_id).cloned())
     }
+    fn sense_id_to_lemma_pos_remove(&mut self, sense_id : &SenseId) -> Result<()> {
+        self.sense_id_to_lemma_pos.remove(sense_id);
+        Ok(())
+    }
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
         self.sense_id_to_lemma_pos.insert(sense_id, lemma_pos);
         Ok(())

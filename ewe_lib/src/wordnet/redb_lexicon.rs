@@ -528,6 +528,13 @@ impl Lexicon for ReDBLexicon {
             Ok(None)
         }
     }
+    fn sense_id_to_lemma_pos_remove(&mut self, sense_id : &SenseId) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_ID_TO_LEMMA_POS)?;
+        table.remove(sense_id.to_string())?;
+        Ok(())
+    }
     fn sense_id_to_lemma_pos_insert(&mut self, sense_id : SenseId, lemma_pos : (String, PosKey)) -> Result<()> {
         let mut manager = self.txn_manager.lock().unwrap();
         let txn = manager.begin_write()?;
@@ -1268,6 +1275,19 @@ mod tests {
             .collect();
         assert_eq!(pos_order, vec!["a".to_string(), "n".to_string(), "s".to_string()]);
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_sense_id_to_lemma_pos_remove() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_redb_sense_remove_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut lexicon = ReDBLexicon::create(&dir.join("test.redb"), 1024 * 1024).unwrap();
+        let id = SenseId::new("cat%1:05:00::");
+        lexicon.sense_id_to_lemma_pos_insert(id.clone(), ("cat".to_string(), PosKey::new("n"))).unwrap();
+        assert!(lexicon.has_sense(&id).unwrap());
+        lexicon.sense_id_to_lemma_pos_remove(&id).unwrap();
+        assert!(!lexicon.has_sense(&id).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
