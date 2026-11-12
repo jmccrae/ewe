@@ -674,33 +674,6 @@
     transform: scale(0.7);
 }
 
-.edit-delete-synset {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background: none;
-    border: 1px solid var(--color-accent);
-    border-radius: 50%;
-    color: var(--color-accent);
-    cursor: pointer;
-    line-height: 1;
-}
-
-.edit-delete-synset:hover {
-    background: var(--color-accent);
-    color: var(--color-white);
-}
-
-.edit-delete-synset:disabled {
-    opacity: 0.5;
-    cursor: default;
-    background: none;
-    color: var(--color-accent);
-}
-
 /* A WN-LMF confidence score below 1.0 (see `components::confidence`): a warning sign coloured
    on a red-orange-green spectrum by the score, set inline from Rust. */
 .confidence {

@@ -135,7 +135,7 @@ fn DeleteSynsetModal(props: DeleteSynsetModalProps) -> Element {
                         "Cancel"
                     }
                     button {
-                        class: "edit-delete-synset",
+                        class: "edit-delete",
                         r#type: "button",
                         title: "No reason or superseding synset needed - removes this synset with no deprecation record",
                         disabled: submitting(),
