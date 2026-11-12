@@ -134,6 +134,34 @@ impl Sense {
         }
     }
 
+    /// Point every relation targeting sense `old` at `new` instead, keeping confidence scores.
+    pub fn rename_rel_target(&mut self, old: &SenseId, new: &SenseId) {
+        self.antonym.rename(old.as_str(), || new.clone());
+        self.also.rename(old.as_str(), || new.clone());
+        self.participle.rename(old.as_str(), || new.clone());
+        self.pertainym.rename(old.as_str(), || new.clone());
+        self.derivation.rename(old.as_str(), || new.clone());
+        self.similar.rename(old.as_str(), || new.clone());
+        self.agent.rename(old.as_str(), || new.clone());
+        self.material.rename(old.as_str(), || new.clone());
+        self.event.rename(old.as_str(), || new.clone());
+        self.instrument.rename(old.as_str(), || new.clone());
+        self.location.rename(old.as_str(), || new.clone());
+        self.by_means_of.rename(old.as_str(), || new.clone());
+        self.undergoer.rename(old.as_str(), || new.clone());
+        self.property.rename(old.as_str(), || new.clone());
+        self.result.rename(old.as_str(), || new.clone());
+        self.state.rename(old.as_str(), || new.clone());
+        self.uses.rename(old.as_str(), || new.clone());
+        self.destination.rename(old.as_str(), || new.clone());
+        self.body_part.rename(old.as_str(), || new.clone());
+        self.vehicle.rename(old.as_str(), || new.clone());
+        self.domain_topic.rename(old.as_str(), || UnresolvedSenseOrSynsetId::Sense(new.clone()));
+        self.domain_region.rename(old.as_str(), || UnresolvedSenseOrSynsetId::Sense(new.clone()));
+        self.exemplifies.rename(old.as_str(), || UnresolvedSenseOrSynsetId::Sense(new.clone()));
+        self.other.rename(old.as_str(), || UnresolvedSenseOrSynsetId::Sense(new.clone()));
+    }
+
     pub fn remove_rel(&mut self, target: &SenseOrSynsetId) {
         if let SenseOrSynsetId::Sense(target) = target {
             self.antonym.retain(|x| x != target);
@@ -686,6 +714,24 @@ mod tests {
     use super::*;
     use crate::change_manager;
     use crate::change_manager::ChangeList;
+
+    #[test]
+    fn test_rename_rel_target() {
+        let (old, new, other) = (SenseId::new("a%1"), SenseId::new("b%1"), SenseId::new("c%1"));
+        let mut s = Sense::new(SenseId::new("x%1"), SynsetId::new("00000001-n"));
+        s.antonym.push_scored(old.clone(), Some(0.25));
+        s.antonym.push_scored(other.clone(), None);
+        s.domain_topic.push(UnresolvedSenseOrSynsetId::Sense(old.clone()));
+        s.rename_rel_target(&old, &new);
+        assert_eq!(s.antonym.iter().cloned().collect::<Vec<_>>(), vec![new.clone(), other]);
+        assert_eq!(s.antonym.confidence(new.as_str()), Some(0.25));
+        assert_eq!(s.domain_topic.iter().cloned().collect::<Vec<_>>(),
+            vec![UnresolvedSenseOrSynsetId::Sense(new.clone())]);
+        // No-op when the old key is absent
+        let before = s.clone();
+        s.rename_rel_target(&old, &new);
+        assert_eq!(s, before);
+    }
 
     #[test]
     fn test_unresolved_resolve_classifies_by_lexicon_not_format() {

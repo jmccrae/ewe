@@ -1257,4 +1257,108 @@ mod tests {
         assert_eq!(links.iter().filter(|(r, t)|
             *r == SenseRelType::Antonym && *t == UnresolvedSenseOrSynsetId::Sense(sense2.clone())).count(), 1);
     }
+
+    fn two_linked_senses(rel: SenseRelType) -> (LexiconHashMapBackend, SenseId, SenseId) {
+        let (dog, cat, wn) = link_two_senses(LexiconHashMapBackend::new(), rel);
+        (wn, dog, cat)
+    }
+
+    fn link_two_senses<L: Lexicon>(mut wn: L, rel: SenseRelType) -> (SenseId, SenseId, L) {
+        let mut change_list = change_manager::ChangeList::new();
+        let ss1 = add_noun(&mut wn, "00000090-n", "dog synset", 'n', &mut change_list);
+        let ss2 = add_noun(&mut wn, "00000091-n", "cat synset", 'n', &mut change_list);
+        let dog = change_manager::add_entry(&mut wn, ss1, "dog".to_owned(),
+            PosKey::new("n".to_owned()), Vec::new(), None, &mut change_list).unwrap().unwrap();
+        let cat = change_manager::add_entry(&mut wn, ss2, "cat".to_owned(),
+            PosKey::new("n".to_owned()), Vec::new(), None, &mut change_list).unwrap().unwrap();
+        change_manager::insert_sense_relation(&mut wn, dog.clone(), rel,
+            SenseOrSynsetId::Sense(cat.clone()), &mut change_list).unwrap();
+        (dog, cat, wn)
+    }
+
+    #[test]
+    fn test_update_sense_key_moves_incoming_relations_and_indexes() {
+        let (mut wn, dog, cat) = two_linked_senses(SenseRelType::Antonym);
+        let target = SenseOrSynsetId::Sense(cat.clone());
+        wn.set_sense_rel_confidence(&dog, &SenseRelType::Antonym, &target, Some(0.5)).unwrap();
+        let new = SenseId::new("cat%1:05:99::");
+
+        wn.update_sense_key(&cat, &new).unwrap();
+
+        let (_, _, dog_sense) = wn.get_sense_by_id(&dog).unwrap().unwrap();
+        assert_eq!(dog_sense.antonym.iter().cloned().collect::<Vec<_>>(), vec![new.clone()]);
+        assert_eq!(dog_sense.rel_confidence(&SenseRelType::Antonym, new.as_str()), Some(0.5));
+        assert!(wn.has_sense(&new).unwrap());
+        assert!(!wn.has_sense(&cat).unwrap());
+        assert!(wn.sense_links_to_get(&cat).unwrap().map_or(true, |v| v.is_empty()));
+        assert_eq!(wn.sense_links_to_get(&new).unwrap().unwrap().into_owned(),
+            vec![(SenseRelType::Antonym, dog)]);
+    }
+
+    #[test]
+    fn test_update_sense_key_retargets_own_backlinks() {
+        let (mut wn, dog, cat) = two_linked_senses(SenseRelType::Antonym);
+        let new = SenseId::new("dog%1:05:99::");
+
+        wn.update_sense_key(&dog, &new).unwrap();
+
+        assert_eq!(wn.sense_links_to_get(&cat).unwrap().unwrap().into_owned(),
+            vec![(SenseRelType::Antonym, new.clone())]);
+        let (_, _, new_sense) = wn.get_sense_by_id(&new).unwrap().unwrap();
+        assert_eq!(new_sense.antonym.iter().cloned().collect::<Vec<_>>(), vec![cat]);
+    }
+
+    #[test]
+    fn test_update_sense_key_inverse_relation() {
+        // `dog has_domain_topic cat` is stored on cat as `domain_topic: dog`
+        let (mut wn, dog, cat) = two_linked_senses(SenseRelType::HasDomainTopic);
+        let new = SenseId::new("cat%1:05:99::");
+
+        wn.update_sense_key(&cat, &new).unwrap();
+
+        let (_, _, new_sense) = wn.get_sense_by_id(&new).unwrap().unwrap();
+        assert_eq!(new_sense.domain_topic.len(), 1);
+        assert_eq!(wn.sense_links_to_get(&new).unwrap().unwrap().into_owned(),
+            vec![(SenseRelType::HasDomainTopic, dog)]);
+    }
+
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_update_sense_key_redb_backend() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_redb_rename_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wn = crate::wordnet::ReDBLexicon::create(dir.join("test.redb"), 1024 * 1024).unwrap();
+        let (dog, cat, mut wn) = link_two_senses(wn, SenseRelType::Antonym);
+        let new = SenseId::new("cat%1:05:99::");
+
+        wn.update_sense_key(&cat, &new).unwrap();
+
+        let (_, _, dog_sense) = wn.get_sense_by_id(&dog).unwrap().unwrap();
+        assert_eq!(dog_sense.antonym.iter().cloned().collect::<Vec<_>>(), vec![new.clone()]);
+        assert!(wn.has_sense(&new).unwrap());
+        assert!(!wn.has_sense(&cat).unwrap());
+        assert!(wn.sense_links_to_get(&cat).unwrap().map_or(true, |v| v.is_empty()));
+        assert_eq!(wn.sense_links_to_get(&new).unwrap().unwrap().into_owned(),
+            vec![(SenseRelType::Antonym, dog)]);
+        drop(wn);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_update_sense_key_survives_save_and_reload() {
+        let (mut wn, dog, cat) = two_linked_senses(SenseRelType::Antonym);
+        let new = SenseId::new("cat%1:05:99::");
+        wn.update_sense_key(&cat, &new).unwrap();
+
+        let dir = std::env::temp_dir().join(format!("ewe_test_rename_reload_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        wn.save(&dir, &mut NullProgress).unwrap();
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut NullProgress).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let (_, _, dog_sense) = reloaded.get_sense_by_id(&dog).unwrap().unwrap();
+        assert_eq!(dog_sense.antonym.iter().cloned().collect::<Vec<_>>(), vec![new.clone()]);
+        assert!(reloaded.has_sense(&new).unwrap());
+        assert!(!reloaded.has_sense(&cat).unwrap());
+    }
 }
