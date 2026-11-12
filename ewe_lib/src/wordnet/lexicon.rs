@@ -423,6 +423,39 @@ pub trait Lexicon: Sized {
             .collect())
     }
 
+    /// Get the entries that list `form` as an alternate form (see `Entry::form`)
+    fn entry_by_form<'a>(&'a self, form: &str, ignore_case: bool) -> Result<Vec<Cow<'a, Entry>>> {
+        let index = self
+            .lemma_index_cache()
+            .get_or_build(|| crate::wordnet::lemma_index::LemmaIndex::build(self))?;
+        let mut out = Vec::new();
+        for lemma in index.lemmas_for_form(form, ignore_case) {
+            for e in self.entry_by_lemma(&lemma)? {
+                let matches = e.form.iter().any(|f| {
+                    f == form || (ignore_case && f.to_lowercase() == form.to_lowercase())
+                });
+                if matches {
+                    out.push(Cow::Owned(e.into_owned()));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Look up a word by lemma, falling back to alternate forms if no lemma matches
+    fn lookup_word<'a>(&'a self, word: &str, ignore_case: bool) -> Result<Vec<Cow<'a, Entry>>> {
+        let found = if ignore_case {
+            self.entry_by_lemma_ignore_case(word)?
+        } else {
+            self.entry_by_lemma(word)?
+        };
+        if found.is_empty() {
+            self.entry_by_form(word, ignore_case)
+        } else {
+            Ok(found)
+        }
+    }
+
     /// Get the entry data (with the part of speech key) for a lemma
     fn entry_by_lemma_with_pos<'a>(&'a self, lemma: &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
         Ok(match self.entries_get(entry_key(lemma))? {
@@ -1542,6 +1575,20 @@ mod tests {
         assert_eq!(lexicon.lemma_search("cafe", None).unwrap(), vec!["café"]);
         assert_eq!(lexicon.lemma_complete("ice", 5).unwrap(), vec!["ice-cream"]);
         assert_eq!(lexicon.lemma_complete("icecrem", 5).unwrap(), vec!["ice-cream"]);
+    }
+
+    #[test]
+    fn test_lookup_by_form() {
+        let mut lexicon = LexiconHashMapBackend::new();
+        let pos = PosKey::new("n".to_string());
+        lexicon.insert_entry("goose".to_string(), pos.clone(), Entry::new()).unwrap();
+        assert!(lexicon.lookup_word("geese", false).unwrap().is_empty());
+        lexicon.add_form("goose", &pos, "geese".to_string()).unwrap();
+        assert_eq!(lexicon.lookup_word("geese", false).unwrap().len(), 1);
+        assert!(lexicon.lookup_word("Geese", false).unwrap().is_empty());
+        assert_eq!(lexicon.lookup_word("Geese", true).unwrap().len(), 1);
+        assert_eq!(lexicon.lookup_word("goose", false).unwrap().len(), 1);
+        assert_eq!(lexicon.lemma_search("geese", None).unwrap(), vec!["goose"]);
     }
 
     #[test]

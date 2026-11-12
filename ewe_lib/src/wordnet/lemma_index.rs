@@ -82,7 +82,12 @@ fn trigrams(s: &str) -> Vec<[char; 3]> {
 }
 
 pub struct LemmaIndex {
+    /// Searchable keys: every lemma, followed by every alternate form
     lemmas: Vec<String>,
+    /// For each key, the lemma it belongs to (the key itself for lemmas)
+    owners: Vec<String>,
+    /// Alternate form -> lemmas having that form
+    forms: HashMap<String, Vec<String>>,
     words: Vec<Vec<String>>,
     compact: Vec<String>,
     /// Lemma ids sorted by compact form
@@ -97,19 +102,37 @@ impl LemmaIndex {
     pub fn build<L: Lexicon>(lexicon: &L) -> Result<LemmaIndex> {
         let mut seen = HashSet::new();
         let mut all = Vec::new();
+        let mut form_pairs: Vec<(String, String)> = Vec::new();
         for section in lexicon.entries_iter()? {
             let (_, entries) = section?;
             for e in entries.entries()? {
-                let (lemma, _, _) = e?;
+                let (lemma, _, entry) = e?;
+                for f in &entry.form {
+                    if *f != lemma && !form_pairs.contains(&(f.clone(), lemma.clone())) {
+                        form_pairs.push((f.clone(), lemma.clone()));
+                    }
+                }
                 if seen.insert(lemma.clone()) {
                     all.push(lemma);
                 }
             }
         }
-        Ok(Self::from_lemmas(all))
+        Ok(Self::from_lemmas_and_forms(all, form_pairs))
     }
 
     pub fn from_lemmas(lemmas: Vec<String>) -> LemmaIndex {
+        Self::from_lemmas_and_forms(lemmas, Vec::new())
+    }
+
+    /// Build from lemmas and `(form, lemma)` pairs for alternate forms
+    pub fn from_lemmas_and_forms(mut lemmas: Vec<String>, form_pairs: Vec<(String, String)>) -> LemmaIndex {
+        let mut owners = lemmas.clone();
+        let mut forms: HashMap<String, Vec<String>> = HashMap::new();
+        for (f, l) in form_pairs {
+            lemmas.push(f.clone());
+            owners.push(l.clone());
+            forms.entry(f).or_default().push(l);
+        }
         let words: Vec<Vec<String>> = lemmas.iter().map(|l| normalize_words(l)).collect();
         let compact: Vec<String> = words.iter().map(|w| w.concat()).collect();
         let mut by_compact: Vec<u32> = (0..lemmas.len() as u32).collect();
@@ -128,11 +151,27 @@ impl LemmaIndex {
             }
         }
         by_word.sort();
-        LemmaIndex { lemmas, words, compact, by_compact, by_word, trigrams: tri }
+        LemmaIndex { lemmas, owners, forms, words, compact, by_compact, by_word, trigrams: tri }
     }
 
     pub fn len(&self) -> usize {
         self.lemmas.len()
+    }
+
+    /// Lemmas that list `form` as an alternate form (exact match, or ignoring case)
+    pub fn lemmas_for_form(&self, form: &str, ignore_case: bool) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for (f, ls) in &self.forms {
+            if f == form || (ignore_case && f.to_lowercase() == form.to_lowercase()) {
+                for l in ls {
+                    if !out.contains(l) {
+                        out.push(l.clone());
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
     }
 
     /// Find lemmas matching a query, best matches first
@@ -224,7 +263,14 @@ impl LemmaIndex {
                 }
             }
         }
-        out.into_iter().take(limit).map(|i| self.lemmas[i as usize].clone()).collect()
+        // Map forms back to their lemma, dropping duplicates
+        let mut done: HashSet<&str> = HashSet::new();
+        out.into_iter()
+            .map(|i| self.owners[i as usize].as_str())
+            .filter(|l| done.insert(*l))
+            .take(limit)
+            .map(|l| l.to_string())
+            .collect()
     }
 
     fn push_tier(&self, mut ids: Vec<u32>, seen: &mut HashSet<u32>, out: &mut Vec<u32>) {
@@ -282,6 +328,17 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect(),
         )
+    }
+
+    #[test]
+    fn test_forms() {
+        let i = LemmaIndex::from_lemmas_and_forms(
+            vec!["goose".to_string(), "geese-like".to_string()],
+            vec![("geese".to_string(), "goose".to_string())],
+        );
+        assert_eq!(i.search("geese", 10), vec!["goose", "geese-like"]);
+        assert_eq!(i.lemmas_for_form("Geese", true), vec!["goose"]);
+        assert!(i.lemmas_for_form("Geese", false).is_empty());
     }
 
     #[test]

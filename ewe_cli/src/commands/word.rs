@@ -1,4 +1,4 @@
-//! `ewe word` - searches for a word by lemma.
+//! `ewe word` - searches for a word by lemma or alternate form.
 
 use crate::common::{locate_wordnet, print_synset};
 use ewe_lib::wordnet::Lexicon;
@@ -10,12 +10,8 @@ pub(crate) fn run(word: &str, ignore_case: bool, sense_ids: bool, wordnet: Optio
         eprintln!("{}", e);
         exit(-1);
     });
-    let entries = if ignore_case {
-        wn.entry_by_lemma_ignore_case(word)
-            .expect("Cannot read wordnet")
-    } else {
-        wn.entry_by_lemma(word).expect("Cannot read wordnet")
-    };
+    // Falls back to alternate forms (e.g. "geese" -> "goose") if no lemma matches
+    let entries = wn.lookup_word(word, ignore_case).expect("Cannot read wordnet");
     if entries.is_empty() {
         println!("No entries found for '{}'", word);
         let suggestions = wn.lemma_search(word, Some(10)).unwrap_or_default();
