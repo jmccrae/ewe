@@ -310,7 +310,7 @@ fn strip_id_prefix<'a>(query: &'a str, id_prefix: &str) -> &'a str {
 #[cfg_attr(not(feature = "desktop"), get("/api/by_lemma/{lemma}"))]
 pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
     let lexicon = read_lexicon()?;
-    let lemmas = lexicon.entry_by_lemma(&lemma)?;
+    let lemmas = lexicon.lookup_word(&lemma, false)?;
     let synset_ids = lemmas
         .iter()
         .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
@@ -323,7 +323,7 @@ pub async fn get_lemma(lemma: String) -> Result<Vec<SynsetId>> {
 #[get("/api/lemma/{lemma}")]
 pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
     let lexicon = read_lexicon()?;
-    let entries = lexicon.entry_by_lemma(&lemma)?;
+    let entries = lexicon.lookup_word(&lemma, false)?;
     let synset_ids: BTreeSet<SynsetId> = entries
         .iter()
         .flat_map(|entry| entry.sense.iter().map(|sense| sense.synset.clone()))
@@ -344,7 +344,7 @@ pub async fn get_lemma_synsets(lemma: String) -> Result<Vec<MemberSynset>> {
 #[cfg_attr(not(feature = "desktop"), get("/api/lemma_description/{lemma}"))]
 pub async fn get_lemma_description(lemma: String) -> Result<Option<String>> {
     let lexicon = read_lexicon()?;
-    let entries = lexicon.entry_by_lemma(&lemma)?;
+    let entries = lexicon.lookup_word(&lemma, false)?;
     let Some(synset_id) = entries
         .iter()
         .find_map(|entry| entry.sense.first().map(|sense| sense.synset.clone()))

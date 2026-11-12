@@ -39,7 +39,9 @@ paths:
       description: >
         Returns the full synset record (definitions, relations, other
         members, ...) for every synset that has a sense for the exact
-        given lemma (across every part of speech).
+        given lemma (across every part of speech). If no lemma matches, entries
+        listing the given string as an alternate form (e.g. `geese` for
+        `goose`) are used instead.
       parameters:
         - $ref: '#/components/parameters/Lemma'
       responses:

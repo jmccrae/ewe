@@ -439,12 +439,11 @@ impl EweMcpServer {
         }): Parameters<LookupWordParams>,
     ) -> Result<String, String> {
         let state = self.state.lock().unwrap();
-        let entries = if ignore_case {
-            state.wn.entry_by_lemma_ignore_case(&word)
-        } else {
-            state.wn.entry_by_lemma(&word)
-        }
-        .map_err(|e| e.to_string())?;
+        // Falls back to alternate forms if no lemma matches
+        let entries = state
+            .wn
+            .lookup_word(&word, ignore_case)
+            .map_err(|e| e.to_string())?;
 
         let mut results = Vec::new();
         for entry in entries {
