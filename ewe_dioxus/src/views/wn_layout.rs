@@ -1,8 +1,9 @@
 use crate::backend::api::get_branding;
 use crate::backend::setup::get_setup_status;
 use crate::components::{
-    provide_dirty_state, provide_display_options, provide_panel_visibility, provide_project_name,
-    ProjectName, SetupNeeded, UnsavedChangesToast, ValidateButton,
+    provide_dirty_state, provide_display_options, provide_edit_guard, provide_panel_visibility,
+    provide_project_name, BeforeUnloadGuard, DiscardEditsModal, GuardedLink, ProjectName,
+    SetupNeeded, UnsavedChangesToast, ValidateButton,
 };
 use crate::Route;
 use dioxus::prelude::*;
@@ -13,7 +14,7 @@ use dioxus::prelude::*;
 #[component]
 fn WebOnlyFooterLinks() -> Element {
     rsx! {
-        Link { to: Route::Downloads {}, "Downloads" }
+        GuardedLink { to: Route::Downloads {}, "Downloads" }
         " | "
         a { href: "/api/docs", "JSON API documentation" }
         " | "
@@ -34,7 +35,7 @@ fn WebOnlyFooterLinks() -> Element {
 #[component]
 fn HistoryLink() -> Element {
     rsx! {
-        Link { to: Route::History {}, "History" }
+        GuardedLink { to: Route::History {}, "History" }
         " | "
     }
 }
@@ -157,6 +158,7 @@ pub fn WNLayout() -> Element {
     provide_display_options();
     provide_panel_visibility();
     provide_dirty_state();
+    provide_edit_guard();
     let mut project_name_ctx = provide_project_name();
 
     // Branding is fetched through a server function rather than reading
@@ -240,9 +242,9 @@ pub fn WNLayout() -> Element {
     rsx! {
         div {
             class: "container",
-            Link {
-                id: "logo",
-                class: if is_home { "home-logo" },
+            GuardedLink {
+                id: "logo".to_string(),
+                class: is_home.then(|| "home-logo".to_string()),
                 to: Route::Home {},
                 span {
                     id: "logo-img",
@@ -276,6 +278,8 @@ pub fn WNLayout() -> Element {
                 }
             }
             UnsavedChangesToast {}
+            DiscardEditsModal {}
+            BeforeUnloadGuard {}
         }
     }
 }
