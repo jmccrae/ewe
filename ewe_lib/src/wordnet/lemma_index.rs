@@ -198,11 +198,11 @@ impl LemmaIndex {
                 break;
             }
         }
-        // An exact match in the case that was typed ("Smith" for "Smith", "smith" for "smith")
-        // comes before the same word in another case.
+        // Within a tier, lemmas written in the case that was typed ("smith" for "smi", "Smith"
+        // for "Smi") come before the same word in another case, see `push_tier`.
         let typed = query.trim();
-        self.push_tier(exact, &mut seen, &mut out, |i| (self.lemmas[i as usize] != typed) as usize);
-        self.push_tier(prefix, &mut seen, &mut out, |_| 0);
+        self.push_tier(exact, &mut seen, &mut out, typed, |_| 0);
+        self.push_tier(prefix, &mut seen, &mut out, typed, |_| 0);
 
         // Tier 3: every query word is the prefix of some word of the lemma
         if out.len() < limit {
@@ -229,7 +229,7 @@ impl LemmaIndex {
                 let start = ws.iter().position(|w| w.starts_with(first.as_str())).unwrap_or(0);
                 (whole.is_none() as usize) * 1000 + whole.unwrap_or(start)
             };
-            self.push_tier(cands, &mut seen, &mut out, rank);
+            self.push_tier(cands, &mut seen, &mut out, typed, rank);
         }
 
         // Tier 4: typos
@@ -286,13 +286,19 @@ impl LemmaIndex {
     }
 
     /// Append a tier of matches, ordered by `rank`, then by length (the closer in length to
-    /// the query, the better) and finally alphabetically
+    /// the query, the better), then those starting with the query exactly as typed (so that
+    /// "smith" comes before "Smith" for "smi", plain byte order would put capitals first), and
+    /// finally alphabetically
     fn push_tier(&self, mut ids: Vec<u32>, seen: &mut HashSet<u32>, out: &mut Vec<u32>,
-                 rank: impl Fn(u32) -> usize) {
+                 typed: &str, rank: impl Fn(u32) -> usize) {
         ids.sort_by(|a, b| {
             rank(*a)
                 .cmp(&rank(*b))
                 .then(self.lemmas[*a as usize].len().cmp(&self.lemmas[*b as usize].len()))
+                .then(
+                    (!self.lemmas[*a as usize].starts_with(typed))
+                        .cmp(&!self.lemmas[*b as usize].starts_with(typed)),
+                )
                 .then(self.lemmas[*a as usize].cmp(&self.lemmas[*b as usize]))
         });
         for i in ids {
@@ -402,6 +408,13 @@ mod tests {
                  "Agropyron smithii"]
         );
         assert_eq!(&i.search("Smith", 2), &["Smith", "smith"]);
+
+        // Equally long matches: the case that was typed first, not capitals first
+        let i = LemmaIndex::from_lemmas(
+            ["Smith", "smile", "smirk", "smith", "Smits"].iter().map(|s| s.to_string()).collect(),
+        );
+        assert_eq!(i.search("smi", 10), vec!["smile", "smirk", "smith", "Smith", "Smits"]);
+        assert_eq!(i.search("Smi", 10), vec!["Smith", "Smits", "smile", "smirk", "smith"]);
     }
 
     #[test]
