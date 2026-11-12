@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use ewe_lib::wordnet::{MemberSynset, ScoredVec, SenseRelation, SynsetId};
 #[allow(unused_imports)]
-use crate::components::{confidence_draft, ConfidenceInput};
+use crate::components::{confidence_draft, ConfidenceInput, GuardedLink};
 
 #[allow(unused_imports)]
 use crate::components::relation_types::{RelationTypeInfo, SENSE_RELATION_TYPES, SYNSET_RELATION_TYPES};
@@ -183,7 +183,7 @@ fn render_synset_relation_group(
                 span {
                     key: "{id}",
                     class: "relation-edit-item",
-                    Link {
+                    GuardedLink {
                         to: Route::BySynset { synset: id.as_str().to_string() },
                         "{id.as_str()}"
                     }
@@ -294,7 +294,7 @@ fn render_sense_relation_group(
                     if let Some(tl) = &r.target_lemma {
                         "{tl} "
                     }
-                    Link {
+                    GuardedLink {
                         to: Route::BySynset { synset: r.target_synset.as_str().to_string() },
                         "({r.target_synset.as_str()})"
                     }

@@ -2,6 +2,12 @@
 //! They can be used to defined common UI elements like buttons, forms, and modals. In this template, we define a Hero
 //! component and an Echo component for fullstack apps to be used in our app.
 
+mod edit_guard;
+pub use edit_guard::{
+    provide_edit_guard, use_edit_guard, BeforeUnloadGuard, DiscardEditsModal, EditGuardRegistrar,
+    GuardedLink,
+};
+
 mod wordnet;
 pub use wordnet::WordNet;
 
