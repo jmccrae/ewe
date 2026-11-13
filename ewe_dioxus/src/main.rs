@@ -239,11 +239,15 @@ fn main() {
         // request that looks like a real browser navigation (see the doc
         // comment on `backend::downloads::download_file`), which broke
         // clicking a download link.
-        let router = dioxus::server::router(App)
-            .route(
-                "/downloads/{filename}",
-                dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
-            )
+        let router = dioxus::server::router(App);
+        // `dx bundle --desktop` also compiles with the `server` feature, but a desktop build has
+        // no Downloads page (`backend::downloads` is configured out), so skip the route there.
+        #[cfg(not(feature = "desktop"))]
+        let router = router.route(
+            "/downloads/{filename}",
+            dioxus_fullstack::axum::routing::get(backend::downloads::download_file),
+        );
+        let router = router
             .route("/favicon", dioxus_fullstack::axum::routing::get(backend::favicon::favicon))
             // For crawlers and older clients that request this directly rather than reading
             // the page's `<link rel="icon">`.

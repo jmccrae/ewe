@@ -25,7 +25,7 @@ jobs:
             ewe-cli-macos
             ewe-mcp-macos
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
 
   # Builds the desktop app as a single self-contained binary (see ewe_dioxus/src/backend/setup.rs
   # for why `desktop` doesn't need a separate server process) and packages it as a .dmg.
@@ -42,4 +42,4 @@ jobs:
         with:
           files: ewe-macos.dmg
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false

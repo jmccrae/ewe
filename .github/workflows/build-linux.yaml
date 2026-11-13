@@ -25,6 +25,8 @@ jobs:
             ewe-cli-linux
             ewe-mcp-linux
           prerelease: false
+          # Only this step writes the notes: each softprops step appends them to the existing
+          # release, so enabling it in all six release steps duplicated them (v0.3.0).
           generate_release_notes: true
 
   # Builds the desktop app as a single self-contained binary (see ewe_dioxus/src/backend/setup.rs
@@ -54,4 +56,4 @@ jobs:
             ewe-linux.deb
             ewe-linux.AppImage
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
