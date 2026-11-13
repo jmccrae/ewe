@@ -30,12 +30,30 @@ pub trait Entries : Sized {
     /// Save only the entries whose part of speech key satisfies `keep`
     fn save_filtered<W : Write>(&self, w : &mut W, keep : impl Fn(&PosKey) -> bool)
             -> result::Result<(), LexiconSaveError> {
+        self.save_filtered_edited(w, keep, &std::collections::HashMap::new())
+    }
+
+    /// Like `save_filtered`, writing the senses in `edits` in place of the stored ones
+    fn save_filtered_edited<W : Write>(&self, w : &mut W, keep : impl Fn(&PosKey) -> bool,
+            edits : &std::collections::HashMap<SenseId, Sense>)
+            -> result::Result<(), LexiconSaveError> {
         let mut last_lemma = None;
         for entry in self.entries()? {
             let (lemma, pos, entry) = entry?;
             if !keep(&pos) {
                 continue;
             }
+            let entry = if entry.sense.iter().any(|s| edits.contains_key(&s.id)) {
+                let mut edited = entry.into_owned();
+                for sense in edited.sense.iter_mut() {
+                    if let Some(replacement) = edits.get(&sense.id) {
+                        *sense = replacement.clone();
+                    }
+                }
+                Cow::Owned(edited)
+            } else {
+                entry
+            };
             if last_lemma.is_none() || last_lemma.as_ref().unwrap() != &lemma {
                 write!(w, "{}:\n", escape_yaml_string(&lemma,0,0))?;
             }

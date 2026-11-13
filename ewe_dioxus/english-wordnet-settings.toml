@@ -44,6 +44,11 @@ footer = """
 primary = "#002868"
 accent = "#bf0a30"
 
+# How relations between names (part of speech `e`) and the rest are stored in the YAML files:
+# "merged" (the default) stores each where it was made, "separate" stores every one of them in
+# the name files only, so that the other files do not refer to names. Loading reads both.
+# names_layout = "separate"
+
 # Validation checks to skip (all default to false); also read by the `ewe` CLI and `ewe-mcp`.
 # [validation]
 # skip_symmetric = false

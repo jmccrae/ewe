@@ -27,6 +27,9 @@ pub use pos::{PartOfSpeech, PosKey};
 mod util;
 pub use util::{WordNetYAMLIOError, LexiconError, LexiconSaveError, string_or_vec};
 
+pub mod names_layout;
+pub use names_layout::{NamesLayout, StorageOptions};
+
 pub mod deprecation;
 pub use deprecation::DeprecationRecord;
 

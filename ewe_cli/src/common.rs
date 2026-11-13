@@ -122,16 +122,22 @@ pub(crate) fn save<L: Lexicon>(
         let really_save = input("Do you really want to save [y/N]? ").to_lowercase();
         if really_save == "y" {
             let mut progress = IndicatifProgress::new();
-            wn.save(path, &mut progress)?;
+            wn.save_with(path, &mut progress, &storage_options(path))?;
             Ok(true)
         } else {
             Ok(false)
         }
     } else {
         let mut progress = IndicatifProgress::new();
-        wn.save(path, &mut progress)?;
+        wn.save_with(path, &mut progress, &storage_options(path))?;
         Ok(true)
     }
+}
+
+/// How the project's `settings.toml` says to lay out the YAML files (`names_layout`). A
+/// settings file that cannot be read gives the default; loading has already reported it.
+fn storage_options(path: &str) -> ewe_lib::wordnet::StorageOptions {
+    ewe_lib::wordnet::StorageOptions::for_wordnet(Path::new(path)).unwrap_or_default()
 }
 
 pub(crate) fn input(prompt: &str) -> String {

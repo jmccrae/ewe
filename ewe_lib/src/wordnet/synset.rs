@@ -18,10 +18,16 @@ pub trait Synsets : Sized {
     fn len(&self) -> Result<usize>;
     fn remove_entry(&mut self, id : &SynsetId) -> Result<Option<(SynsetId, Synset)>>;
     fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
+        self.save_edited(w, &std::collections::HashMap::new())
+    }
+
+    /// Save, writing the synsets in `edits` in place of the stored ones
+    fn save_edited<W : Write>(&self, w : &mut W, edits : &std::collections::HashMap<SynsetId, Synset>)
+            -> result::Result<(), LexiconSaveError> {
         for ss in self.iter()? {
             let (key, ss) = ss?;
             write!(w, "{}:", key.as_str())?;
-            ss.save(w)?;
+            edits.get(&key).unwrap_or(&ss).save(w)?;
             write!(w, "\n")?;
         }
         Ok(())
@@ -137,7 +143,50 @@ pub struct Synset {
     #[serde(default)]
     pub masculine : ScoredVec<SynsetId>,
     #[serde(default)]
-    pub other : ScoredVec<SynsetId>
+    pub other : ScoredVec<SynsetId>,
+    // The inverse forms of the relations above, as written on the other end of a relation in the
+    // `separate` names layout (see `names_layout`). They are only ever read from YAML: loading
+    // moves each one onto the synset it points at as the ordinary relation, so they are empty
+    // in a loaded lexicon and never stored in the database.
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub has_domain_region : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub has_domain_topic : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holo_location : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holo_member : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holo_part : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holo_portion : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holo_substance : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub holonym : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub hyponym : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub instance_hyponym : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_caused_by : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_entailed_by : ScoredVec<SynsetId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_exemplified_by : ScoredVec<SynsetId>
 }
 
 impl Synset {
@@ -170,7 +219,20 @@ impl Synset {
             similar : Vec::new().into(),
             feminine : Vec::new().into(),
             masculine : Vec::new().into(),
-            other : Vec::new().into()
+            other : Vec::new().into(),
+            has_domain_region : Vec::new().into(),
+            has_domain_topic : Vec::new().into(),
+            holo_location : Vec::new().into(),
+            holo_member : Vec::new().into(),
+            holo_part : Vec::new().into(),
+            holo_portion : Vec::new().into(),
+            holo_substance : Vec::new().into(),
+            holonym : Vec::new().into(),
+            hyponym : Vec::new().into(),
+            instance_hyponym : Vec::new().into(),
+            is_caused_by : Vec::new().into(),
+            is_entailed_by : Vec::new().into(),
+            is_exemplified_by : Vec::new().into()
         }
     }
 
@@ -345,6 +407,54 @@ impl Synset {
         }
     }
 
+    /// The sources that point at this synset with the forward form of `rel`, as read from the
+    /// YAML of the `separate` names layout (`hyponym`, `holo_member`, ...). Empty unless the
+    /// lexicon is being loaded or saved. `None` for a relation type that has no such field.
+    pub(crate) fn inverse_rel_targets(&self, rel : &SynsetRelType) -> Option<&ScoredVec<SynsetId>> {
+        match rel {
+            SynsetRelType::HasDomainRegion => Some(&self.has_domain_region),
+            SynsetRelType::HasDomainTopic => Some(&self.has_domain_topic),
+            SynsetRelType::HoloLocation => Some(&self.holo_location),
+            SynsetRelType::HoloMember => Some(&self.holo_member),
+            SynsetRelType::HoloPart => Some(&self.holo_part),
+            SynsetRelType::HoloPortion => Some(&self.holo_portion),
+            SynsetRelType::HoloSubstance => Some(&self.holo_substance),
+            SynsetRelType::Holonym => Some(&self.holonym),
+            SynsetRelType::Hyponym => Some(&self.hyponym),
+            SynsetRelType::InstanceHyponym => Some(&self.instance_hyponym),
+            SynsetRelType::IsCausedBy => Some(&self.is_caused_by),
+            SynsetRelType::IsEntailedBy => Some(&self.is_entailed_by),
+            SynsetRelType::IsExemplifiedBy => Some(&self.is_exemplified_by),
+            _ => None
+        }
+    }
+
+    pub(crate) fn inverse_rel_targets_mut(&mut self, rel : &SynsetRelType) -> Option<&mut ScoredVec<SynsetId>> {
+        match rel {
+            SynsetRelType::HasDomainRegion => Some(&mut self.has_domain_region),
+            SynsetRelType::HasDomainTopic => Some(&mut self.has_domain_topic),
+            SynsetRelType::HoloLocation => Some(&mut self.holo_location),
+            SynsetRelType::HoloMember => Some(&mut self.holo_member),
+            SynsetRelType::HoloPart => Some(&mut self.holo_part),
+            SynsetRelType::HoloPortion => Some(&mut self.holo_portion),
+            SynsetRelType::HoloSubstance => Some(&mut self.holo_substance),
+            SynsetRelType::Holonym => Some(&mut self.holonym),
+            SynsetRelType::Hyponym => Some(&mut self.hyponym),
+            SynsetRelType::InstanceHyponym => Some(&mut self.instance_hyponym),
+            SynsetRelType::IsCausedBy => Some(&mut self.is_caused_by),
+            SynsetRelType::IsEntailedBy => Some(&mut self.is_entailed_by),
+            SynsetRelType::IsExemplifiedBy => Some(&mut self.is_exemplified_by),
+            _ => None
+        }
+    }
+
+    /// Whether any inverse relation is waiting to be moved onto the synset it points at
+    pub(crate) fn has_inverse_rels(&self) -> bool {
+        SynsetRelType::INVERSE_ONLY.iter().any(|rel| {
+            self.inverse_rel_targets(rel).is_some_and(|targets| !targets.is_empty())
+        })
+    }
+
     pub fn rel_targets_mut(&mut self, rel : &SynsetRelType) -> Option<&mut ScoredVec<SynsetId>> {
         match rel {
             SynsetRelType::Also => Some(&mut self.also),
@@ -413,7 +523,16 @@ impl Synset {
         }
         write_prop_synset(w, &self.exemplifies, "exemplifies")?;
         write_prop_synset(w, &self.feminine, "feminine")?;
+        write_prop_synset(w, &self.has_domain_region, "has_domain_region")?;
+        write_prop_synset(w, &self.has_domain_topic, "has_domain_topic")?;
+        write_prop_synset(w, &self.holo_location, "holo_location")?;
+        write_prop_synset(w, &self.holo_member, "holo_member")?;
+        write_prop_synset(w, &self.holo_part, "holo_part")?;
+        write_prop_synset(w, &self.holo_portion, "holo_portion")?;
+        write_prop_synset(w, &self.holo_substance, "holo_substance")?;
+        write_prop_synset(w, &self.holonym, "holonym")?;
         write_prop_synset(w, &self.hypernym, "hypernym")?;
+        write_prop_synset(w, &self.hyponym, "hyponym")?;
         match &self.ili {
             // An empty ILI is a deliberate "no ILI and no ILI definition" marker, so it must be
             // quoted: a bare `ili:` would read back as null, i.e. as "no ILI set".
@@ -432,6 +551,10 @@ impl Synset {
             None => {}
         }
         write_prop_synset(w, &self.instance_hypernym, "instance_hypernym")?;
+        write_prop_synset(w, &self.instance_hyponym, "instance_hyponym")?;
+        write_prop_synset(w, &self.is_caused_by, "is_caused_by")?;
+        write_prop_synset(w, &self.is_entailed_by, "is_entailed_by")?;
+        write_prop_synset(w, &self.is_exemplified_by, "is_exemplified_by")?;
         write!(w, "\n  members:")?;
         for m in self.members.iter() {
             write!(w, "\n  - {}", escape_yaml_string(m, 4,4))?;

@@ -328,13 +328,38 @@ pub trait Lexicon: Sized {
         Ok(self)
     }
 
-    /// Save a lexicon to a set of files
+    /// Save a lexicon to a set of files, with the default storage options
     fn save<P: AsRef<Path>, Bar: Progress>(
         &self,
         folder: P,
         bar: &mut Bar,
     ) -> result::Result<(), LexiconSaveError> {
+        self.save_with(folder, bar, &crate::wordnet::StorageOptions::default())
+    }
+
+    /// Save a lexicon to a set of files, laid out as `options` says
+    fn save_with<P: AsRef<Path>, Bar: Progress>(
+        &self,
+        folder: P,
+        bar: &mut Bar,
+        options: &crate::wordnet::StorageOptions,
+    ) -> result::Result<(), LexiconSaveError> {
         bar.start(73);
+        // In the `separate` names layout the relations between names and the rest are written
+        // in the name files only: these are the synsets and senses that differ because of it
+        let edits = if options.names_layout == crate::wordnet::NamesLayout::Separate {
+            let edits = crate::wordnet::names_layout::separate_edits(self)?;
+            if !edits.leftovers.is_empty() {
+                eprintln!(
+                    "Warning: {} relation(s) from the common vocabulary to names have no inverse form and stay in the base files, e.g. {}",
+                    edits.leftovers.len(),
+                    edits.leftovers[0]
+                );
+            }
+            edits
+        } else {
+            Default::default()
+        };
         // Only the sections that have entries are written, except that a lexicon using only
         // '0' and 'a'..='z' (including a brand new, empty one) always gets the complete set
         // entries-0.yaml..entries-z.yaml, matching the real OEWN layout.
@@ -345,12 +370,12 @@ pub trait Lexicon: Sized {
             let (ekey, entries) = entries?;
             let name = format!("entries-{}.yaml", key_to_name(ekey));
             let mut w = File::create(folder.as_ref().join(&name))?;
-            entries.save_filtered(&mut w, |pos| !is_name_pos(pos))?;
+            entries.save_filtered_edited(&mut w, |pos| !is_name_pos(pos), &edits.senses)?;
             written_names.insert(name);
             written_keys.insert(ekey);
             // Names (part of speech `e`) go to their own file, never into the common one
             let mut name_buf = Vec::new();
-            entries.save_filtered(&mut name_buf, is_name_pos)?;
+            entries.save_filtered_edited(&mut name_buf, is_name_pos, &edits.senses)?;
             if !name_buf.is_empty() {
                 name_sections.push((ekey, name_buf));
             }
@@ -400,7 +425,7 @@ pub trait Lexicon: Sized {
         for synsets in self.synsets_iter()? {
             let (skey, synsets) = synsets?;
             let mut w = File::create(folder.as_ref().join(format!("{}.yaml", skey)))?;
-            synsets.save(&mut w)?;
+            synsets.save_edited(&mut w, &edits.synsets)?;
             bar.inc(1);
         }
         // A flat `key: description` mapping - the inverse of the `frames.yaml` loading in
@@ -1466,6 +1491,9 @@ fn dedup_preserve_order<T: Eq + std::hash::Hash + Clone>(items: &mut Vec<T>) {
 pub(crate) fn finalize_bulk_load<L: Lexicon>(
     lexicon: &mut L,
 ) -> result::Result<(), WordNetYAMLIOError> {
+    // Relations written in their inverse form on a name (the `separate` names layout) go back
+    // to the synset or sense they come from, before anything is indexed
+    crate::wordnet::names_layout::apply_inverse_relations(lexicon)?;
     // The four sense-synset relation fields (domain_topic/domain_region/
     // exemplifies/other) come off disk as `UnresolvedSenseOrSynsetId::Unresolved`
     // raw strings - `Deserialize` has no lexicon access to classify them.

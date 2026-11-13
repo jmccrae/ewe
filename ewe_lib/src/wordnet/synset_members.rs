@@ -578,7 +578,9 @@ impl MemberSynset {
             similar: self.similar,
             feminine: self.feminine,
             masculine: self.masculine,
-            other: self.other
+            other: self.other,
+            // the inverse forms that only the YAML of the `separate` names layout carries
+            ..Synset::new(self.part_of_speech)
         }
     }
 }
