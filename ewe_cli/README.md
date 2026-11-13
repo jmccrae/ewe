@@ -153,6 +153,29 @@ as an asterisk in the lemma. `ewe export xml --lmf-version 1.5` writes it as WN-
 `Lemma/@reconstructed`; the default, `--lmf-version 1.4`, has no such attribute, so it is
 omitted and a warning is printed with the number of lemmas affected.
 
+## Names (proper nouns)
+
+Names are synsets with part of speech `e` (ids ending `-e`, `name.*` lexfiles, entries in
+`entries-<LETTER>-name.yaml`). `ewe export xml|wndb|rdf` and `ewe stats` take `--names` to choose
+which of them a release or report covers:
+
+| `--names` | Result |
+| --- | --- |
+| `include` (default) | Everything as stored; names keep their `-e` ids and part of speech `e`. |
+| `exclude` | The core edition: no names, and no relation, sense or member that refers to one. |
+| `only` | Just the names, without anything that refers to the common vocabulary. |
+| `merged` | The names as ordinary nouns (`-n` ids, `noun.*` lexfiles, a name entry joined to the noun entry of the same lemma), as in releases before names had their own part of speech. |
+
+WNDB has no part of speech for names: with `include` they are left out (a note is printed),
+`only` is an error and `merged` writes them into `data.noun`/`index.noun`. A
+`src/sense-orders.csv` row may list synsets that are not exported; the others are still ordered
+as the row says.
+
+```
+ewe export xml core.xml --names exclude
+ewe export wndb wndb/ --names merged
+```
+
 ## Non-interactive validation (CI)
 
 `ewe validate` runs validation without any prompting and exits with status `0` if there are no

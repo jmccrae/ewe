@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::exit;
 use std::result;
 
 /// Whether `path` looks like a YAML wordnet source directory. `entries-a.yaml` is the
@@ -28,6 +29,45 @@ fn has_entries_file(path: &Path) -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+/// Which names (proper nouns) an export or the statistics cover, see
+/// `ewe_lib::names::NamesMode`
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum NamesArg {
+    /// Everything: names keep their `-e` ids and part of speech `e`
+    #[default]
+    Include,
+    /// The core edition, without names
+    Exclude,
+    /// Only the names
+    Only,
+    /// The names as ordinary nouns (`-n` ids, `noun.*` lexfiles), as in releases before names
+    /// had their own part of speech
+    Merged,
+}
+
+impl From<NamesArg> for ewe_lib::names::NamesMode {
+    fn from(arg: NamesArg) -> Self {
+        match arg {
+            NamesArg::Include => ewe_lib::names::NamesMode::Include,
+            NamesArg::Exclude => ewe_lib::names::NamesMode::Exclude,
+            NamesArg::Only => ewe_lib::names::NamesMode::Only,
+            NamesArg::Merged => ewe_lib::names::NamesMode::Merged,
+        }
+    }
+}
+
+/// The wordnet restricted to the chosen names, exiting with an error message if that is not
+/// possible. `Include` returns the wordnet itself.
+pub(crate) fn apply_names(wn: LexiconHashMapBackend, names: NamesArg) -> LexiconHashMapBackend {
+    if names == NamesArg::Include {
+        return wn;
+    }
+    ewe_lib::names::restrict_names(&wn, names.into()).unwrap_or_else(|e| {
+        eprintln!("Could not select names: {}", e);
+        exit(-1);
+    })
 }
 
 pub(crate) fn locate_wordnet(

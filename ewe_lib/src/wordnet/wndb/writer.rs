@@ -871,14 +871,20 @@ fn write_index<L: Lexicon>(
         // `senseOrders.get(...)` block in `writeIndex`.
         if let Some(csv_order) = sense_orders.get(lemma_lower) {
             if csv_order.first().is_some_and(|id| id.as_str().ends_with(bucket_pos.value())) {
-                let csv_no_pos: Vec<&str> = csv_order.iter().map(|id| no_pos(id.as_str())).collect();
                 let cur_no_pos: Vec<&str> = synset_ids.iter().map(|id| no_pos(id.as_str())).collect();
-                let mut csv_set: Vec<&str> = csv_no_pos.clone();
-                csv_set.sort();
-                csv_set.dedup();
                 let mut cur_set: Vec<&str> = cur_no_pos.clone();
                 cur_set.sort();
                 cur_set.dedup();
+                // The CSV can list synsets that are not in this export (names, when they are
+                // left out): only the ones that are exported take part in the ordering.
+                let csv_no_pos: Vec<&str> = csv_order
+                    .iter()
+                    .map(|id| no_pos(id.as_str()))
+                    .filter(|id| cur_set.binary_search(id).is_ok())
+                    .collect();
+                let mut csv_set: Vec<&str> = csv_no_pos.clone();
+                csv_set.sort();
+                csv_set.dedup();
                 if csv_set == cur_set {
                     let mut with_key: Vec<(usize, SynsetId)> = synset_ids
                         .into_iter()
@@ -1297,6 +1303,50 @@ mod tests {
         // "second" is the 1st word on the line.
         assert!(line.contains("+ 00000"), "{line}");
         assert!(line.contains(" n 0101 "), "{line}");
+    }
+
+    /// A sense-orders row can list synsets that are not exported (names are left out of WNDB):
+    /// the others are still ordered as the row says.
+    #[test]
+    fn test_sense_order_ignores_synsets_that_are_not_exported() {
+        let mut wn = LexiconHashMapBackend::new();
+        for (id, lexfile, pos, definition) in [
+            ("00000003-n", "noun.location", Pos::n, "a place"),
+            ("00000004-n", "noun.person", Pos::n, "a prince"),
+            ("00000010-e", "name.location", Pos::e, "a capital"),
+        ] {
+            let mut ss = Synset::new(pos);
+            ss.definition.push(definition.to_string());
+            wn.insert_synset(lexfile.to_string(), SsId::new(id), ss).unwrap();
+        }
+        let mut entry = Entry::new();
+        // the entry lists the prince first, the sense-orders row the place
+        entry.sense.push(Sense::new(SId::new("paris%1:18:00::"), SsId::new("00000004-n")));
+        entry.sense.push(Sense::new(SId::new("paris%1:15:00::"), SsId::new("00000003-n")));
+        wn.insert_entry("paris".to_string(), PosKey::new("n"), entry).unwrap();
+        let mut name = Entry::new();
+        name.sense.push(Sense::new(SId::new("paris%1:15:01::"), SsId::new("00000010-e")));
+        wn.insert_entry("paris".to_string(), PosKey::new("e"), name).unwrap();
+
+        let csv = std::env::temp_dir().join(format!("ewe_wndb_orders_{}.csv", std::process::id()));
+        std::fs::write(&csv, "paris,n,00000003 00000010 00000004\n").unwrap();
+        let out_dir = std::env::temp_dir().join(format!("ewe_wndb_orders_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out_dir);
+        write_wndb(&wn, &out_dir, &WndbExportOptions { license_file: None, sense_orders: Some(csv) }).unwrap();
+
+        let index = std::fs::read_to_string(out_dir.join("index.noun")).unwrap();
+        let offsets: Vec<u32> = index
+            .lines()
+            .find(|l| l.starts_with("paris "))
+            .unwrap()
+            .split_whitespace()
+            .rev()
+            .take(2)
+            .map(|o| o.parse().unwrap())
+            .collect();
+        // listed in the order of the row (00000003 first), and 00000003 comes first in data.noun
+        assert_eq!(offsets.len(), 2);
+        assert!(offsets[1] < offsets[0], "{index}");
     }
 
     #[test]

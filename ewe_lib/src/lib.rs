@@ -14,3 +14,4 @@ pub mod automaton;
 pub mod progress;
 pub mod source_mtime;
 pub mod stats;
+pub mod names;

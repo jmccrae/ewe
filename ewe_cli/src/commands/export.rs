@@ -1,10 +1,10 @@
 //! `ewe export` - writes the wordnet out as XML, WNDB, or RDF.
 
-use crate::common::locate_wordnet;
+use crate::common::{apply_names, locate_wordnet, NamesArg};
 use clap::Subcommand;
 use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
 use ewe_lib::wordnet::xml::write_lexicon_xml_report;
-use ewe_lib::wordnet::{write_wndb, LexiconMetadata, LmfVersion, WndbExportOptions};
+use ewe_lib::wordnet::{write_wndb, Lexicon, LexiconMetadata, LmfVersion, PartOfSpeech, WndbExportOptions};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -47,6 +47,12 @@ pub(crate) enum ExportFormat {
         /// with a warning
         #[arg(long, default_value = "1.4")]
         lmf_version: LmfVersion,
+
+        /// Which names (proper nouns, part of speech `e`) to export: `include` everything,
+        /// `exclude` them for the core edition, `only` the names, or `merged` to export them
+        /// as ordinary nouns
+        #[arg(long, value_enum, default_value_t = NamesArg::Include)]
+        names: NamesArg,
     },
     /// Export as the classic WNDB (Princeton WordNet database) file set
     /// (data.*/index.*/index.sense/*.exc)
@@ -60,6 +66,12 @@ pub(crate) enum ExportFormat {
         /// or point at a file explicitly when there's no such default to find.
         #[arg(long)]
         license_file: Option<PathBuf>,
+
+        /// Which names (proper nouns, part of speech `e`) to export: `include` everything,
+        /// `exclude` them for the core edition, `merged` to write them as ordinary nouns.
+        /// WNDB has no names of its own, so with `include` they are left out and `only` is an error
+        #[arg(long, value_enum, default_value_t = NamesArg::Include)]
+        names: NamesArg,
     },
     /// Export as a whole-lexicon RDF document (Turtle or RDF/XML), suitable for an
     /// `en-word.net`-style RDF release - every `LexicalEntry` is declared exactly once,
@@ -95,6 +107,12 @@ pub(crate) enum ExportFormat {
         /// The header's `schema:url` project homepage (defaults to `--site` if unset)
         #[arg(long)]
         url: Option<String>,
+
+        /// Which names (proper nouns, part of speech `e`) to export: `include` everything,
+        /// `exclude` them for the core edition, `only` the names, or `merged` to export them
+        /// as ordinary nouns
+        #[arg(long, value_enum, default_value_t = NamesArg::Include)]
+        names: NamesArg,
     },
 }
 
@@ -161,13 +179,28 @@ fn default_sense_orders(wordnet: &Option<PathBuf>) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-pub(crate) fn run_wndb(path: &Path, license_file: Option<PathBuf>, wordnet: Option<PathBuf>) {
+pub(crate) fn run_wndb(
+    path: &Path,
+    license_file: Option<PathBuf>,
+    names: NamesArg,
+    wordnet: Option<PathBuf>,
+) {
     let license_file = license_file.or_else(|| default_license_file(&wordnet));
     let sense_orders = default_sense_orders(&wordnet);
     let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
     });
+    if names == NamesArg::Only {
+        eprintln!("WNDB has no part of speech for names, so --names only would be empty. Use --names merged to write them as nouns.");
+        exit(-1);
+    }
+    if names == NamesArg::Include
+        && wn.synsets().is_ok_and(|mut ss| ss.any(|s| s.is_ok_and(|(_, s)| s.part_of_speech == PartOfSpeech::e)))
+    {
+        eprintln!("Note: names have no place in WNDB and are left out. Use --names merged to write them as nouns.");
+    }
+    let wn = apply_names(wn, names);
     let options = WndbExportOptions {
         license_file,
         sense_orders,
@@ -179,7 +212,7 @@ pub(crate) fn run_wndb(path: &Path, license_file: Option<PathBuf>, wordnet: Opti
     println!("Wrote {}", path.display());
 }
 
-pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, wordnet: Option<PathBuf>) {
+pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, names: NamesArg, wordnet: Option<PathBuf>) {
     let (wordnet_path, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
@@ -192,6 +225,7 @@ pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, wordnet: Optio
             })
             .unwrap_or_else(|| "en".to_string());
     }
+    let wn = apply_names(wn, names);
     let output = write_lexicon_xml_report(&wn, &metadata).unwrap_or_else(|e| {
         eprintln!("Could not generate XML: {}", e);
         exit(-1);
@@ -206,11 +240,12 @@ pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, wordnet: Optio
     println!("Wrote {} (WN-LMF {})", path.display(), metadata.lmf_version.as_str());
 }
 
-pub(crate) fn run_rdf(path: &Path, options: RdfExportOptions, wordnet: Option<PathBuf>) {
+pub(crate) fn run_rdf(path: &Path, options: RdfExportOptions, names: NamesArg, wordnet: Option<PathBuf>) {
     let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(-1);
     });
+    let wn = apply_names(wn, names);
     let rdf = write_lexicon_rdf(&wn, &options).unwrap_or_else(|e| {
         eprintln!("Could not generate RDF: {}", e);
         exit(-1);
