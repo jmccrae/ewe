@@ -415,7 +415,12 @@ fn perform_save(state: &mut ServerState, force: bool) -> Result<(bool, Vec<Strin
         let mut save_progress = NullProgress;
         state
             .wn
-            .save(&state.path, &mut save_progress)
+            .save_with(
+                &state.path,
+                &mut save_progress,
+                &ewe_lib::wordnet::StorageOptions::for_wordnet(Path::new(&state.path))
+                    .unwrap_or_default(),
+            )
             .map_err(|e| e.to_string())?;
         state.loaded_mtime = source_mtime(&state.path);
         true

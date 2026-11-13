@@ -376,7 +376,12 @@ pub async fn save_lexicon(force: bool) -> Result<SaveResult> {
 
         let mut progress = SharedProgress::new("Saving");
         lexicon
-            .save(&source, &mut progress)
+            .save_with(
+                &source,
+                &mut progress,
+                &ewe_lib::wordnet::StorageOptions::for_wordnet(std::path::Path::new(&source))
+                    .unwrap_or_default(),
+            )
             .map_err(|e| EweEditError::Save(e.to_string()))?;
 
         if let Some((latest_id, _)) = changelog_recent(&*lexicon, 1, None)

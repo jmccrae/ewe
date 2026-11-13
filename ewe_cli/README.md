@@ -176,6 +176,26 @@ ewe export xml core.xml --names exclude
 ewe export wndb wndb/ --names merged
 ```
 
+### Where the relations between names and the rest are stored
+
+By default a relation is stored where it was made, so the common files (`noun.*.yaml`, ...)
+refer to name synsets and name senses that only exist in the name files, and the data is not
+usable without them. Setting `names_layout = "separate"` in the project's `settings.toml` makes
+every save write each relation between a name and anything else in the name files only, on the
+name end, in its inverse form, so the common files are self-contained:
+
+- a synset relation is written under the name synset with the inverse key: `hyponym`,
+  `instance_hyponym`, `holo_member`, `holo_part`, `has_domain_region`, `has_domain_topic`, ...
+  (symmetric relations such as `also`, `similar` and `attribute` just get their copy there);
+- a sense relation is written under the name sense in an `inverse:` block that maps the relation
+  to the senses that have it (`inverse: {pertainym: [parisian%3:01:00::]}`); symmetric ones
+  (`derivation`, `antonym`, ...) are written on the name sense as usual.
+
+Loading understands both layouts whatever the setting, so a project can be switched in either
+direction: saving once rewrites the files. In memory nothing changes, and relations that have no
+inverse form (`feminine`, `masculine`, `other`) stay in the common files with a warning. Loading
+only the common files gives the same wordnet as `--names exclude`.
+
 ## Non-interactive validation (CI)
 
 `ewe validate` runs validation without any prompting and exits with status `0` if there are no

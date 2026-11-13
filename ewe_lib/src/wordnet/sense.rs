@@ -96,6 +96,14 @@ pub struct Sense {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sent: Vec<String>,
+
+    /// Relations of other senses that point at this one, written on this sense in the
+    /// `separate` names layout: the relation name (`pertainym`) to the senses that have it.
+    /// Only ever read from YAML: loading moves each onto the sense it comes from as the
+    /// ordinary relation, so it is empty in a loaded lexicon and never stored in the database.
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub inverse: std::collections::BTreeMap<String, ScoredVec<SenseId>>,
 }
 
 impl Sense {
@@ -131,6 +139,7 @@ impl Sense {
             adjposition: None,
             confidence: None,
             sent: Vec::new(),
+            inverse: Default::default(),
         }
     }
 
@@ -258,6 +267,19 @@ impl Sense {
             )?;
         }
         write_prop_sense(w, &self.instrument, "instrument", first)?;
+        if !self.inverse.is_empty() {
+            write!(w, "\n      inverse:")?;
+            for (rel, sources) in self.inverse.iter().filter(|(_, s)| !s.is_empty()) {
+                write!(w, "\n        {}:", rel)?;
+                for (source, confidence) in sources.iter_scored() {
+                    match confidence {
+                        None => write!(w, "\n        - {}", escape_yaml_string(source.as_str(), 10, 10))?,
+                        Some(c) => write!(w, "\n        - confidence: {}\n          target: {}",
+                            format_confidence(c), escape_yaml_string(source.as_str(), 12, 12))?,
+                    }
+                }
+            }
+        }
         write_prop_sense(w, &self.location, "location", first)?;
         write_prop_sense(w, &self.material, "material", first)?;
         write_prop_sense(w, &self.other, "other", first)?;

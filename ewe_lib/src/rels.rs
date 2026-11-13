@@ -367,6 +367,17 @@ impl SynsetRelType {
         }
     }
 
+    /// The relation types that are never stored as such (`hyponym`, `holo_member`, ...): each
+    /// is the inverse of one that is. They can still be written in the YAML of the `separate`
+    /// names layout, see `Synset::inverse_rel_targets`.
+    pub const INVERSE_ONLY: [SynsetRelType; 13] = [
+        SynsetRelType::HasDomainRegion, SynsetRelType::HasDomainTopic,
+        SynsetRelType::HoloLocation, SynsetRelType::HoloMember, SynsetRelType::HoloPart,
+        SynsetRelType::HoloPortion, SynsetRelType::HoloSubstance, SynsetRelType::Holonym,
+        SynsetRelType::Hyponym, SynsetRelType::InstanceHyponym, SynsetRelType::IsCausedBy,
+        SynsetRelType::IsEntailedBy, SynsetRelType::IsExemplifiedBy,
+    ];
+
     pub fn inverse(&self) -> Option<SynsetRelType> {
         match self {
             SynsetRelType::Also => Some(SynsetRelType::Also),
