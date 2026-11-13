@@ -24,9 +24,18 @@ pub trait Entries : Sized {
     fn lemma_by_prefix(&self, prefix : &str, max_results : usize) -> Result<Vec<String>>;
     
     fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
+        self.save_filtered(w, |_| true)
+    }
+
+    /// Save only the entries whose part of speech key satisfies `keep`
+    fn save_filtered<W : Write>(&self, w : &mut W, keep : impl Fn(&PosKey) -> bool)
+            -> result::Result<(), LexiconSaveError> {
         let mut last_lemma = None;
         for entry in self.entries()? {
             let (lemma, pos, entry) = entry?;
+            if !keep(&pos) {
+                continue;
+            }
             if last_lemma.is_none() || last_lemma.as_ref().unwrap() != &lemma {
                 write!(w, "{}:\n", escape_yaml_string(&lemma,0,0))?;
             }

@@ -155,10 +155,8 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
            }
            match wn.synset_by_id(&sense.synset)? {
                Some(synset) => {
-                   if poskey.to_part_of_speech() == None ||
-                       synset.part_of_speech != poskey.to_part_of_speech().unwrap() && 
-                       !(synset.part_of_speech == PartOfSpeech::s &&
-                         poskey.to_part_of_speech().unwrap() == PartOfSpeech::a) {
+                   if !poskey.to_part_of_speech().is_some_and(|entry_pos|
+                       PartOfSpeech::entry_accepts_synset(entry_pos, synset.part_of_speech)) {
                         errors.push(ValidationError::EntryPartOfSpeech {
                             id: sense.id.clone(),
                             pos: poskey.clone(),
@@ -195,7 +193,7 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
 
                match poskey.to_part_of_speech() {
                    Some(pos) => {
-                       if !rel.pos().iter().any(|p| **p == pos) {
+                       if !rel.pos().iter().any(|rp| rp.base() == pos.base()) {
                            errors.push(ValidationError::SenseRelationPOS {
                                id: sense.id.clone(),
                                pos: pos,
@@ -386,7 +384,7 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
 
         let mut sr_items = HashSet::new();
         for (rel, target) in synset.links_from() {
-            if !rel.pos().iter().any(|p| **p == synset.part_of_speech) {
+            if !rel.pos().iter().any(|rp| rp.base() == synset.part_of_speech.base()) {
                 errors.push(ValidationError::SynsetRelationPOS {
                     id: synset_id.clone(),
                     pos: synset.part_of_speech.clone(),
@@ -398,7 +396,7 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
                 match wn.synset_by_id(&target)? {
                     Some(_) if opts.skip_hypernym => {},
                     Some(target_synset) => {
-                        if synset.part_of_speech != target_synset.part_of_speech {
+                        if synset.part_of_speech.base() != target_synset.part_of_speech.base() {
                             errors.push(ValidationError::CrossPOSHyper {
                                 source: synset_id.clone(),
                                 target: target.clone()
@@ -650,13 +648,14 @@ fn check_no_loops<L : Lexicon, ProgressBar : Progress>(wn : &L,
 }
 
 lazy_static! {
-   static ref VALID_SYNSET_ID : Regex = Regex::new("^[0-9]{8}-[nvars]$").unwrap();
+   static ref VALID_SYNSET_ID : Regex = Regex::new("^[0-9]{8}-[a-z]$").unwrap();
    static ref VALID_ILI : Regex = Regex::new("^i\\d+$").unwrap();
    static ref VALID_WIKIDATA_ID : Regex = Regex::new("^Q[1-9][0-9]*$").unwrap();
 }
 
 fn is_valid_synset_id(synset_id : &SynsetId) -> bool {
     VALID_SYNSET_ID.is_match(synset_id.as_str())
+        && synset_id.part_of_speech().is_some_and(|pos| pos.value() == &synset_id.as_str()[9..])
 }
 
 fn is_valid_ili(iliid : &ILIID) -> bool {
@@ -972,6 +971,69 @@ mod tests {
         let errors = validate_errors(&wn);
         assert!(errors.iter().any(|e| matches!(e,
             ValidationError::SimilarTargetPOS { id, target } if *id == a && *target == b)));
+    }
+
+    fn add_name(wn : &mut LexiconHashMapBackend, ssid : &str, definition : &str,
+                change_list : &mut change_manager::ChangeList) -> SynsetId {
+        change_manager::add_synset(wn, definition.to_owned(), "name.location".to_owned(),
+            PosKey::new("e"), Some(SynsetId::new(ssid)), change_list).unwrap()
+    }
+
+    #[test]
+    fn test_name_synsets_are_valid() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let place = add_noun(&mut wn, "00000100-n", "a place", 'n', &mut change_list);
+        let name = add_name(&mut wn, "00000101-e", "a named place", &mut change_list);
+        let other = add_name(&mut wn, "00000102-e", "another named place", &mut change_list);
+        wn.update_synset(&name, |ss| { ss.instance_hypernym.push(place.clone()); }).unwrap();
+        wn.update_synset(&other, |ss| { ss.hypernym.push(name.clone()); }).unwrap();
+        let sense = change_manager::add_entry(&mut wn, name.clone(), "Atlantis".to_owned(),
+            PosKey::new("e"), Vec::new(), None, &mut change_list).unwrap().unwrap();
+        // Sense keys of names use the number of the matching noun file (noun.location = 15)
+        assert_eq!(sense.as_str(), "atlantis%1:15:00::");
+
+        let errors = validate_errors(&wn);
+        assert!(!errors.iter().any(|e| matches!(e,
+            ValidationError::InvalidSynsetId { .. }
+            | ValidationError::EntryPartOfSpeech { .. }
+            | ValidationError::InvalidSenseId { .. }
+            | ValidationError::SynsetRelationPOS { .. }
+            | ValidationError::SenseRelationPOS { .. }
+            | ValidationError::CrossPOSHyper { .. })));
+
+        // ... but a name is not a verb
+        let verb = add_noun(&mut wn, "00000103-v", "a verb", 'v', &mut change_list);
+        wn.update_synset(&name, |ss| { ss.hypernym.push(verb.clone()); }).unwrap();
+        assert!(validate_errors(&wn).iter().any(|e| matches!(e,
+            ValidationError::CrossPOSHyper { source, target } if *source == name && *target == verb)));
+    }
+
+    #[test]
+    fn test_name_entry_in_noun_synset_but_not_in_verb_synset() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let noun = add_noun(&mut wn, "00000110-n", "a noun", 'n', &mut change_list);
+        let verb = add_noun(&mut wn, "00000111-v", "a verb", 'v', &mut change_list);
+        change_manager::add_entry(&mut wn, noun.clone(), "Paris".to_owned(),
+            PosKey::new("e"), Vec::new(), None, &mut change_list).unwrap();
+        change_manager::add_entry(&mut wn, verb.clone(), "Rome".to_owned(),
+            PosKey::new("e"), Vec::new(), None, &mut change_list).unwrap();
+        let errors = validate_errors(&wn);
+        let bad: Vec<_> = errors.iter().filter_map(|e| match e {
+            ValidationError::EntryPartOfSpeech { synset_pos, .. } => Some(synset_pos.clone()),
+            _ => None,
+        }).collect();
+        assert_eq!(bad, vec![PartOfSpeech::v]);
+    }
+
+    #[test]
+    fn test_synset_id_suffixes() {
+        assert!(is_valid_synset_id(&SynsetId::new("00000001-e")));
+        assert!(is_valid_synset_id(&SynsetId::new("00000001-z")));
+        assert!(!is_valid_synset_id(&SynsetId::new("00000001-t")));
+        assert!(!is_valid_synset_id(&SynsetId::new("00000001-q")));
+        assert!(!is_valid_synset_id(&SynsetId::new("0000001-n")));
     }
 
     #[test]

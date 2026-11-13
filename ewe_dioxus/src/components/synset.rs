@@ -11,7 +11,7 @@ use crate::components::{
 use crate::Route;
 use dioxus::prelude::*;
 use ewe_lib::automaton::{Action, SenseRef, SynsetRef};
-use ewe_lib::wordnet::{Example, MemberSynset, ScoredVec, SenseRelation, SynsetId};
+use ewe_lib::wordnet::{Example, MemberSynset, PartOfSpeech, ScoredVec, SenseRelation, SynsetId};
 use std::collections::HashMap;
 
 /// Draft confidence scores (see `components::confidence`) for everything in the synset editor
@@ -406,14 +406,7 @@ fn shared_adjposition(synset: &MemberSynset) -> Option<&str> {
 /// Tooltip for the part-of-speech tag: the full name of the part of speech, qualified by the
 /// adjective position when the tag shows one, e.g. "postnominal adjective".
 fn pos_tooltip(pos: &str, adjposition: Option<&str>) -> String {
-    let name = match pos {
-        "n" => "noun",
-        "v" => "verb",
-        "a" => "adjective",
-        "s" => "adjective satellite",
-        "r" => "adverb",
-        other => other,
-    };
+    let name = PartOfSpeech::from_code(pos).map_or(pos, |pos| pos.label());
     match adjposition {
         Some(a) if matches!(pos, "a" | "s") => format!("{} {}", adjposition_name(a), name),
         _ => name.to_string(),

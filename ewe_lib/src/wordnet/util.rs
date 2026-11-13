@@ -170,6 +170,8 @@ pub enum LexiconError {
     EntryNotFound(String, PosKey),
     #[error("Identifier is neither a sense nor a synset: {0}")]
     SenseOrSynsetIdNotFound(String),
+    #[error("Sense keys are not defined for synsets with part of speech '{0}'")]
+    NoSenseKeyType(String),
     #[error("Cannot reverse relation from sense {0} to synset {1}: no defined inverse exists for a sense-synset relation")]
     CannotReverseSenseSynsetRelation(SenseId, SynsetId),
     #[cfg(feature="redb")]

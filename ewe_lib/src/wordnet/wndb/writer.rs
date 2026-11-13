@@ -99,6 +99,14 @@ impl Offsets {
     }
 }
 
+/// Whether a synset is written to WNDB at all: names and the other parts of speech of WN-LMF
+/// 1.5 have no WNDB file, so nothing may point to them.
+fn in_wndb<L: Lexicon>(wn: &L, id: &SynsetId) -> Result<bool> {
+    Ok(wn
+        .synset_by_id(id)?
+        .map_or(true, |s| s.part_of_speech.wndb_file().is_some()))
+}
+
 fn wndb_pos_char_no_satellite(pos: &PartOfSpeech) -> &'static str {
     if *pos == PartOfSpeech::s {
         "a"
@@ -478,6 +486,9 @@ fn write_data<L: Lexicon>(
         let mut pointers: Vec<(&'static str, SynsetId, String, String)> = Vec::new();
 
         for target in &synset.hypernym {
+            if !in_wndb(wn, target)? {
+                continue;
+            }
             let (_, _) = offsets.resolve(wn, target)?; // ensure a code/placeholder exists
             let target_pos_char = wn
                 .synset_by_id(target)?
@@ -511,6 +522,9 @@ fn write_data<L: Lexicon>(
                         (target_synset.clone(), 0)
                     }
                 };
+                if !in_wndb(wn, &target_synset)? {
+                    continue;
+                }
                 let target_pos_char = wn
                     .synset_by_id(&target_synset)?
                     .map(|s| wndb_pos_char_no_satellite(&s.part_of_speech).to_string())
@@ -538,6 +552,9 @@ fn write_data<L: Lexicon>(
             inverse.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()).then_with(|| a.1.as_str().cmp(b.1.as_str())));
             if let Some(symbol) = SenseRelType::IsExemplifiedBy.wndb_pointer(bucket_pos) {
                 for (source_synset, sense_id) in inverse {
+                    if !in_wndb(wn, &source_synset)? {
+                        continue;
+                    }
                     let source_pos_char = wn
                         .synset_by_id(&source_synset)?
                         .map(|s| wndb_pos_char_no_satellite(&s.part_of_speech).to_string())
@@ -569,6 +586,9 @@ fn write_data<L: Lexicon>(
             let Some(symbol) = rel_type.wndb_pointer(bucket_pos) else {
                 continue;
             };
+            if !in_wndb(wn, target)? {
+                continue;
+            }
             let target_pos_char = wn
                 .synset_by_id(target)?
                 .map(|s| wndb_pos_char_no_satellite(&s.part_of_speech).to_string())

@@ -42,6 +42,12 @@ impl LmfVersion {
         }
     }
 
+    /// The `partOfSpeech` code to write in this version: WN-LMF 1.4 has no code for the parts
+    /// of speech added in 1.5, so those fall back to the closest older one.
+    pub fn pos_code(&self, pos: crate::wordnet::PartOfSpeech) -> &'static str {
+        if *self >= LmfVersion::V1_5 { pos.value() } else { pos.lmf_1_4_code() }
+    }
+
     /// Whether `Lemma/@reconstructed` exists in this version.
     pub fn supports_reconstructed(&self) -> bool {
         *self >= LmfVersion::V1_5

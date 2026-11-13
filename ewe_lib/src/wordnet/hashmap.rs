@@ -61,7 +61,18 @@ impl Lexicon for LexiconHashMapBackend {
     }
     fn entries_insert(&mut self, key : char, entries : BTEntries) -> Result<()> {
         self.lemma_index.invalidate();
-        self.entries.insert(key, entries);
+        // Like the redb backend, add to a section that already has entries (the name files
+        // are loaded into the same section as the common vocabulary).
+        match self.entries.get_mut(&key) {
+            Some(existing) => {
+                for (lemma, by_pos) in entries.0 {
+                    existing.0.entry(lemma).or_default().extend(by_pos);
+                }
+            }
+            None => {
+                self.entries.insert(key, entries);
+            }
+        }
         Ok(())
     }
     fn entries_iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(char, Cow<'a, BTEntries>)>>> {

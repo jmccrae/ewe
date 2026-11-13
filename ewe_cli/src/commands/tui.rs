@@ -339,12 +339,15 @@ fn change_synset<L: Lexicon>(wn: &mut L, change_list: &mut ChangeList) {
             println!("Lexicographer file does not exist");
             return;
         }
-        let pos = PosKey::new(
-            input("Part of speech (n)oun/(v)erb/(a)djective/adve(r)b/(s)atellite: ").to_lowercase(),
-        );
+        let options = poses
+            .iter()
+            .map(|pos| format!("{} = {}", pos.value(), pos.label()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let pos = PosKey::new(input(&format!("Part of speech ({}): ", options)).to_lowercase());
         match pos.to_part_of_speech() {
-            Some(p) => {
-                if !poses.iter().any(|p2| p == *p2) {
+            Some(entered) => {
+                if !poses.iter().any(|allowed| entered == *allowed) {
                     println!("Wrong POS for lexicographer file");
                     return;
                 }

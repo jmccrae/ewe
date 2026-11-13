@@ -55,22 +55,14 @@ struct AddSynsetModalProps {
     on_close: EventHandler<()>,
 }
 
-/// Which part-of-speech values a lexicographer file allows, mirroring
-/// `ewe_lib::wordnet::Lexicon::pos_for_lexfile`'s prefix rule exactly (kept in sync manually -
-/// there's no server round trip for this since it's a pure function of the lexfile name).
+/// Which part-of-speech values a lexicographer file allows (a pure function of the lexfile
+/// name, so there is no server round trip for it), with their labels.
 #[cfg(feature = "edit")]
 fn pos_options_for_lexfile(lexfile: &str) -> Vec<(&'static str, &'static str)> {
-    if lexfile.starts_with("noun") {
-        vec![("n", "noun")]
-    } else if lexfile.starts_with("verb") {
-        vec![("v", "verb")]
-    } else if lexfile.starts_with("adv") {
-        vec![("r", "adverb")]
-    } else if lexfile.starts_with("adj") {
-        vec![("a", "adjective"), ("s", "adjective satellite")]
-    } else {
-        vec![]
-    }
+    ewe_lib::wordnet::PartOfSpeech::for_lexfile(lexfile)
+        .into_iter()
+        .map(|pos| (pos.value(), pos.label()))
+        .collect()
 }
 
 #[cfg(feature = "edit")]

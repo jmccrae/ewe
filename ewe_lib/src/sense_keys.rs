@@ -1,4 +1,5 @@
 use crate::wordnet::Result;
+use crate::wordnet::LexiconError;
 use crate::wordnet::{Lexicon, PartOfSpeech, Sense, SenseId, Synset, SynsetId};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -71,6 +72,21 @@ lazy_static! {
         map.insert("verb.stative", 42);
         map.insert("verb.weather", 43);
         map.insert("adj.ppl", 44);
+        // Names use the number of the noun file of the same name
+        map.insert("name.act", 4);
+        map.insert("name.animal", 5);
+        map.insert("name.artifact", 6);
+        map.insert("name.cognition", 9);
+        map.insert("name.communication", 10);
+        map.insert("name.event", 11);
+        map.insert("name.group", 14);
+        map.insert("name.location", 15);
+        map.insert("name.object", 17);
+        map.insert("name.person", 18);
+        map.insert("name.plant", 20);
+        map.insert("name.possession", 21);
+        map.insert("name.state", 26);
+        map.insert("name.time", 28);
         map.insert("contrib.colloq", 50);
         map.insert("contrib.plwn", 51);
         map
@@ -204,7 +220,10 @@ pub fn get_sense_key<L: Lexicon>(
     synset: &Synset,
     synset_id: &SynsetId,
 ) -> Result<SenseId> {
-    let ss_type = synset.part_of_speech.ss_type();
+    let ss_type = synset
+        .part_of_speech
+        .ss_type()
+        .ok_or_else(|| LexiconError::NoSenseKeyType(synset.part_of_speech.value().to_string()))?;
     let lex_filenum = wn
         .lex_name_for(synset_id)?
         .and_then(|lex_name| LEX_FILENUMS.get(lex_name.as_str()))

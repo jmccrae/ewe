@@ -43,7 +43,13 @@ in memory but unsaved and reports the validation errors. Every one of them also 
 
 ## Structure of a wordnet
 
-- A synset id is 8 digits plus a part-of-speech suffix (e.g. `00001740-n`). **Never
+- Parts of speech are the WN-LMF 1.5 letters: `n` noun, `v` verb, `a` adjective, `r` adverb,
+  `s` adjective satellite, `e` name (proper noun), and `c` `o` `p` `d` `b` `i` `l` `h` `m` `y`
+  `z` `x` `u` for conjunction, subordinating conjunction, adposition, determiner, number,
+  pronoun, particle, auxiliary, punctuation, symbol, phrase, other and unknown. The lexfile
+  prefix decides which one `add_synset` accepts (`noun.*` -> `n`, `name.*` -> `e`, ...).
+  A name entry (`e`) may be a member of a noun synset.
+- A synset id is 8 digits plus a part-of-speech suffix (e.g. `00001740-n`, `08337853-e`). **Never
   invent one** - `add_synset` assigns it and returns it as `last_synset_id`. To reference a
   synset you just created later in the *same* `apply_automaton` call (e.g. to attach a
   hypernym right after creating it), use the synset-ref value `"last"` instead of

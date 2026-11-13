@@ -3,7 +3,7 @@ use crate::rels::{SenseRelType, SynsetRelType};
 use crate::sense_keys::get_sense_key;
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::util::{escape_yaml_string, LexiconSaveError};
-use crate::wordnet::section::{entry_key, key_to_name, name_to_key};
+use crate::wordnet::section::{entry_key, is_name_file_stem, key_to_name, name_file_stem, name_to_key};
 use crate::wordnet::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -18,6 +18,11 @@ pub type Result<T> = result::Result<T, LexiconError>;
 /// Recursively list all files under `folder`, descending into subdirectories.
 /// Used so that source trees which split files across subdirectories (e.g.
 /// large WordNet extensions like NameNet) are loaded in full.
+/// Whether entries with this part of speech key are names, which are stored in their own files
+fn is_name_pos(pos: &PosKey) -> bool {
+    pos.to_part_of_speech() == Some(PartOfSpeech::e)
+}
+
 fn list_files_recursive(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(folder)? {
@@ -248,8 +253,13 @@ pub trait Lexicon: Sized {
                 .map(|x| x.to_string())
                 .unwrap_or_else(|| "".to_string());
             if file_name.starts_with("entries-") && file_name.ends_with(".yaml") {
-                let key = match name_to_key(&file_name["entries-".len()..file_name.len() - ".yaml".len()]) {
-                    Some(k) => k,
+                let stem = &file_name["entries-".len()..file_name.len() - ".yaml".len()];
+                // `entries-A-name.yaml` holds names, which share their section with the common
+                // vocabulary, so those are filed by the first letter of each lemma instead.
+                let is_names = is_name_file_stem(stem);
+                let key = match name_to_key(stem) {
+                    Some(k) => Some(k),
+                    None if is_names => None,
                     None => continue,
                 };
                 let entries2: BTEntries =
@@ -272,7 +282,19 @@ pub trait Lexicon: Sized {
                         }
                     }
                 }
-                self.entries_insert(key, entries2)?;
+                match key {
+                    Some(key) => self.entries_insert(key, entries2)?,
+                    None => {
+                        let mut by_key: HashMap<char, BTEntries> = HashMap::new();
+                        for (lemma, by_pos) in entries2.0 {
+                            by_key.entry(entry_key(&lemma)).or_insert_with(BTEntries::new)
+                                .0.insert(lemma, by_pos);
+                        }
+                        for (key, entries) in by_key {
+                            self.entries_insert(key, entries)?;
+                        }
+                    }
+                }
             } else if file_name == "frames.yaml" {
                 // A flat `key: description` mapping, not a synset file - `serde_yaml::Mapping`
                 // preserves declaration order, which is worth keeping for the frame picker in
@@ -318,14 +340,44 @@ pub trait Lexicon: Sized {
         // entries-0.yaml..entries-z.yaml, matching the real OEWN layout.
         let mut written_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut written_keys: std::collections::HashSet<char> = std::collections::HashSet::new();
+        let mut name_sections: Vec<(char, Vec<u8>)> = Vec::new();
         for entries in self.entries_iter()? {
             let (ekey, entries) = entries?;
             let name = format!("entries-{}.yaml", key_to_name(ekey));
             let mut w = File::create(folder.as_ref().join(&name))?;
-            entries.save(&mut w)?;
+            entries.save_filtered(&mut w, |pos| !is_name_pos(pos))?;
             written_names.insert(name);
             written_keys.insert(ekey);
+            // Names (part of speech `e`) go to their own file, never into the common one
+            let mut name_buf = Vec::new();
+            entries.save_filtered(&mut name_buf, is_name_pos)?;
+            if !name_buf.is_empty() {
+                name_sections.push((ekey, name_buf));
+            }
             bar.inc(1);
+        }
+        if !name_sections.is_empty() {
+            // The complete set 0, A..Z, as the real layout has, whatever the names contain
+            let mut stems: Vec<(String, Vec<u8>)> = Vec::new();
+            for (ekey, buf) in name_sections {
+                stems.push((name_file_stem(ekey), buf));
+            }
+            for key in std::iter::once('0').chain('a'..='z') {
+                let stem = name_file_stem(key);
+                if !stems.iter().any(|(s, _)| *s == stem) {
+                    stems.push((stem, Vec::new()));
+                }
+            }
+            // Different sections can share a name file (e.g. `ß` and `s` both upper-case to S)
+            let mut merged: std::collections::BTreeMap<String, Vec<u8>> = std::collections::BTreeMap::new();
+            for (stem, buf) in stems {
+                merged.entry(stem).or_default().extend(buf);
+            }
+            for (stem, buf) in merged {
+                let name = format!("entries-{stem}.yaml");
+                File::create(folder.as_ref().join(&name))?.write_all(&buf)?;
+                written_names.insert(name);
+            }
         }
         if written_keys.iter().all(|k| *k == '0' || ('a'..='z').contains(k)) {
             for key in std::iter::once('0').chain('a'..='z') {
@@ -1189,17 +1241,7 @@ pub trait Lexicon: Sized {
     /// Get the part of speech from a lexicographer file
     fn pos_for_lexfile(&self, lexfile: &str) -> Result<Vec<PartOfSpeech>> {
         Ok(if self.synsets_contains_key(lexfile)? {
-            if lexfile.starts_with("noun") {
-                vec![PartOfSpeech::n]
-            } else if lexfile.starts_with("verb") {
-                vec![PartOfSpeech::v]
-            } else if lexfile.starts_with("adv") {
-                vec![PartOfSpeech::r]
-            } else if lexfile.starts_with("adj") {
-                vec![PartOfSpeech::a, PartOfSpeech::s]
-            } else {
-                Vec::new()
-            }
+            PartOfSpeech::for_lexfile(lexfile)
         } else {
             Vec::new()
         })
@@ -1650,6 +1692,70 @@ mod tests {
         assert_eq!(reloaded.n_entries().unwrap(), 2);
         assert_eq!(reloaded.entry_by_lemma("漢字").unwrap().len(), 1);
         assert_eq!(reloaded.lemma_by_prefix("σο", None).unwrap(), vec!["σοφία".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_name_entries_are_saved_to_separate_files_and_merged_on_load() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_name_files_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut lexicon = LexiconHashMapBackend::new();
+        // A name with the same lemma as a common word has its own entry
+        lexicon.insert_entry("Aaron".to_string(), PosKey::new("e"), Entry::new()).unwrap();
+        lexicon.insert_entry("Aaron".to_string(), PosKey::new("n"), Entry::new()).unwrap();
+        lexicon.insert_entry("apple".to_string(), PosKey::new("n"), Entry::new()).unwrap();
+        lexicon.insert_entry("iPhone".to_string(), PosKey::new("e"), Entry::new()).unwrap();
+        let mut bar = crate::progress::NullProgress;
+        lexicon.save(&dir, &mut bar).unwrap();
+
+        let common = fs::read_to_string(dir.join("entries-a.yaml")).unwrap();
+        assert!(common.contains("Aaron:") && common.contains("apple:") && !common.contains("  e:"));
+        let names = fs::read_to_string(dir.join("entries-A-name.yaml")).unwrap();
+        assert!(names.contains("Aaron:") && names.contains("  e:") && !names.contains("  n:"));
+        assert!(!names.contains("apple"));
+        // Upper case file for the section, even though the lemma is lower case
+        let iphone = fs::read_to_string(dir.join("entries-I-name.yaml")).unwrap();
+        assert!(iphone.contains("iPhone:"));
+        assert!(!dir.join("entries-i.yaml").exists() || !fs::read_to_string(dir.join("entries-i.yaml")).unwrap().contains("iPhone"));
+        // The complete set is written
+        for key in std::iter::once('0').chain('A'..='Z') {
+            assert!(dir.join(format!("entries-{key}-name.yaml")).is_file(), "{key}");
+        }
+
+        let reloaded = LexiconHashMapBackend::new().load(&dir, &mut bar).unwrap();
+        assert_eq!(reloaded.n_entries().unwrap(), 4);
+        let aaron = reloaded.entry_by_lemma_with_pos("Aaron").unwrap();
+        let mut poses: Vec<_> = aaron.iter().map(|(p, _)| p.as_str().to_string()).collect();
+        poses.sort();
+        assert_eq!(poses, vec!["e", "n"]);
+
+        // Saving again is stable, and removing the last name removes the name files
+        let dir2 = dir.join("again");
+        fs::create_dir_all(&dir2).unwrap();
+        reloaded.save(&dir2, &mut bar).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir2.join("entries-A-name.yaml")).unwrap(),
+            names
+        );
+        let mut reloaded = reloaded;
+        reloaded.entries_update('a', |e| e.remove_entry("Aaron", &PosKey::new("e"))).unwrap().unwrap();
+        reloaded.entries_update('i', |e| e.remove_entry("iPhone", &PosKey::new("e"))).unwrap().unwrap();
+        reloaded.save(&dir2, &mut bar).unwrap();
+        assert!(!dir2.join("entries-A-name.yaml").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_no_names_means_no_name_files() {
+        let dir = std::env::temp_dir().join(format!("ewe_test_no_name_files_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut lexicon = LexiconHashMapBackend::new();
+        lexicon.insert_entry("apple".to_string(), PosKey::new("n"), Entry::new()).unwrap();
+        let mut bar = crate::progress::NullProgress;
+        lexicon.save(&dir, &mut bar).unwrap();
+        let any_name_file = fs::read_dir(&dir).unwrap().flatten()
+            .any(|f| f.file_name().to_string_lossy().ends_with("-name.yaml"));
+        assert!(!any_name_file);
         let _ = fs::remove_dir_all(&dir);
     }
 
