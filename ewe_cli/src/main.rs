@@ -17,7 +17,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     name="ewe",
-    version="0.2.0",
+    version,
     about="EWE Wordnet Editor",
     long_about=None)]
 struct EweCli {
