@@ -6,7 +6,7 @@ use crate::components::{
     confidence_draft, parse_confidence_draft, ConfidenceBadge, ConfidenceInput,
     DeleteSynsetButton, EditToggle, EditableDefinition, EditableExamples, EditableIli, EditableIliDefinition, EditableSource,
     EditableLemmas, EditableRelations, EditableWikidata, ExampleDraft, PendingRelation, Relation,
-    RelationKey, Subcat,
+    RelationKey, Subcat, EditGuardRegistrar, GuardedLink,
 };
 use crate::Route;
 use dioxus::prelude::*;
@@ -143,6 +143,16 @@ fn relation_confidence_action(
 /// `AddExample`; an existing example's is set alongside its update (by original number, before
 /// any delete shifts it); every other confidence is set last, once whatever it scores exists.
 /// A malformed confidence draft is an error rather than being silently dropped.
+/// Whether the result of `build_actions` means the edit pane holds drafts that differ from the
+/// saved synset. A draft that can't even be turned into actions (e.g. a malformed confidence)
+/// counts as changed, since the user has typed something.
+fn draft_has_changes(actions: &Result<Vec<Action>, String>) -> bool {
+    match actions {
+        Ok(actions) => !actions.is_empty(),
+        Err(_) => true,
+    }
+}
+
 fn build_actions(
     original: &MemberSynset,
     confidence: &ConfidenceDrafts,
@@ -576,8 +586,41 @@ pub fn Synset(props: SynsetProps) -> Element {
             }
         } else {
             if let Some(synset) = &*ss_load.read() {
+                // Whether the open edit pane has drafts that would be lost on navigation. Only
+                // computed while editing (it reads every draft signal, so it also re-renders
+                // this component as the drafts change, which keeps `EditGuardRegistrar` current).
+                let has_unsaved_drafts = editing()
+                    && draft_has_changes(&build_actions(
+                        synset,
+                        &confidence_drafts(),
+                        &synset.id,
+                        &synset.members.iter().map(|m| m.lemma.clone()).collect::<Vec<_>>(),
+                        &lemma_drafts(),
+                        &synset.definition.get(0).cloned().unwrap_or_default(),
+                        &definition_draft(),
+                        &synset.example,
+                        &example_drafts(),
+                        &relation_deletes(),
+                        &relation_adds(),
+                        &synset.ili.as_ref().map(|i| i.to_string()).unwrap_or_default(),
+                        &ili_draft(),
+                        &synset.wikidata,
+                        &wikidata_drafts(),
+                        &synset.source.clone().unwrap_or_default(),
+                        &source_draft(),
+                        &adjposition_drafts(),
+                        &reconstructed_drafts(),
+                        &synset.ili_definition.clone().unwrap_or_default(),
+                        &ili_definition_draft(),
+                    ));
                 rsx! {
                     document::Style { href: CSS },
+                    if editing() {
+                        EditGuardRegistrar {
+                            synset_id: synset.id.to_string(),
+                            changed: has_unsaved_drafts,
+                        }
+                    }
                     div {
                         class: if editing() { "synset editing" } else { "synset" },
                         if props.display_ids || editing() {
@@ -694,7 +737,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                     for (index, member) in synset.members.iter().enumerate() {
                                         span {
                                             class: "lemma",
-                                            Link {
+                                            GuardedLink {
                                                 to: Route::ByLemma { lemma: member.lemma.clone() },
                                                 class: if member.lemma == props.focus {
                                                     "focus"
@@ -1247,7 +1290,7 @@ pub fn Synset(props: SynsetProps) -> Element {
                                                 if let Some(count) = Some(*count_load.read()).filter(|c| *c > 0) {
                                                     div {
                                                         class: "relation-title",
-                                                        Link {
+                                                        GuardedLink {
                                                             to: Route::BySenses { id: synset.id.as_str().to_string(), page: 0 },
                                                             "Occurrences ({count})"
                                                         }
@@ -1713,5 +1756,19 @@ mod tests {
             confidence.synset = bad.to_string();
             assert!(confidence_only_actions(&dog_ss, &confidence, &[]).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn test_draft_has_changes() {
+        // nothing differs from the saved synset
+        assert!(!draft_has_changes(&Ok(Vec::new())));
+        // a real edit
+        assert!(draft_has_changes(&Ok(vec![Action::Definition {
+            confidence: None,
+            synset: SynsetRef::Id(SynsetId::new("00000001-n")),
+            definition: "x".to_string(),
+        }])));
+        // a draft that cannot be applied still holds typed-in text
+        assert!(draft_has_changes(&Err("bad".to_string())));
     }
 }

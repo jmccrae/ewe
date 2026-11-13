@@ -2,7 +2,9 @@ use dioxus::prelude::*;
 use dioxus::events::{FormEvent, KeyboardEvent};
 use dioxus::prelude::Key;
 use crate::backend::api::{autocomplete, SearchResult, SearchResultKind};
-use crate::components::{use_dismiss_on_outside_click, AddSynsetTrigger, DisplayOptionsButton};
+use crate::components::{
+    use_dismiss_on_outside_click, use_edit_guard, AddSynsetTrigger, DisplayOptionsButton,
+};
 use crate::Route;
 
 #[component]
@@ -39,15 +41,11 @@ pub fn WordNet() -> Element {
         show_suggestions.set(!e.value().is_empty());
     };
 
+    let mut guard = use_edit_guard();
     let mut go_to = move |s: SearchResult| {
-        let navigator = navigator();
         match s.kind {
-            SearchResultKind::Lemma => {
-                navigator.push(Route::ByLemma { lemma: s.value.clone() });
-            }
-            SearchResultKind::Synset => {
-                navigator.push(Route::BySynset { synset: s.value.clone() });
-            }
+            SearchResultKind::Lemma => guard.navigate(Route::ByLemma { lemma: s.value.clone() }),
+            SearchResultKind::Synset => guard.navigate(Route::BySynset { synset: s.value.clone() }),
         }
         // Leave the box empty rather than filled with the just-completed
         // query, so it's ready for the next search.

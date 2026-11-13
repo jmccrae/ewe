@@ -98,7 +98,7 @@ pub fn UnsavedChangesToast() -> Element {
                             }
                         }
                         button {
-                            class: "edit-delete-synset",
+                            class: "edit-delete",
                             r#type: "button",
                             disabled: saving(),
                             onclick: move |_| do_save(true),
@@ -182,7 +182,7 @@ fn RevertConfirmModal(props: RevertConfirmModalProps) -> Element {
                         "Cancel"
                     }
                     button {
-                        class: "edit-delete-synset",
+                        class: "edit-delete",
                         r#type: "button",
                         disabled: reverting(),
                         onclick: move |_| {

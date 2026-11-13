@@ -57,6 +57,9 @@ adjectives and adverbs are each a single catch-all file.
 - `adj.pert` — relational adjectives (pertains to a noun, e.g. "presidential")
 - `adj.ppl` — participial adjectives
 - `adv.all` — general adverbs
+- `adv.manner`, `adv.speaker_oriented`, `adv.frequency`, `adv.temporal`, `adv.spatial`,
+  `adv.degree`, `adv.domain`, `adv.focus`, `adv.contrast` — the finer-grained adverb lexfiles
+  (english-wordnet#1411). All share `adv.all`'s file number `02` in sense keys.
 
 ## Names
 
@@ -73,4 +76,3 @@ tag, e.g. `cconj.all` (conjunctions), `sconj.all` (subordinating conjunctions), 
 (particles), `aux.all` (auxiliaries), `punct.all` (punctuation), `sym.all` (symbols), plus
 `phrase.all`, `other.all` and `unknown.all`. The prefix before the dot decides which part of
 speech `add_synset` accepts for the file.
-
