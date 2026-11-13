@@ -8,7 +8,8 @@ use crate::wordnet::SynsetId;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// lowercased-lemma-as-written-in-the-CSV -> ordered synset ids (each `{numeric-id}-{pos}`, no
+/// lowercased-lemma-as-written-in-the-CSV -> ordered synset ids (each `{numeric-id}-{pos}`; the CSV
+/// may write the suffix itself or leave it off, no
 /// lexicon id-prefix - the CSV's own `"oewn-" + id + "-" + pos` construction is irrelevant here
 /// since `ewe_lib`'s `SynsetId` never carries a prefix at all).
 pub(super) type SenseOrders = HashMap<String, Vec<SynsetId>>;
@@ -29,7 +30,15 @@ pub(super) fn load(path: Option<&Path>) -> std::result::Result<SenseOrders, Wndb
         let ids: Vec<SynsetId> = record[2]
             .split(' ')
             .filter(|s| !s.is_empty())
-            .map(|id| SynsetId::new(&format!("{id}-{pos}")))
+            .map(|id| {
+                // Ids may be bare (`00001740`, POS taken from column 2) or already carry
+                // their POS suffix (`00001740-n`, `-e`, `-s`, `-a`).
+                if id.contains('-') {
+                    SynsetId::new(id)
+                } else {
+                    SynsetId::new(&format!("{id}-{pos}"))
+                }
+            })
             .collect();
         map.insert(lemma, ids);
     }

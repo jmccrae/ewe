@@ -870,7 +870,8 @@ fn write_index<L: Lexicon>(
         // Sense-order override, when `--sense-orders` covers this lemma+pos - mirrors the
         // `senseOrders.get(...)` block in `writeIndex`.
         if let Some(csv_order) = sense_orders.get(lemma_lower) {
-            if csv_order.first().is_some_and(|id| id.as_str().ends_with(bucket_pos.value())) {
+            // CSV ids may carry `-n`/`-e`/`-s`/`-a` suffixes: match on the base part of speech.
+            if csv_order.iter().any(|id| id.part_of_speech().is_some_and(|ip| ip.base() == bucket_pos.base())) {
                 let cur_no_pos: Vec<&str> = synset_ids.iter().map(|id| no_pos(id.as_str())).collect();
                 let mut cur_set: Vec<&str> = cur_no_pos.clone();
                 cur_set.sort();
@@ -899,7 +900,7 @@ fn write_index<L: Lexicon>(
                 } else {
                     eprintln!(
                         "{lemma_lower} has different set of keys to ordering ([{:?}] vs. [{:?}])",
-                        csv_order, cur_no_pos
+                        csv_no_pos, cur_no_pos
                     );
                 }
             }
@@ -1309,6 +1310,12 @@ mod tests {
     /// the others are still ordered as the row says.
     #[test]
     fn test_sense_order_ignores_synsets_that_are_not_exported() {
+        // bare ids, and ids carrying their POS suffix (#104)
+        check_sense_order("paris,n,00000003 00000010 00000004\n", "bare");
+        check_sense_order("paris,n,00000003-n 00000010-e 00000004-n\n", "suffixed");
+    }
+
+    fn check_sense_order(csv_content: &str, tag: &str) {
         let mut wn = LexiconHashMapBackend::new();
         for (id, lexfile, pos, definition) in [
             ("00000003-n", "noun.location", Pos::n, "a place"),
@@ -1328,9 +1335,9 @@ mod tests {
         name.sense.push(Sense::new(SId::new("paris%1:15:01::"), SsId::new("00000010-e")));
         wn.insert_entry("paris".to_string(), PosKey::new("e"), name).unwrap();
 
-        let csv = std::env::temp_dir().join(format!("ewe_wndb_orders_{}.csv", std::process::id()));
-        std::fs::write(&csv, "paris,n,00000003 00000010 00000004\n").unwrap();
-        let out_dir = std::env::temp_dir().join(format!("ewe_wndb_orders_{}", std::process::id()));
+        let csv = std::env::temp_dir().join(format!("ewe_wndb_orders_{tag}_{}.csv", std::process::id()));
+        std::fs::write(&csv, csv_content).unwrap();
+        let out_dir = std::env::temp_dir().join(format!("ewe_wndb_orders_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out_dir);
         write_wndb(&wn, &out_dir, &WndbExportOptions { license_file: None, sense_orders: Some(csv) }).unwrap();
 
