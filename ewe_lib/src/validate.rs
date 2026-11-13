@@ -137,7 +137,9 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
     let mut sense_keys = HashSet::new();
     let mut definition_index : HashMap<String, SynsetId> = HashMap::new();
     let mut ili_index : HashMap<String, SynsetId> = HashMap::new();
-    let mut wikidata_index : HashMap<String, SynsetId> = HashMap::new();
+    // Different parts of speech may legitimately share a Wikidata id (#101),
+    // so duplicates are only reported within one part of speech.
+    let mut wikidata_index : HashMap<(String, Option<PartOfSpeech>), SynsetId> = HashMap::new();
     for entry in wn.entries()? {
         let (lemma, poskey, entry) = entry?;
         bar.inc(1);
@@ -351,7 +353,8 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
                     qid: qid.clone()
                 });
             } else {
-                match wikidata_index.get(qid) {
+                let key = (qid.clone(), synset_id.part_of_speech());
+                match wikidata_index.get(&key) {
                     Some(prev) => {
                         errors.push(ValidationError::DuplicateWikidataId {
                             id1: prev.clone(),
@@ -360,7 +363,7 @@ pub fn validate_with<L : Lexicon, Bar : Progress>(wn : &L, bar : &mut Bar, opts 
                         });
                     },
                     None => {
-                        wikidata_index.insert(qid.clone(), synset_id.clone());
+                        wikidata_index.insert(key, synset_id.clone());
                     }
                 }
             }
@@ -1250,6 +1253,19 @@ mod tests {
             ValidationError::DuplicateWikidataId { id1, id2, qid } if
                 qid == "Q123" &&
                 ((*id1 == a && *id2 == b) || (*id1 == b && *id2 == a)))));
+    }
+
+    #[test]
+    fn test_wikidata_id_shared_across_pos_is_allowed() {
+        let mut wn = LexiconHashMapBackend::new();
+        let mut change_list = change_manager::ChangeList::new();
+        let a = add_noun(&mut wn, "00000060-n", "wikidata synset a", 'n', &mut change_list);
+        let b = add_noun(&mut wn, "00000061-e", "wikidata synset b", 'e', &mut change_list);
+        wn.update_synset(&a, |ss| { ss.wikidata.push("Q123".to_owned()); }).unwrap();
+        wn.update_synset(&b, |ss| { ss.wikidata.push("Q123".to_owned()); }).unwrap();
+
+        let errors = validate_errors(&wn);
+        assert!(!errors.iter().any(|e| matches!(e, ValidationError::DuplicateWikidataId { .. })));
     }
 
     #[test]
