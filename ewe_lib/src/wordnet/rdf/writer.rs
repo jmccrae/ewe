@@ -272,12 +272,26 @@ fn write_sense_relation_triples<W: std::io::Write>(
 ) -> Result<()> {
     let category = wn(rel_name)?;
     serializer.serialize_triple(TripleRef::new(source, &category, target))?;
-    let reified = BlankNode::new_unchecked(blank_id);
+    let reified = BlankNode::new_unchecked(blank_node_label(&blank_id));
     serializer.serialize_triple(TripleRef::new(&reified, rdf::TYPE, &ontolex("SenseRelation")?))?;
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("source")?, source))?;
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("category")?, &category))?;
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("target")?, target))?;
     Ok(())
+}
+
+/// Make `s` a valid Turtle `BLANK_NODE_LABEL`: ASCII alphanumerics, `_` and `-` are kept; every
+/// other character (e.g. the `'` in "women's liberation movement") becomes `_x<hex>_`.
+fn blank_node_label(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            out.push(c);
+        } else {
+            out.push_str(&format!("_x{:x}_", c as u32));
+        }
+    }
+    out
 }
 
 /// Synset-relation counterpart of [`write_sense_relation_triples`] - the schema's synset-level
@@ -292,7 +306,7 @@ fn write_synset_relation_triples<W: std::io::Write>(
 ) -> Result<()> {
     let category = wn(rel_name)?;
     serializer.serialize_triple(TripleRef::new(source, &category, target))?;
-    let reified = BlankNode::new_unchecked(blank_id);
+    let reified = BlankNode::new_unchecked(blank_node_label(&blank_id));
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("source")?, source))?;
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("category")?, &category))?;
     serializer.serialize_triple(TripleRef::new(&reified, &vartrans("target")?, target))?;
@@ -778,6 +792,15 @@ mod tests {
             entry_no: None,
             reconstructed: false,
         }
+    }
+
+    #[test]
+    fn test_blank_node_label_is_valid_turtle() {
+        assert_eq!(
+            blank_node_label("relsense-women's_liberation-n-00802082-n-derivation-0"),
+            "relsense-women_x27_s_liberation-n-00802082-n-derivation-0"
+        );
+        assert_eq!(blank_node_label("a-b_c1"), "a-b_c1");
     }
 
     #[test]
