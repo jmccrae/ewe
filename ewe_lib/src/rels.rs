@@ -664,6 +664,62 @@ impl SenseRelType {
         }
     }
     
+    /// The sense relations that are not their own inverse. In the YAML of the `separate`
+    /// names layout the sense a relation points at lists the senses that have it under the
+    /// key `inverse_key()` gives.
+    pub const HAS_INVERSE_KEY: [SenseRelType; 20] = [
+        SenseRelType::Participle,
+        SenseRelType::Pertainym,
+        SenseRelType::DomainTopic,
+        SenseRelType::DomainRegion,
+        SenseRelType::Exemplifies,
+        SenseRelType::Other,
+        SenseRelType::Agent,
+        SenseRelType::Material,
+        SenseRelType::Event,
+        SenseRelType::Instrument,
+        SenseRelType::Location,
+        SenseRelType::ByMeansOf,
+        SenseRelType::Undergoer,
+        SenseRelType::Property,
+        SenseRelType::Result,
+        SenseRelType::State,
+        SenseRelType::Uses,
+        SenseRelType::Destination,
+        SenseRelType::BodyPart,
+        SenseRelType::Vehicle,
+    ];
+
+    /// The YAML key under which a sense lists the senses that have this relation to it: the
+    /// existing inverse name where there is one (`has_domain_topic`, `is_exemplified_by`), else
+    /// `is_<relation>_of` (`is_pertainym_of`). `None` for the symmetric relations, which are
+    /// written on both senses.
+    pub fn inverse_key(&self) -> Option<&'static str> {
+        match self {
+            SenseRelType::Participle => Some("is_participle_of"),
+            SenseRelType::Pertainym => Some("is_pertainym_of"),
+            SenseRelType::DomainTopic => Some("has_domain_topic"),
+            SenseRelType::DomainRegion => Some("has_domain_region"),
+            SenseRelType::Exemplifies => Some("is_exemplified_by"),
+            SenseRelType::Other => Some("is_other_of"),
+            SenseRelType::Agent => Some("is_agent_of"),
+            SenseRelType::Material => Some("is_material_of"),
+            SenseRelType::Event => Some("is_event_of"),
+            SenseRelType::Instrument => Some("is_instrument_of"),
+            SenseRelType::Location => Some("is_location_of"),
+            SenseRelType::ByMeansOf => Some("is_by_means_of_of"),
+            SenseRelType::Undergoer => Some("is_undergoer_of"),
+            SenseRelType::Property => Some("is_property_of"),
+            SenseRelType::Result => Some("is_result_of"),
+            SenseRelType::State => Some("is_state_of"),
+            SenseRelType::Uses => Some("is_uses_of"),
+            SenseRelType::Destination => Some("is_destination_of"),
+            SenseRelType::BodyPart => Some("is_body_part_of"),
+            SenseRelType::Vehicle => Some("is_vehicle_of"),
+            _ => None,
+        }
+    }
+
     pub fn is_symmetric(&self) -> bool {
         *self == SenseRelType::Antonym ||
             *self == SenseRelType::Similar ||
@@ -785,5 +841,30 @@ impl SenseRelType {
             SenseRelType::IsExemplifiedBy => (false, SenseRelType::Exemplifies),
             other => (true, other),
         }
+    }
+}
+
+#[cfg(test)]
+mod inverse_key_tests {
+    use super::*;
+
+    #[test]
+    fn test_inverse_keys_of_sense_relations() {
+        assert_eq!(SenseRelType::Pertainym.inverse_key(), Some("is_pertainym_of"));
+        assert_eq!(SenseRelType::Agent.inverse_key(), Some("is_agent_of"));
+        assert_eq!(SenseRelType::Event.inverse_key(), Some("is_event_of"));
+        // the ones that already have an inverse name keep it
+        assert_eq!(SenseRelType::DomainTopic.inverse_key(), Some("has_domain_topic"));
+        assert_eq!(SenseRelType::DomainRegion.inverse_key(), Some("has_domain_region"));
+        assert_eq!(SenseRelType::Exemplifies.inverse_key(), Some("is_exemplified_by"));
+        // a symmetric relation is its own inverse
+        for rel in [SenseRelType::Antonym, SenseRelType::Derivation, SenseRelType::Similar, SenseRelType::Also] {
+            assert_eq!(rel.inverse_key(), None);
+            assert!(!SenseRelType::HAS_INVERSE_KEY.contains(&rel));
+        }
+        // every key is distinct
+        let keys: std::collections::HashSet<_> =
+            SenseRelType::HAS_INVERSE_KEY.iter().filter_map(|r| r.inverse_key()).collect();
+        assert_eq!(keys.len(), SenseRelType::HAS_INVERSE_KEY.len());
     }
 }

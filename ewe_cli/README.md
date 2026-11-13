@@ -187,9 +187,10 @@ name end, in its inverse form, so the common files are self-contained:
 - a synset relation is written under the name synset with the inverse key: `hyponym`,
   `instance_hyponym`, `holo_member`, `holo_part`, `has_domain_region`, `has_domain_topic`, ...
   (symmetric relations such as `also`, `similar` and `attribute` just get their copy there);
-- a sense relation is written under the name sense in an `inverse:` block that maps the relation
-  to the senses that have it (`inverse: {pertainym: [parisian%3:01:00::]}`); symmetric ones
-  (`derivation`, `antonym`, ...) are written on the name sense as usual.
+- a sense relation is written under the name sense as `is_<relation>_of`, listing the senses
+  that have it (`is_pertainym_of`, `is_agent_of`, `is_event_of`, ...); the three that already have
+  an inverse name keep it (`has_domain_topic`, `has_domain_region`, `is_exemplified_by`).
+  Symmetric ones (`derivation`, `antonym`, ...) are written on the name sense as usual.
 
 Loading understands both layouts whatever the setting, so a project can be switched in either
 direction: saving once rewrites the files. In memory nothing changes, and relations that have no

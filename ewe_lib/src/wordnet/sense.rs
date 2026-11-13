@@ -97,13 +97,71 @@ pub struct Sense {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     sent: Vec<String>,
 
-    /// Relations of other senses that point at this one, written on this sense in the
-    /// `separate` names layout: the relation name (`pertainym`) to the senses that have it.
-    /// Only ever read from YAML: loading moves each onto the sense it comes from as the
-    /// ordinary relation, so it is empty in a loaded lexicon and never stored in the database.
+    // The senses that have a relation to this one, written on this sense in the `separate`
+    // names layout (see `names_layout`): `is_pertainym_of` lists the senses with a `pertainym`
+    // relation to this one, and so on. They are only ever read from YAML: loading gives each
+    // listed sense the ordinary relation, so they are empty in a loaded lexicon and never
+    // stored in the database.
     #[serde(default, skip_serializing)]
     #[cfg_attr(feature="redb", speedy(skip))]
-    pub inverse: std::collections::BTreeMap<String, ScoredVec<SenseId>>,
+    pub is_participle_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_pertainym_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub has_domain_topic: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub has_domain_region: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_exemplified_by: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_other_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_agent_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_material_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_event_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_instrument_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_location_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_by_means_of_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_undergoer_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_property_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_result_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_state_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_uses_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_destination_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_body_part_of: ScoredVec<SenseId>,
+    #[serde(default, skip_serializing)]
+    #[cfg_attr(feature="redb", speedy(skip))]
+    pub is_vehicle_of: ScoredVec<SenseId>,
 }
 
 impl Sense {
@@ -139,8 +197,97 @@ impl Sense {
             adjposition: None,
             confidence: None,
             sent: Vec::new(),
-            inverse: Default::default(),
+            is_participle_of: Vec::new().into(),
+            is_pertainym_of: Vec::new().into(),
+            has_domain_topic: Vec::new().into(),
+            has_domain_region: Vec::new().into(),
+            is_exemplified_by: Vec::new().into(),
+            is_other_of: Vec::new().into(),
+            is_agent_of: Vec::new().into(),
+            is_material_of: Vec::new().into(),
+            is_event_of: Vec::new().into(),
+            is_instrument_of: Vec::new().into(),
+            is_location_of: Vec::new().into(),
+            is_by_means_of_of: Vec::new().into(),
+            is_undergoer_of: Vec::new().into(),
+            is_property_of: Vec::new().into(),
+            is_result_of: Vec::new().into(),
+            is_state_of: Vec::new().into(),
+            is_uses_of: Vec::new().into(),
+            is_destination_of: Vec::new().into(),
+            is_body_part_of: Vec::new().into(),
+            is_vehicle_of: Vec::new().into(),
         }
+    }
+
+    /// The senses that have the relation `rel` to this one, as read from the YAML of the
+    /// `separate` names layout. `None` for a relation that is its own inverse.
+    pub(crate) fn inverse_sources(&self, rel: &SenseRelType) -> Option<&ScoredVec<SenseId>> {
+        match rel {
+            SenseRelType::Participle => Some(&self.is_participle_of),
+            SenseRelType::Pertainym => Some(&self.is_pertainym_of),
+            SenseRelType::DomainTopic => Some(&self.has_domain_topic),
+            SenseRelType::DomainRegion => Some(&self.has_domain_region),
+            SenseRelType::Exemplifies => Some(&self.is_exemplified_by),
+            SenseRelType::Other => Some(&self.is_other_of),
+            SenseRelType::Agent => Some(&self.is_agent_of),
+            SenseRelType::Material => Some(&self.is_material_of),
+            SenseRelType::Event => Some(&self.is_event_of),
+            SenseRelType::Instrument => Some(&self.is_instrument_of),
+            SenseRelType::Location => Some(&self.is_location_of),
+            SenseRelType::ByMeansOf => Some(&self.is_by_means_of_of),
+            SenseRelType::Undergoer => Some(&self.is_undergoer_of),
+            SenseRelType::Property => Some(&self.is_property_of),
+            SenseRelType::Result => Some(&self.is_result_of),
+            SenseRelType::State => Some(&self.is_state_of),
+            SenseRelType::Uses => Some(&self.is_uses_of),
+            SenseRelType::Destination => Some(&self.is_destination_of),
+            SenseRelType::BodyPart => Some(&self.is_body_part_of),
+            SenseRelType::Vehicle => Some(&self.is_vehicle_of),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn inverse_sources_mut(&mut self, rel: &SenseRelType) -> Option<&mut ScoredVec<SenseId>> {
+        match rel {
+            SenseRelType::Participle => Some(&mut self.is_participle_of),
+            SenseRelType::Pertainym => Some(&mut self.is_pertainym_of),
+            SenseRelType::DomainTopic => Some(&mut self.has_domain_topic),
+            SenseRelType::DomainRegion => Some(&mut self.has_domain_region),
+            SenseRelType::Exemplifies => Some(&mut self.is_exemplified_by),
+            SenseRelType::Other => Some(&mut self.is_other_of),
+            SenseRelType::Agent => Some(&mut self.is_agent_of),
+            SenseRelType::Material => Some(&mut self.is_material_of),
+            SenseRelType::Event => Some(&mut self.is_event_of),
+            SenseRelType::Instrument => Some(&mut self.is_instrument_of),
+            SenseRelType::Location => Some(&mut self.is_location_of),
+            SenseRelType::ByMeansOf => Some(&mut self.is_by_means_of_of),
+            SenseRelType::Undergoer => Some(&mut self.is_undergoer_of),
+            SenseRelType::Property => Some(&mut self.is_property_of),
+            SenseRelType::Result => Some(&mut self.is_result_of),
+            SenseRelType::State => Some(&mut self.is_state_of),
+            SenseRelType::Uses => Some(&mut self.is_uses_of),
+            SenseRelType::Destination => Some(&mut self.is_destination_of),
+            SenseRelType::BodyPart => Some(&mut self.is_body_part_of),
+            SenseRelType::Vehicle => Some(&mut self.is_vehicle_of),
+            _ => None,
+        }
+    }
+
+    /// Forget the inverse relations, once they have been given to the senses they come from
+    pub(crate) fn clear_inverse_rels(&mut self) {
+        for rel in SenseRelType::HAS_INVERSE_KEY {
+            if let Some(sources) = self.inverse_sources_mut(&rel) {
+                sources.clear();
+            }
+        }
+    }
+
+    /// Whether any inverse relation is waiting to be given to the sense it comes from
+    pub(crate) fn has_inverse_rels(&self) -> bool {
+        SenseRelType::HAS_INVERSE_KEY
+            .iter()
+            .any(|rel| self.inverse_sources(rel).is_some_and(|s| !s.is_empty()))
     }
 
     /// Apply `f` to the target list of every relation that points at another sense
@@ -256,6 +403,8 @@ impl Sense {
         first = write_prop_sense(w, &self.domain_topic, "domain_topic", first)?;
         first = write_prop_sense(w, &self.event, "event", first)?;
         first = write_prop_sense(w, &self.exemplifies, "exemplifies", first)?;
+        first = write_prop_sense(w, &self.has_domain_region, "has_domain_region", first)?;
+        first = write_prop_sense(w, &self.has_domain_topic, "has_domain_topic", first)?;
         if first {
             write!(w, "id: {}", escape_yaml_string(self.id.as_str(), 8, 8))?;
             first = false;
@@ -267,19 +416,24 @@ impl Sense {
             )?;
         }
         write_prop_sense(w, &self.instrument, "instrument", first)?;
-        if !self.inverse.is_empty() {
-            write!(w, "\n      inverse:")?;
-            for (rel, sources) in self.inverse.iter().filter(|(_, s)| !s.is_empty()) {
-                write!(w, "\n        {}:", rel)?;
-                for (source, confidence) in sources.iter_scored() {
-                    match confidence {
-                        None => write!(w, "\n        - {}", escape_yaml_string(source.as_str(), 10, 10))?,
-                        Some(c) => write!(w, "\n        - confidence: {}\n          target: {}",
-                            format_confidence(c), escape_yaml_string(source.as_str(), 12, 12))?,
-                    }
-                }
-            }
-        }
+        write_prop_sense(w, &self.is_agent_of, "is_agent_of", first)?;
+        write_prop_sense(w, &self.is_body_part_of, "is_body_part_of", first)?;
+        write_prop_sense(w, &self.is_by_means_of_of, "is_by_means_of_of", first)?;
+        write_prop_sense(w, &self.is_destination_of, "is_destination_of", first)?;
+        write_prop_sense(w, &self.is_event_of, "is_event_of", first)?;
+        write_prop_sense(w, &self.is_exemplified_by, "is_exemplified_by", first)?;
+        write_prop_sense(w, &self.is_instrument_of, "is_instrument_of", first)?;
+        write_prop_sense(w, &self.is_location_of, "is_location_of", first)?;
+        write_prop_sense(w, &self.is_material_of, "is_material_of", first)?;
+        write_prop_sense(w, &self.is_other_of, "is_other_of", first)?;
+        write_prop_sense(w, &self.is_participle_of, "is_participle_of", first)?;
+        write_prop_sense(w, &self.is_pertainym_of, "is_pertainym_of", first)?;
+        write_prop_sense(w, &self.is_property_of, "is_property_of", first)?;
+        write_prop_sense(w, &self.is_result_of, "is_result_of", first)?;
+        write_prop_sense(w, &self.is_state_of, "is_state_of", first)?;
+        write_prop_sense(w, &self.is_undergoer_of, "is_undergoer_of", first)?;
+        write_prop_sense(w, &self.is_uses_of, "is_uses_of", first)?;
+        write_prop_sense(w, &self.is_vehicle_of, "is_vehicle_of", first)?;
         write_prop_sense(w, &self.location, "location", first)?;
         write_prop_sense(w, &self.material, "material", first)?;
         write_prop_sense(w, &self.other, "other", first)?;

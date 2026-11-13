@@ -4,8 +4,8 @@
 //! (`noun.*.yaml`, `entries-a.yaml`, ...) refer to name synsets and senses that only exist in the
 //! name files. In the `separate` layout every such relation is written in the name files, on the
 //! name end, in its inverse form (`hyponym`, `holo_member`, `has_domain_region`, ... for
-//! synsets; an `inverse:` block listing the senses that have the relation for senses), so the
-//! base files are self-contained without the names. Loading understands both layouts, whatever
+//! synsets; `is_pertainym_of`, `is_agent_of`, ... for senses), so the base files are
+//! self-contained without the names. Loading understands both layouts, whatever
 //! the project setting is. The data model in memory is the same in both.
 use crate::rels::{SenseRelType, SynsetRelType};
 use crate::wordnet::{
@@ -168,7 +168,7 @@ pub(crate) fn apply_inverse_relations<L: Lexicon>(wn: &mut L) -> Result<()> {
     }
 
     // Senses
-    type Pending = (String, PosKey, SenseId, Vec<(String, SenseId, Option<f64>)>);
+    type Pending = (String, PosKey, SenseId, Vec<(SenseRelType, SenseId, Option<f64>)>);
     let mut pending: Vec<Pending> = Vec::new();
     let mut symmetric: Vec<(SenseId, SenseRelType, SenseId, Option<f64>)> = Vec::new();
     let mut name_senses: HashSet<SenseId> = HashSet::new();
@@ -187,10 +187,10 @@ pub(crate) fn apply_inverse_relations<L: Lexicon>(wn: &mut L) -> Result<()> {
                         }
                     }
                 }
-                if sense.inverse.values().any(|s| !s.is_empty()) {
+                if sense.has_inverse_rels() {
                     let mut list = Vec::new();
-                    for (rel, sources) in sense.inverse.iter() {
-                        for (source, conf) in sources.iter_scored() {
+                    for rel in SenseRelType::HAS_INVERSE_KEY {
+                        for (source, conf) in sense.inverse_sources(&rel).into_iter().flat_map(|s| s.iter_scored()) {
                             list.push((rel.clone(), source.clone(), conf));
                         }
                     }
@@ -200,16 +200,12 @@ pub(crate) fn apply_inverse_relations<L: Lexicon>(wn: &mut L) -> Result<()> {
         }
     }
     for (lemma, pos, id, list) in pending {
-        for (rel_name, source, conf) in list {
-            let Some(rel) = SenseRelType::from(&rel_name) else {
-                eprintln!("Warning: sense {} has an inverse relation {} that is not known", id, rel_name);
-                continue;
-            };
+        for (rel, source, conf) in list {
             add_sense_rel(wn, &source, rel, &id, conf)?;
         }
         wn.update_entry(&lemma, &pos, |entry| {
             for sense in entry.sense.iter_mut() {
-                sense.inverse.clear();
+                sense.clear_inverse_rels();
             }
         })?;
     }
@@ -386,15 +382,18 @@ pub(crate) fn separate_edits<L: Lexicon>(wn: &L) -> Result<SeparateEdits> {
                 }
             }
         } else {
-            let sources = name.inverse.entry(rel.value().to_string()).or_default();
-            if !sources.iter().any(|x| *x == source) {
-                sources.push_scored(source.clone(), conf);
+            if let Some(sources) = name.inverse_sources_mut(&rel) {
+                if !sources.iter().any(|x| *x == source) {
+                    sources.push_scored(source.clone(), conf);
+                }
             }
         }
     }
     for sense in edits.senses.values_mut() {
-        for sources in sense.inverse.values_mut() {
-            sources.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        for rel in SenseRelType::HAS_INVERSE_KEY {
+            if let Some(sources) = sense.inverse_sources_mut(&rel) {
+                sources.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            }
         }
     }
     Ok(edits)
@@ -545,8 +544,8 @@ mod tests {
             assert!(names.contains(key), "{key} in {names}");
         }
         let name_entries = read_all(&dir, "entries-", "-name.yaml");
-        assert!(name_entries.contains("inverse:"), "{name_entries}");
-        assert!(name_entries.contains("pertainym:") && name_entries.contains("agent:"), "{name_entries}");
+        assert!(!name_entries.contains("inverse:"), "{name_entries}");
+        assert!(name_entries.contains("is_pertainym_of:") && name_entries.contains("is_agent_of:"), "{name_entries}");
         assert!(name_entries.contains("confidence: 0.8"), "{name_entries}");
         // symmetric relations just have their copy on the name end
         assert!(name_entries.contains("derivation:"));
@@ -573,7 +572,7 @@ mod tests {
         assert_eq!(entries(&reloaded), entries(&original));
         // the inverse forms are consumed by loading
         assert!(synsets(&reloaded).values().all(|s| !s.has_inverse_rels()));
-        assert!(entries(&reloaded).values().all(|e| e.sense.iter().all(|s| s.inverse.is_empty())));
+        assert!(entries(&reloaded).values().all(|e| e.sense.iter().all(|s| !s.has_inverse_rels())));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
