@@ -134,6 +134,32 @@ impl Sense {
         }
     }
 
+    /// Apply `f` to the target list of every relation that points at another sense
+    pub(crate) fn for_each_sense_rel_mut(&mut self, mut f: impl FnMut(&mut ScoredVec<SenseId>)) {
+        for rels in [
+            &mut self.antonym, &mut self.also, &mut self.participle, &mut self.pertainym,
+            &mut self.derivation, &mut self.similar, &mut self.agent, &mut self.material,
+            &mut self.event, &mut self.instrument, &mut self.location, &mut self.by_means_of,
+            &mut self.undergoer, &mut self.property, &mut self.result, &mut self.state,
+            &mut self.uses, &mut self.destination, &mut self.body_part, &mut self.vehicle,
+        ] {
+            f(rels);
+        }
+    }
+
+    /// Apply `f` to the target list of every relation that may point at a sense or a synset
+    pub(crate) fn for_each_mixed_rel_mut(
+        &mut self,
+        mut f: impl FnMut(&mut ScoredVec<UnresolvedSenseOrSynsetId>),
+    ) {
+        for rels in [
+            &mut self.domain_topic, &mut self.domain_region, &mut self.exemplifies,
+            &mut self.other,
+        ] {
+            f(rels);
+        }
+    }
+
     /// Point every relation targeting sense `old` at `new` instead, keeping confidence scores.
     pub fn rename_rel_target(&mut self, old: &SenseId, new: &SenseId) {
         self.antonym.rename(old.as_str(), || new.clone());

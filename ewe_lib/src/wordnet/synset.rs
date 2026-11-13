@@ -174,6 +174,20 @@ impl Synset {
         }
     }
 
+    /// Apply `f` to the target list of every synset relation
+    pub(crate) fn for_each_rel_mut(&mut self, mut f : impl FnMut(&mut ScoredVec<SynsetId>)) {
+        for rels in [
+            &mut self.also, &mut self.attribute, &mut self.causes, &mut self.domain_region,
+            &mut self.domain_topic, &mut self.exemplifies, &mut self.entails, &mut self.hypernym,
+            &mut self.instance_hypernym, &mut self.mero_location, &mut self.mero_member,
+            &mut self.mero_part, &mut self.mero_portion, &mut self.mero_substance,
+            &mut self.meronym, &mut self.similar, &mut self.feminine, &mut self.masculine,
+            &mut self.other,
+        ] {
+            f(rels);
+        }
+    }
+
     pub(crate) fn remove_rel(&mut self, target : &SynsetId) {
         self.also.retain(|x| x != target);
         self.attribute.retain(|x| x != target);

@@ -125,6 +125,12 @@ enum Command {
         /// has an unrelated extra hypernym).
         #[arg(long)]
         compound_pattern_instances: bool,
+
+        /// Which names (proper nouns, part of speech `e`) the statistics cover: `include`
+        /// everything, `exclude` them (the core edition), `only` the names, or `merged` to count
+        /// them as ordinary nouns
+        #[arg(long, value_enum, default_value_t = common::NamesArg::Include)]
+        names: common::NamesArg,
     },
 }
 
@@ -157,6 +163,7 @@ fn main() {
                     url,
                     confidence,
                     lmf_version,
+                    names,
                 },
         }) => {
             let metadata = LexiconMetadata {
@@ -171,16 +178,17 @@ fn main() {
                 confidence: *confidence,
                 lmf_version: *lmf_version,
             };
-            commands::export::run_xml(path, metadata, cli.wordnet);
+            commands::export::run_xml(path, metadata, *names, cli.wordnet);
         }
         Some(Command::Export {
             format:
                 ExportFormat::Wndb {
                     ref path,
                     license_file,
+                    names,
                 },
         }) => {
-            commands::export::run_wndb(path, license_file.clone(), cli.wordnet);
+            commands::export::run_wndb(path, license_file.clone(), *names, cli.wordnet);
         }
         Some(Command::Export {
             format:
@@ -194,6 +202,7 @@ fn main() {
                     license,
                     version,
                     url,
+                    names,
                 },
         }) => {
             let options = RdfExportOptions {
@@ -214,7 +223,7 @@ fn main() {
                     lmf_version: Default::default(),
                 },
             };
-            commands::export::run_rdf(path, options, cli.wordnet);
+            commands::export::run_rdf(path, options, *names, cli.wordnet);
         }
         Some(Command::Import {
             format: ImportFormat::Xml { ref path },
@@ -229,9 +238,11 @@ fn main() {
             shortcut_instances,
             dense_component_instances,
             compound_pattern_instances,
+            names,
         }) => {
             commands::stats::run(
                 cli.wordnet,
+                *names,
                 *self_hypernymy_instances,
                 *shortcut_instances,
                 *dense_component_instances,

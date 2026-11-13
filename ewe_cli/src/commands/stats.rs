@@ -2,7 +2,7 @@
 //! "test patterns" from Lohk, Fellbaum & Võhandu, "Tuning Hierarchies in Princeton WordNet"
 //! (GWC 2016).
 
-use crate::common::locate_wordnet;
+use crate::common::{apply_names, locate_wordnet, NamesArg};
 use ewe_lib::wordnet::{Lexicon, SynsetId};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ fn print_count_table(counts: &BTreeMap<String, usize>) {
 
 pub(crate) fn run(
     wordnet: Option<PathBuf>,
+    names: NamesArg,
     self_hypernymy_instances: bool,
     shortcut_instances: bool,
     dense_component_instances: bool,
@@ -25,6 +26,7 @@ pub(crate) fn run(
         eprintln!("{}", e);
         exit(-1);
     });
+    let wn = apply_names(wn, names);
 
     let mut synsets_by_pos: BTreeMap<String, usize> = BTreeMap::new();
     let mut synset_rel_counts: BTreeMap<String, usize> = BTreeMap::new();
