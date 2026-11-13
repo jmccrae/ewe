@@ -1028,40 +1028,10 @@ fn sense_wndb_relation_types(sense: &Sense) -> Vec<SenseRelType> {
 
 /// `index.sense` - mirrors `writeSenseIndex` (`wndb.scala:1013-1041`). No header. Runs once,
 /// globally, after every `data.*` buffer is complete (needs every synset's final offset).
-/// `index.sense`'s sense-key column is *not* simply `sense.id` verbatim: real `english-wordnet-
-/// 2025.xml` never sets `Sense/@dc:identifier` (confirmed: zero occurrences in the file), so
-/// `WNDB.write` always falls back to its own `unmapSenseKey` to reconstruct a sense key from the
-/// escaped `Sense/@id` - and that function is *not* a full inverse of the escaping scheme
-/// `ids::map_sense_key` (ported from OEWN's own `sense_keys.py`) implements: it only undoes
-/// `-ap-`/`-sl-`/`-ex-`/`-cm-`/`-cl-`, never the hyphen-doubling or any of the other escapes. So
-/// a lemma with a literal hyphen (e.g. "10-membered") round-trips through the real tool as
-/// "10--membered" in `index.sense` - confirmed against `oewn2025/index.sense` directly. Faithfully
-/// reproducing that (rather than "fixing" it) is what byte-exactness requires: re-escape via
-/// `ids::map_sense_key` the same way a WN-LMF document would encode this sense key, then run
-/// `WNDB.unmapSenseKey`'s exact (incomplete) logic on that - mirrors `wndb.scala:1043-1057`.
-fn scala_sense_key(sense_key: &str) -> String {
-    let escaped = crate::wordnet::xml::ids::map_sense_key(sense_key, "x");
-    if let Some(dunder) = escaped.find("__") {
-        let e0 = &escaped[..dunder];
-        let first_dash = escaped.find('-').unwrap_or(0);
-        let l = if first_dash + 1 <= e0.len() {
-            &e0[first_dash + 1..]
-        } else {
-            e0
-        };
-        let mut r = escaped[dunder + 2..].to_string();
-        if escaped.ends_with("__") {
-            r.push_str("__");
-        }
-        let l = l.replace("-ap-", "'").replace("-sl-", "/").replace("-ex-", "!").replace("-cm-", ",").replace("-cl-", ":");
-        let r = r.replace('_', ":").replace('.', ":").replace("-sp-", "_");
-        format!("{l}%{r}")
-    } else {
-        let rest = escaped.get(4..).unwrap_or("");
-        rest.replace("__", "%").replace("-ap-", "'").replace("-sl-", "/").replace("-ex-", "!").replace("-cm-", ",").replace("-cl-", ":")
-    }
-}
-
+/// The sense-key column is `sense.id` verbatim: it is the real Princeton sense key (e.g.
+/// `'hood%1:14:01::`, `a-bomb%1:06:00::`), matching Princeton WordNet's own `index.sense`. (The old
+/// Scala tool re-derived it from the XML-escaped id with an incomplete `unmapSenseKey`, producing
+/// `-apos-hood` / `a--bomb`; that is english-wordnet#1305 and is deliberately not reproduced.)
 fn write_sense_index(all_entries: &[AllEntry], offsets: &Offsets, out_dir: &Path) -> Result<()> {
     // Group by (lowercase lemma, part-of-speech char) preserving document order within a group -
     // mirrors `entriesByLowercaseLemma`. Iteration order across groups doesn't matter, since the
@@ -1083,7 +1053,7 @@ fn write_sense_index(all_entries: &[AllEntry], offsets: &Offsets, out_dir: &Path
                     .get(&sense.synset)
                     .map(|(code, _)| code.clone())
                     .unwrap_or_else(|| "00000000".to_string());
-                lines.push(format!("{} {} {} 0", scala_sense_key(sense.id.as_str()), code, i));
+                lines.push(format!("{} {} {} 0", sense.id.as_str(), code, i));
                 i += 1;
             }
         }
@@ -1217,18 +1187,20 @@ mod tests {
     }
 
     #[test]
-    fn test_scala_sense_key_round_trips_ordinary_keys() {
-        assert_eq!(scala_sense_key("grandfather%1:01:00::"), "grandfather%1:01:00::");
-    }
-
-    #[test]
-    fn test_scala_sense_key_reproduces_hyphen_doubling_quirk() {
-        // Transcribed from real `oewn2025/index.sense` - confirms the exact upstream quirk this
-        // is meant to reproduce (see this function's doc comment).
-        assert_eq!(
-            scala_sense_key("10-membered%5:00:00:membered:00"),
-            "10--membered%5:00:00:membered:00"
-        );
+    fn test_write_sense_index_keeps_real_sense_keys() {
+        // Princeton's index.sense uses literal apostrophes/hyphens (#107).
+        let mut wn = small_fixture();
+        let mut ss = Synset::new(PartOfSpeech::n);
+        ss.definition.push("a thing".to_string());
+        ss.members.push("a-bomb".to_string());
+        wn.insert_synset("noun.artifact".to_string(), SsId::new("20000001-n"), ss).unwrap();
+        let mut e = Entry::new();
+        e.sense.push(Sense::new(SenseId::new("a-bomb%1:06:00::".to_string()), SsId::new("20000001-n")));
+        wn.insert_entry("a-bomb".to_string(), PosKey::new("n".to_string()), e).unwrap();
+        let out_dir = write_fixture(&wn, Some(header_file()));
+        let idx = std::fs::read_to_string(out_dir.join("index.sense")).unwrap();
+        assert!(idx.contains("a-bomb%1:06:00:: "), "{idx}");
+        assert!(!idx.contains("a--bomb"));
     }
 
     #[test]
