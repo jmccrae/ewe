@@ -35,6 +35,37 @@ type Result<T> = std::result::Result<T, XmlExportError>;
 /// `SenseRelation`'s target carries - so an actual target sense id can be looked up.
 type SenseKeyLookup = HashMap<(String, PosKey, SynsetId), SenseId>;
 
+/// Finds the id of the sense of `lemma` (with part of speech `pos`) in `synset`, if the export
+/// contains it - the information a `SenseRelation` target carries.
+trait SenseIdLookup {
+    fn sense_id(&self, lemma: &str, pos: &PosKey, synset: &SynsetId) -> Result<Option<SenseId>>;
+}
+
+impl SenseIdLookup for SenseKeyLookup {
+    fn sense_id(&self, lemma: &str, pos: &PosKey, synset: &SynsetId) -> Result<Option<SenseId>> {
+        Ok(self.get(&(lemma.to_string(), pos.clone(), synset.clone())).cloned())
+    }
+}
+
+/// Looks senses up in the lexicon itself, so no table of every sense has to be built
+struct LexiconSenseLookup<'a, L: Lexicon>(&'a L);
+
+impl<L: Lexicon> SenseIdLookup for LexiconSenseLookup<'_, L> {
+    fn sense_id(&self, lemma: &str, pos: &PosKey, synset: &SynsetId) -> Result<Option<SenseId>> {
+        // As in the whole-lexicon table: the synset has to list the lemma as a member
+        match self.0.synset_by_id(synset)? {
+            Some(ss) if ss.members.iter().any(|m| m == lemma) => {}
+            _ => return Ok(None),
+        }
+        for (entry_pos, entry) in self.0.entry_by_lemma_with_pos(lemma)? {
+            if &entry_pos == pos {
+                return Ok(entry.sense.iter().rev().find(|s| &s.synset == synset).map(|s| s.id.clone()));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// Export every synset in `wn` as a single self-contained WN-LMF document.
 pub fn write_lexicon_xml<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) -> Result<Vec<u8>> {
     Ok(write_lexicon_xml_report(wn, metadata)?.bytes)
@@ -76,6 +107,110 @@ pub fn write_lexicon_xml_report<L: Lexicon>(wn: &L, metadata: &LexiconMetadata) 
 struct EntryAcc<'a> {
     representative: &'a Member,
     senses: Vec<(&'a MemberSynset, &'a Member)>,
+}
+
+/// Export every synset in `wn` as a single self-contained WN-LMF document, straight to `out`,
+/// returning the warnings (see [`write_lexicon_xml_report`]). The document is the same, but
+/// nothing proportional to the size of the lexicon is held except the sorted ids of its entries
+/// and synsets: each element is built from the lexicon, written, and dropped. Use this for
+/// lexicons too large for [`write_lexicon_xml_report`].
+pub fn write_lexicon_xml_to<L: Lexicon, W: std::io::Write>(
+    wn: &L,
+    metadata: &LexiconMetadata,
+    out: W,
+) -> Result<Vec<String>> {
+    let version = metadata.lmf_version;
+    let prefix = metadata.id_prefix.as_str();
+    let frames = wn.frames_get()?;
+
+    // Entries and synsets are written sorted by their own `@id` (see the module doc comment)
+    let mut entry_keys: Vec<(String, String, PosKey)> = Vec::new();
+    for bucket in wn.entries_iter()? {
+        let (_, bucket) = bucket?;
+        for e in bucket.entries()? {
+            let (lemma, pos, entry) = e?;
+            if !entry.sense.is_empty() {
+                entry_keys.push((ids::entry_xml_id(prefix, &lemma, &pos), lemma, pos));
+            }
+        }
+    }
+    entry_keys.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut synset_ids: Vec<SynsetId> = Vec::new();
+    for lexfile in wn.synsets_iter()? {
+        let (_, syns) = lexfile?;
+        for s in syns.iter()? {
+            synset_ids.push(s?.0);
+        }
+    }
+    synset_ids.sort();
+
+    let mut writer = Writer::new_with_indent(out, b' ', 2);
+    write_document_start(&mut writer, metadata)?;
+
+    let lookup = LexiconSenseLookup(wn);
+    let mut n_reconstructed = 0usize;
+    for (_, lemma, pos) in &entry_keys {
+        let entries = wn.entry_by_lemma_with_pos(lemma)?;
+        let Some((_, entry)) = entries.iter().find(|(p, _)| p == pos) else { continue };
+        // A sense is part of the entry if its synset lists the lemma as a member
+        let mut synsets: Vec<MemberSynset> = Vec::new();
+        let mut member_index: Vec<usize> = Vec::new();
+        for sense in entry.sense.iter() {
+            let Some(synset) = wn.synset_by_id(&sense.synset)? else { continue };
+            let member_synset = MemberSynset::from_synset(&sense.synset, synset.into_owned(), wn)?;
+            if let Some(i) = member_synset.members.iter().position(|m| m.sense.id == sense.id) {
+                synsets.push(member_synset);
+                member_index.push(i);
+            }
+        }
+        let Some(first) = synsets.first() else { continue };
+        let representative = &first.members[member_index[0]];
+        if representative.reconstructed {
+            n_reconstructed += 1;
+        }
+        let acc = EntryAcc {
+            representative,
+            senses: synsets.iter().zip(&member_index).map(|(s, i)| (s, &s.members[*i])).collect(),
+        };
+        write_lexical_entry(&mut writer, prefix, lemma, pos, &acc, &lookup, version)?;
+    }
+
+    let mut n_new_pos = 0usize;
+    for id in &synset_ids {
+        let Some(synset) = wn.synset_by_id(id)? else { continue };
+        let member_synset = MemberSynset::from_synset(id, synset.into_owned(), wn)?;
+        if member_synset.part_of_speech.is_new_in_lmf_1_5() {
+            n_new_pos += 1;
+        }
+        write_synset(&mut writer, prefix, &member_synset, &metadata.language, version)?;
+    }
+    write_document_end(&mut writer, &frames)?;
+    writer.into_inner().flush().map_err(quick_xml::Error::from)?;
+
+    let mut warnings = Vec::new();
+    if version < LmfVersion::V1_5 && n_new_pos > 0 {
+        warnings.push(new_pos_warning(n_new_pos, version));
+    }
+    if !version.supports_reconstructed() && n_reconstructed > 0 {
+        warnings.push(reconstructed_warning(n_reconstructed, version));
+    }
+    Ok(warnings)
+}
+
+fn new_pos_warning(n: usize, version: LmfVersion) -> String {
+    format!(
+        "{n} synset(s) with a part of speech introduced in WN-LMF 1.5 (e.g. names, `e`) \
+         were exported with the closest WN-LMF {} value (use WN-LMF 1.5 to keep them)",
+        version.as_str()
+    )
+}
+
+fn reconstructed_warning(n: usize, version: LmfVersion) -> String {
+    format!(
+        "{n} reconstructed lemma(s) were exported without the `reconstructed` flag: \
+         WN-LMF {} has no such attribute (use WN-LMF 1.5 to keep it)",
+        version.as_str()
+    )
 }
 
 /// Export exactly the given synsets (see the module doc comment for the self-containment
@@ -144,6 +279,36 @@ pub fn write_lexicon_xml_subset_report(
     synsets_sorted.sort_by(|a, b| a.id.cmp(&b.id));
 
     let mut writer = Writer::new_with_indent(Vec::new(), b' ', 2);
+    write_document_start(&mut writer, metadata)?;
+
+    for (_, (lemma, poskey), acc) in &entries_sorted {
+        write_lexical_entry(&mut writer, prefix, lemma, poskey, acc, &sense_id_lookup, version)?;
+    }
+
+    for synset in &synsets_sorted {
+        write_synset(&mut writer, prefix, synset, &metadata.language, version)?;
+    }
+
+    write_document_end(&mut writer, frames)?;
+
+    if version < LmfVersion::V1_5 {
+        let n = synsets.iter().filter(|s| s.part_of_speech.is_new_in_lmf_1_5()).count();
+        if n > 0 {
+            warnings.push(new_pos_warning(n, version));
+        }
+    }
+    if !version.supports_reconstructed() {
+        let n = entries.values().filter(|a| a.representative.reconstructed).count();
+        if n > 0 {
+            warnings.push(reconstructed_warning(n, version));
+        }
+    }
+    Ok(XmlOutput { bytes: writer.into_inner(), warnings })
+}
+
+fn write_document_start<W: std::io::Write>(writer: &mut Writer<W>, metadata: &LexiconMetadata) -> Result<()> {
+    let version = metadata.lmf_version;
+    let prefix = metadata.id_prefix.as_str();
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
     writer.write_event(Event::DocType(BytesText::from_escaped(version.doctype())))?;
 
@@ -161,15 +326,10 @@ pub fn write_lexicon_xml_subset_report(
     lexicon.push_attribute(("url", metadata.url.as_deref().unwrap_or("")));
     push_confidence(&mut lexicon, metadata.confidence);
     writer.write_event(Event::Start(lexicon))?;
+    Ok(())
+}
 
-    for (_, (lemma, poskey), acc) in &entries_sorted {
-        write_lexical_entry(&mut writer, prefix, lemma, poskey, acc, &sense_id_lookup, version)?;
-    }
-
-    for synset in &synsets_sorted {
-        write_synset(&mut writer, prefix, synset, &metadata.language, version)?;
-    }
-
+fn write_document_end<W: std::io::Write>(writer: &mut Writer<W>, frames: &[(String, String)]) -> Result<()> {
     for (id, subcategorization_frame) in frames {
         let mut el = BytesStart::new("SyntacticBehaviour");
         el.push_attribute(("id", id.as_str()));
@@ -179,28 +339,7 @@ pub fn write_lexicon_xml_subset_report(
 
     writer.write_event(Event::End(BytesEnd::new("Lexicon")))?;
     writer.write_event(Event::End(BytesEnd::new("LexicalResource")))?;
-
-    if version < LmfVersion::V1_5 {
-        let n = synsets.iter().filter(|s| s.part_of_speech.is_new_in_lmf_1_5()).count();
-        if n > 0 {
-            warnings.push(format!(
-                "{n} synset(s) with a part of speech introduced in WN-LMF 1.5 (e.g. names, `e`) \
-                 were exported with the closest WN-LMF {} value (use WN-LMF 1.5 to keep them)",
-                version.as_str()
-            ));
-        }
-    }
-    if !version.supports_reconstructed() {
-        let n = entries.values().filter(|a| a.representative.reconstructed).count();
-        if n > 0 {
-            warnings.push(format!(
-                "{n} reconstructed lemma(s) were exported without the `reconstructed` flag: \
-                 WN-LMF {} has no such attribute (use WN-LMF 1.5 to keep it)",
-                version.as_str()
-            ));
-        }
-    }
-    Ok(XmlOutput { bytes: writer.into_inner(), warnings })
+    Ok(())
 }
 
 fn write_lexical_entry<W: std::io::Write>(
@@ -209,7 +348,7 @@ fn write_lexical_entry<W: std::io::Write>(
     lemma: &str,
     poskey: &PosKey,
     acc: &EntryAcc,
-    sense_id_lookup: &SenseKeyLookup,
+    sense_id_lookup: &impl SenseIdLookup,
     version: LmfVersion,
 ) -> Result<()> {
     let mut entry = BytesStart::new("LexicalEntry");
@@ -264,7 +403,7 @@ fn write_sense<W: std::io::Write>(
     prefix: &str,
     member: &Member,
     synset: &MemberSynset,
-    sense_id_lookup: &SenseKeyLookup,
+    sense_id_lookup: &impl SenseIdLookup,
 ) -> Result<()> {
     let mut sense = BytesStart::new("Sense");
     sense.push_attribute(("id", ids::sense_xml_id(prefix, &member.sense.id).as_str()));
@@ -278,7 +417,7 @@ fn write_sense<W: std::io::Write>(
     sense.push_attribute(("synset", ids::synset_xml_id(prefix, &synset.id).as_str()));
     push_confidence(&mut sense, member.sense.confidence);
 
-    let relations = sense_relations_xml(prefix, synset, &member.lemma, sense_id_lookup);
+    let relations = sense_relations_xml(prefix, synset, &member.lemma, sense_id_lookup)?;
     if relations.is_empty() {
         writer.write_event(Event::Empty(sense))?;
     } else {
@@ -303,8 +442,8 @@ fn sense_relations_xml(
     prefix: &str,
     synset: &MemberSynset,
     lemma: &str,
-    sense_id_lookup: &SenseKeyLookup,
-) -> Vec<(&'static str, String, Option<f64>)> {
+    sense_id_lookup: &impl SenseIdLookup,
+) -> Result<Vec<(&'static str, String, Option<f64>)>> {
     let mut out = Vec::new();
     macro_rules! rel {
         ($field:ident, $rel_type:expr) => {
@@ -321,12 +460,11 @@ fn sense_relations_xml(
                     out.push(($rel_type, ids::synset_xml_id(prefix, &rel.target_synset), rel.confidence));
                     continue;
                 };
-                let key = (target_lemma.clone(), target_poskey.clone(), rel.target_synset.clone());
                 // A target outside this export's synsets has no known real sense key to build
                 // its `Sense/@id` from (see the module doc comment) - skip it rather than emit
                 // an unresolvable IDREF.
-                if let Some(target_sense_id) = sense_id_lookup.get(&key) {
-                    out.push(($rel_type, ids::sense_xml_id(prefix, target_sense_id), rel.confidence));
+                if let Some(target_sense_id) = sense_id_lookup.sense_id(target_lemma, target_poskey, &rel.target_synset)? {
+                    out.push(($rel_type, ids::sense_xml_id(prefix, &target_sense_id), rel.confidence));
                 }
             }
         };
@@ -355,7 +493,7 @@ fn sense_relations_xml(
     rel!(body_part, "body_part");
     rel!(vehicle, "vehicle");
 
-    out
+    Ok(out)
 }
 
 fn write_synset<W: std::io::Write>(

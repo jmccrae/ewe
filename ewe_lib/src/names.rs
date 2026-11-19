@@ -9,6 +9,9 @@ use crate::wordnet::{
     Entries, Entry, Lexicon, LexiconError, LexiconHashMapBackend, PartOfSpeech, PosKey, Sense,
     SenseId, Synset, SynsetId, Synsets, UnresolvedSenseOrSynsetId,
 };
+use crate::wordnet::entry::BTEntries;
+use crate::wordnet::section::entry_key;
+use crate::wordnet::BTSynsets;
 use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 
@@ -31,6 +34,8 @@ pub enum NamesMode {
 pub enum NamesError {
     #[error(transparent)]
     Lexicon(#[from] LexiconError),
+    #[error(transparent)]
+    Load(#[from] crate::wordnet::WordNetYAMLIOError),
     #[error("Cannot merge name {name} into the nouns: {noun} already exists")]
     IdCollision { name: SynsetId, noun: SynsetId },
 }
@@ -63,101 +68,258 @@ fn merged_lexfile(lexfile: &str) -> String {
 /// A copy of `wn` containing the names as described by `mode`, with no relation, sense or
 /// member left pointing at something that is not in the copy. `Include` copies everything.
 pub fn restrict_names<L: Lexicon>(wn: &L, mode: NamesMode) -> Result<LexiconHashMapBackend> {
+    restrict_names_into(wn, mode, LexiconHashMapBackend::new())
+}
+
+/// As [`restrict_names`], but writes the copy into `out` (e.g. an on-disk `ReDBLexicon`) and
+/// streams `wn` instead of collecting it, so memory use is bounded by the id sets below rather
+/// than by the size of the lexicon's contents.
+pub fn restrict_names_into<L: Lexicon, O: Lexicon>(wn: &L, mode: NamesMode, mut out: O) -> Result<O> {
     // Pass 1: which synsets are kept
-    let mut synsets: Vec<(String, SynsetId, Synset)> = Vec::new();
+    let mut kept_synsets: HashSet<SynsetId> = HashSet::new();
     for group in wn.synsets_iter()? {
-        let (lexname, group) = group?;
+        let (_, group) = group?;
         for s in group.iter()? {
             let (id, synset) = s?;
-            let keep = match mode {
-                NamesMode::Include | NamesMode::Merged => true,
-                NamesMode::Exclude => !is_name_synset(&synset),
-                NamesMode::Only => is_name_synset(&synset),
-            };
-            if keep {
-                synsets.push((lexname.clone(), id, synset.into_owned()));
+            if synset_kept(&synset, mode) {
+                kept_synsets.insert(id);
             }
         }
     }
-    let kept_synsets: HashSet<SynsetId> = synsets.iter().map(|(_, id, _)| id.clone()).collect();
 
-    // Pass 2: which entries and senses are kept
-    let mut entries: Vec<(String, PosKey, Entry)> = Vec::new();
-    // senses that were dropped, per (synset, lemma), to tidy the synset members afterwards
+    // Pass 2: which entries and senses are kept. Entries come out sorted by lemma, so all the
+    // entries of one lemma are adjacent; a (synset, lemma) member is only ever dropped if none of
+    // that lemma's entries keeps it, so it is decided one lemma at a time.
     let mut dropped_members: HashSet<(SynsetId, String)> = HashSet::new();
-    let mut kept_members: HashSet<(SynsetId, String)> = HashSet::new();
     let mut kept_senses: HashSet<SenseId> = HashSet::new();
+    let mut group_lemma = String::new();
+    let mut group_dropped: HashSet<(SynsetId, String)> = HashSet::new();
+    let mut group_kept: HashSet<(SynsetId, String)> = HashSet::new();
+    macro_rules! flush_group {
+        () => {
+            for key in group_dropped.drain() {
+                if !group_kept.contains(&key) {
+                    dropped_members.insert(key);
+                }
+            }
+            group_kept.clear();
+        };
+    }
     for bucket in wn.entries_iter()? {
         let (_, bucket) = bucket?;
         for e in bucket.entries()? {
             let (lemma, pos, entry) = e?;
-            let mut entry = entry.into_owned();
-            let had_senses = !entry.sense.is_empty();
+            if lemma != group_lemma {
+                flush_group!();
+                group_lemma = lemma.clone();
+            }
             let name_entry = is_name_pos(&pos);
-            entry.sense.retain(|sense| {
-                let keep = kept_synsets.contains(&sense.synset)
-                    && match mode {
-                        NamesMode::Include | NamesMode::Merged => true,
-                        NamesMode::Exclude => !name_entry,
-                        NamesMode::Only => name_entry,
-                    };
-                if keep {
-                    kept_members.insert((sense.synset.clone(), lemma.clone()));
+            let mut any_kept = false;
+            for sense in entry.sense.iter() {
+                if sense_kept(sense, name_entry, mode, &kept_synsets) {
+                    any_kept = true;
+                    group_kept.insert((sense.synset.clone(), lemma.clone()));
                 } else {
-                    dropped_members.insert((sense.synset.clone(), lemma.clone()));
+                    group_dropped.insert((sense.synset.clone(), lemma.clone()));
                 }
-                keep
-            });
-            if had_senses && entry.sense.is_empty() {
+            }
+            if entry_kept(&entry, any_kept, name_entry, mode) {
+                for sense in entry.sense.iter() {
+                    if sense_kept(sense, name_entry, mode, &kept_synsets) {
+                        kept_senses.insert(sense.id.clone());
+                    }
+                }
+            }
+        }
+    }
+    flush_group!();
+
+    // Pass 3: write the kept synsets, with everything that points at something gone removed.
+    // Both this and the entries below are written in batches through the bulk-load paths, and
+    // the reverse indexes are built once at the end, as `Lexicon::load` does: adding records one
+    // by one maintains them incrementally, which is far too slow on a large lexicon.
+    for group in wn.synsets_iter()? {
+        let (lexname, group) = group?;
+        let target_lexname = if mode == NamesMode::Merged { merged_lexfile(lexname) } else { lexname.to_string() };
+        let mut batch = BTSynsets::new();
+        for s in group.iter()? {
+            let (id, synset) = s?;
+            if !kept_synsets.contains(&id) {
                 continue;
             }
-            // An entry that never had a sense is only part of the common vocabulary or of the
-            // names, never of both
-            if entry.sense.is_empty()
-                && match mode {
-                    NamesMode::Exclude => name_entry,
-                    NamesMode::Only => !name_entry,
-                    _ => false,
+            let mut synset = synset.into_owned();
+            synset.for_each_rel_mut(|rels| rels.retain(|t| kept_synsets.contains(t)));
+            synset.members.retain(|m| !dropped_members.contains(&(id.clone(), m.clone())));
+            let new_id = if mode == NamesMode::Merged {
+                let new_id = merged_id(&id);
+                if new_id != id && kept_synsets.contains(&new_id) {
+                    return Err(NamesError::IdCollision { name: id, noun: new_id });
                 }
-            {
-                continue;
+                if is_name_synset(&synset) {
+                    synset.part_of_speech = PartOfSpeech::n;
+                }
+                synset.for_each_rel_mut(|rels| rename_synsets(rels));
+                new_id
+            } else {
+                id
+            };
+            batch.insert(new_id, synset)?;
+            if batch.0.len() >= WRITE_BATCH {
+                out.synsets_insert(target_lexname.clone(), std::mem::replace(&mut batch, BTSynsets::new()))?;
             }
-            for sense in &entry.sense {
-                kept_senses.insert(sense.id.clone());
-            }
-            entries.push((lemma, pos, entry));
+        }
+        if !batch.0.is_empty() {
+            out.synsets_insert(target_lexname, batch)?;
         }
     }
 
-    // Pass 3: drop everything that points at something that is gone
-    for (_, _, synset) in synsets.iter_mut() {
-        synset.for_each_rel_mut(|rels| rels.retain(|t| kept_synsets.contains(t)));
-    }
-    for (_, id, synset) in synsets.iter_mut() {
-        synset.members.retain(|m| {
-            let key = (id.clone(), m.clone());
-            !dropped_members.contains(&key) || kept_members.contains(&key)
-        });
-    }
-    for (_, _, entry) in entries.iter_mut() {
-        for sense in entry.sense.iter_mut() {
-            restrict_sense(sense, &kept_senses, &kept_synsets);
+    // Pass 3b: write the kept entries, one lemma at a time
+    let mut writer = EntryWriter::default();
+    let mut pending: Vec<(PosKey, Entry)> = Vec::new();
+    let mut pending_lemma = String::new();
+    for bucket in wn.entries_iter()? {
+        let (_, bucket) = bucket?;
+        for e in bucket.entries()? {
+            let (lemma, pos, entry) = e?;
+            if lemma != pending_lemma {
+                write_lemma(&mut out, &mut writer, mode, &pending_lemma, std::mem::take(&mut pending))?;
+                pending_lemma = lemma.clone();
+            }
+            let name_entry = is_name_pos(&pos);
+            let any_kept = entry.sense.iter().any(|s| sense_kept(s, name_entry, mode, &kept_synsets));
+            if !entry_kept(&entry, any_kept, name_entry, mode) {
+                continue;
+            }
+            let mut entry = entry.into_owned();
+            entry.sense.retain(|s| sense_kept(s, name_entry, mode, &kept_synsets));
+            for sense in entry.sense.iter_mut() {
+                restrict_sense(sense, &kept_senses, &kept_synsets);
+            }
+            pending.push((pos, entry));
         }
     }
-
-    if mode == NamesMode::Merged {
-        return merge_names(wn, synsets, entries);
-    }
-
-    let mut out = LexiconHashMapBackend::new();
-    for (lexname, id, synset) in synsets {
-        out.insert_synset(lexname, id, synset)?;
-    }
-    for (lemma, pos, entry) in entries {
-        out.insert_entry(lemma, pos, entry)?;
-    }
+    write_lemma(&mut out, &mut writer, mode, &pending_lemma, pending)?;
+    writer.flush(&mut out)?;
     out.frames_set(wn.frames_get()?.into_owned())?;
+    crate::wordnet::lexicon::finalize_bulk_load(&mut out)?;
     Ok(out)
+}
+
+/// How many records are written to the output at a time
+const WRITE_BATCH: usize = 2000;
+
+/// Collects entries by section so they can be written to the output in batches
+#[derive(Default)]
+struct EntryWriter {
+    by_section: BTreeMap<char, BTEntries>,
+    count: usize,
+}
+
+impl EntryWriter {
+    fn add<O: Lexicon>(&mut self, out: &mut O, lemma: &str, pos: PosKey, entry: Entry) -> Result<()> {
+        for sense in entry.sense.iter() {
+            out.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.to_string(), pos.clone()))?;
+        }
+        self.by_section
+            .entry(entry_key(lemma))
+            .or_insert_with(BTEntries::new)
+            .0
+            .entry(lemma.to_string())
+            .or_default()
+            .insert(pos, entry);
+        self.count += 1;
+        if self.count >= WRITE_BATCH {
+            self.flush(out)?;
+        }
+        Ok(())
+    }
+
+    fn flush<O: Lexicon>(&mut self, out: &mut O) -> Result<()> {
+        for (key, entries) in std::mem::take(&mut self.by_section) {
+            out.entries_insert(key, entries)?;
+        }
+        self.count = 0;
+        Ok(())
+    }
+}
+
+fn synset_kept(synset: &Synset, mode: NamesMode) -> bool {
+    match mode {
+        NamesMode::Include | NamesMode::Merged => true,
+        NamesMode::Exclude => !is_name_synset(synset),
+        NamesMode::Only => is_name_synset(synset),
+    }
+}
+
+fn sense_kept(sense: &Sense, name_entry: bool, mode: NamesMode, kept_synsets: &HashSet<SynsetId>) -> bool {
+    kept_synsets.contains(&sense.synset)
+        && match mode {
+            NamesMode::Include | NamesMode::Merged => true,
+            NamesMode::Exclude => !name_entry,
+            NamesMode::Only => name_entry,
+        }
+}
+
+/// Whether an entry survives, given whether any of its senses did
+fn entry_kept(entry: &Entry, any_sense_kept: bool, name_entry: bool, mode: NamesMode) -> bool {
+    if !entry.sense.is_empty() {
+        return any_sense_kept;
+    }
+    // An entry that never had a sense is only part of the common vocabulary or of the names,
+    // never of both
+    !match mode {
+        NamesMode::Exclude => name_entry,
+        NamesMode::Only => !name_entry,
+        _ => false,
+    }
+}
+
+/// Write the (already filtered) entries of one lemma, merging names into nouns in `Merged` mode
+fn write_lemma<O: Lexicon>(out: &mut O, writer: &mut EntryWriter, mode: NamesMode, lemma: &str, entries: Vec<(PosKey, Entry)>) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    if mode != NamesMode::Merged {
+        for (pos, entry) in entries {
+            writer.add(out, lemma, pos, entry)?;
+        }
+        return Ok(());
+    }
+    // The first name entry of a lemma joins the lemma's noun entry
+    let mut by_pos: BTreeMap<PosKey, Entry> = entries.into_iter().collect();
+    let names: Vec<PosKey> = by_pos.keys().filter(|p| is_name_pos(p)).cloned().collect();
+    let mut renamed: Vec<(PosKey, Entry)> = Vec::new();
+    for (i, key) in names.into_iter().enumerate() {
+        let mut entry = by_pos.remove(&key).expect("key just listed");
+        for sense in entry.sense.iter_mut() {
+            sense.synset = merged_id(&sense.synset);
+            restrict_to_merged(sense);
+        }
+        if i == 0 {
+            match by_pos.remove(&PosKey::new("n")) {
+                Some(noun) => by_pos.insert(PosKey::new("n"), merge_entries(noun, entry)),
+                None => by_pos.insert(PosKey::new("n"), entry),
+            };
+        } else {
+            renamed.push((key, entry));
+        }
+    }
+    // further name entries of the lemma (homographs) keep their own entry
+    for (_, entry) in renamed {
+        let mut k = 2;
+        while by_pos.contains_key(&PosKey::new(format!("n{k}"))) {
+            k += 1;
+        }
+        by_pos.insert(PosKey::new(format!("n{k}")), entry);
+    }
+    for (pos, mut entry) in by_pos {
+        for sense in entry.sense.iter_mut() {
+            sense.synset = merged_id(&sense.synset);
+            restrict_to_merged(sense);
+        }
+        writer.add(out, lemma, pos, entry)?;
+    }
+    Ok(())
 }
 
 /// Remove the relations of a sense that point at a sense or synset that is not kept
@@ -170,69 +332,6 @@ fn restrict_sense(sense: &mut Sense, kept_senses: &HashSet<SenseId>, kept_synset
             UnresolvedSenseOrSynsetId::Unresolved(_) => true,
         })
     });
-}
-
-/// `Merged` mode: turn the names into nouns
-fn merge_names<L: Lexicon>(
-    wn: &L,
-    synsets: Vec<(String, SynsetId, Synset)>,
-    entries: Vec<(String, PosKey, Entry)>,
-) -> Result<LexiconHashMapBackend> {
-    let existing: HashSet<SynsetId> = synsets.iter().map(|(_, id, _)| id.clone()).collect();
-    let mut out = LexiconHashMapBackend::new();
-    for (lexname, id, mut synset) in synsets {
-        let new_id = merged_id(&id);
-        if new_id != id && existing.contains(&new_id) {
-            return Err(NamesError::IdCollision { name: id, noun: new_id });
-        }
-        if is_name_synset(&synset) {
-            synset.part_of_speech = PartOfSpeech::n;
-        }
-        synset.for_each_rel_mut(|rels| rename_synsets(rels));
-        out.insert_synset(merged_lexfile(&lexname), new_id, synset)?;
-    }
-
-    // Entries: the first name entry of a lemma joins the lemma's noun entry
-    let mut by_lemma: BTreeMap<String, BTreeMap<PosKey, Entry>> = BTreeMap::new();
-    for (lemma, pos, entry) in entries {
-        by_lemma.entry(lemma).or_default().insert(pos, entry);
-    }
-    for (lemma, mut by_pos) in by_lemma {
-        let names: Vec<PosKey> = by_pos.keys().filter(|p| is_name_pos(p)).cloned().collect();
-        let mut renamed: Vec<(PosKey, Entry)> = Vec::new();
-        for (i, key) in names.into_iter().enumerate() {
-            let mut entry = by_pos.remove(&key).expect("key just listed");
-            for sense in entry.sense.iter_mut() {
-                sense.synset = merged_id(&sense.synset);
-                restrict_to_merged(sense);
-            }
-            if i == 0 {
-                match by_pos.remove(&PosKey::new("n")) {
-                    Some(noun) => by_pos.insert(PosKey::new("n"), merge_entries(noun, entry)),
-                    None => by_pos.insert(PosKey::new("n"), entry),
-                };
-            } else {
-                renamed.push((key, entry));
-            }
-        }
-        // further name entries of the lemma (homographs) keep their own entry
-        for (_, entry) in renamed {
-            let mut k = 2;
-            while by_pos.contains_key(&PosKey::new(format!("n{k}"))) {
-                k += 1;
-            }
-            by_pos.insert(PosKey::new(format!("n{k}")), entry);
-        }
-        for (pos, mut entry) in by_pos {
-            for sense in entry.sense.iter_mut() {
-                sense.synset = merged_id(&sense.synset);
-                restrict_to_merged(sense);
-            }
-            out.insert_entry(lemma.clone(), pos, entry)?;
-        }
-    }
-    out.frames_set(wn.frames_get()?.into_owned())?;
-    Ok(out)
 }
 
 fn rename_synsets(rels: &mut crate::wordnet::ScoredVec<SynsetId>) {

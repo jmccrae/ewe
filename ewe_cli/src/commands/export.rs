@@ -1,9 +1,9 @@
 //! `ewe export` - writes the wordnet out as XML, WNDB, or RDF.
 
-use crate::common::{apply_names, locate_wordnet, NamesArg};
+use crate::common::{apply_names, apply_names_disk, locate_wordnet_with, Loaded, LowMemory, NamesArg};
 use clap::Subcommand;
 use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
-use ewe_lib::wordnet::xml::write_lexicon_xml_report;
+use ewe_lib::wordnet::xml::write_lexicon_xml_to;
 use ewe_lib::wordnet::{write_wndb, Lexicon, LexiconMetadata, LmfVersion, PartOfSpeech, WndbExportOptions};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -179,80 +179,105 @@ fn default_sense_orders(wordnet: &Option<PathBuf>) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
+/// Run `$body` with `$wn` bound to the (names-restricted) wordnet, whichever backend it is on.
+/// `$path` is the resolved YAML directory.
+macro_rules! with_wordnet {
+    ($wordnet:expr, $low_memory:expr, $names:expr, |$path:ident, $wn:ident| $body:expr) => {{
+        let ($path, loaded) = locate_wordnet_with($wordnet, $low_memory).unwrap_or_else(|e| {
+            eprintln!("{}", e);
+            exit(-1);
+        });
+        match loaded {
+            Loaded::Memory(wn) => {
+                let $wn = apply_names(wn, $names);
+                $body
+            }
+            Loaded::Disk(wn, options) => {
+                let ($wn, _scratch) = apply_names_disk(wn, $names, &options);
+                $body
+            }
+        }
+    }};
+}
+
 pub(crate) fn run_wndb(
     path: &Path,
     license_file: Option<PathBuf>,
     names: NamesArg,
     wordnet: Option<PathBuf>,
+    low_memory: Option<LowMemory>,
 ) {
     let license_file = license_file.or_else(|| default_license_file(&wordnet));
     let sense_orders = default_sense_orders(&wordnet);
-    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        exit(-1);
-    });
     if names == NamesArg::Only {
         eprintln!("WNDB has no part of speech for names, so --names only would be empty. Use --names merged to write them as nouns.");
         exit(-1);
     }
-    if names == NamesArg::Include
-        && wn.synsets().is_ok_and(|mut ss| ss.any(|s| s.is_ok_and(|(_, s)| s.part_of_speech == PartOfSpeech::e)))
-    {
-        eprintln!("Note: names have no place in WNDB and are left out. Use --names merged to write them as nouns.");
-    }
-    let wn = apply_names(wn, names);
     let options = WndbExportOptions {
         license_file,
         sense_orders,
     };
-    write_wndb(&wn, path, &options).unwrap_or_else(|e| {
-        eprintln!("Could not generate WNDB: {}", e);
-        exit(-1);
+    with_wordnet!(wordnet, low_memory, names, |_p, wn| {
+        if names == NamesArg::Include
+            && wn.synsets().is_ok_and(|mut ss| ss.any(|s| s.is_ok_and(|(_, s)| s.part_of_speech == PartOfSpeech::e)))
+        {
+            eprintln!("Note: names have no place in WNDB and are left out. Use --names merged to write them as nouns.");
+        }
+        write_wndb(&wn, path, &options).unwrap_or_else(|e| {
+            eprintln!("Could not generate WNDB: {}", e);
+            exit(-1);
+        });
     });
     println!("Wrote {}", path.display());
 }
 
-pub(crate) fn run_xml(path: &Path, mut metadata: LexiconMetadata, names: NamesArg, wordnet: Option<PathBuf>) {
-    let (wordnet_path, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        exit(-1);
-    });
-    if metadata.language.is_empty() {
-        metadata.language = ewe_lib::validate::ValidationOptions::language_for_wordnet(Path::new(&wordnet_path))
-            .unwrap_or_else(|e| {
-                eprintln!("{}", e);
-                exit(2);
-            })
-            .unwrap_or_else(|| "en".to_string());
-    }
-    let wn = apply_names(wn, names);
-    let output = write_lexicon_xml_report(&wn, &metadata).unwrap_or_else(|e| {
-        eprintln!("Could not generate XML: {}", e);
-        exit(-1);
-    });
-    for w in &output.warnings {
-        eprintln!("Warning: {}", w);
-    }
-    std::fs::write(path, output.bytes).unwrap_or_else(|e| {
-        eprintln!("Could not write {}: {}", path.display(), e);
-        exit(-1);
+pub(crate) fn run_xml(
+    path: &Path,
+    mut metadata: LexiconMetadata,
+    names: NamesArg,
+    wordnet: Option<PathBuf>,
+    low_memory: Option<LowMemory>,
+) {
+    with_wordnet!(wordnet, low_memory, names, |wordnet_path, wn| {
+        if metadata.language.is_empty() {
+            metadata.language = ewe_lib::validate::ValidationOptions::language_for_wordnet(Path::new(&wordnet_path))
+                .unwrap_or_else(|e| {
+                    eprintln!("{}", e);
+                    exit(2);
+                })
+                .unwrap_or_else(|| "en".to_string());
+        }
+        let file = std::fs::File::create(path).unwrap_or_else(|e| {
+            eprintln!("Could not write {}: {}", path.display(), e);
+            exit(-1);
+        });
+        let warnings = write_lexicon_xml_to(&wn, &metadata, std::io::BufWriter::new(file)).unwrap_or_else(|e| {
+            eprintln!("Could not generate XML: {}", e);
+            exit(-1);
+        });
+        for w in &warnings {
+            eprintln!("Warning: {}", w);
+        }
     });
     println!("Wrote {} (WN-LMF {})", path.display(), metadata.lmf_version.as_str());
 }
 
-pub(crate) fn run_rdf(path: &Path, options: RdfExportOptions, names: NamesArg, wordnet: Option<PathBuf>) {
-    let (_, wn) = locate_wordnet(wordnet).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        exit(-1);
-    });
-    let wn = apply_names(wn, names);
-    let rdf = write_lexicon_rdf(&wn, &options).unwrap_or_else(|e| {
-        eprintln!("Could not generate RDF: {}", e);
-        exit(-1);
-    });
-    std::fs::write(path, rdf).unwrap_or_else(|e| {
-        eprintln!("Could not write {}: {}", path.display(), e);
-        exit(-1);
+pub(crate) fn run_rdf(
+    path: &Path,
+    options: RdfExportOptions,
+    names: NamesArg,
+    wordnet: Option<PathBuf>,
+    low_memory: Option<LowMemory>,
+) {
+    with_wordnet!(wordnet, low_memory, names, |_p, wn| {
+        let rdf = write_lexicon_rdf(&wn, &options).unwrap_or_else(|e| {
+            eprintln!("Could not generate RDF: {}", e);
+            exit(-1);
+        });
+        std::fs::write(path, rdf).unwrap_or_else(|e| {
+            eprintln!("Could not write {}: {}", path.display(), e);
+            exit(-1);
+        });
     });
     println!("Wrote {}", path.display());
 }
