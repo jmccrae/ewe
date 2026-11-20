@@ -153,6 +153,13 @@ impl ReDBLexicon {
         })
     }
 
+    /// Trade durability for speed while loading a database that is rebuilt from source if the
+    /// load does not complete (see `TransactionManager::set_bulk_load`). `set_bulk_load(false)`
+    /// syncs everything written since.
+    pub fn set_bulk_load(&self, on: bool) -> Result<()> {
+        self.txn_manager.lock().unwrap().set_bulk_load(on)
+    }
+
     /// Create a new database, deleting the existing file if necessary.
     /// See [`ReDBLexicon::open`] for `cache_size_bytes`.
     pub fn create<P: AsRef<Path>>(path : P, cache_size_bytes: usize) -> Result<ReDBLexicon> {
@@ -300,7 +307,14 @@ impl Lexicon for ReDBLexicon {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
     fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
-        let lexfile_opt = self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned());
+        // Look up through the write transaction: a read would commit it, once per update
+        let lexfile_opt = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+            let x = table.get(synset_id.to_string())?.map(|l| l.value());
+            x
+        };
         let res = if let Some(lexfile) = lexfile_opt {
             if let Some(synsets) = self.synsets.get_mut(&lexfile) {
                 synsets.update(synset_id, f)?;
@@ -1014,12 +1028,14 @@ impl ReDBSynsets {
         // Step 1: read the current synset under the transaction manager lock
         let mut synset = {
             let mut manager = self.txn_manager.lock().unwrap();
-            let txn = manager.begin_read()?;
+            // Read through the write transaction: a read transaction would commit it
+            let txn = manager.begin_write()?;
             let table = txn.open_table(SYNSETS_TABLE)?;
-            if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
-                deserialize_synset(synset_str.value())?
-            } else {
-                return Err(LexiconError::SynsetIdNotFound(id.clone()));
+            let found = table.get((self.lexname.clone(), id.to_string()))?
+                .map(|v| deserialize_synset(v.value()));
+            match found {
+                Some(x) => x?,
+                None => return Err(LexiconError::SynsetIdNotFound(id.clone())),
             }
         };
         let old_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string()).filter(|i| !i.is_empty());

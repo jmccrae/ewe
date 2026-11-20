@@ -57,11 +57,20 @@ pub(crate) fn open(source: &str, options: &LowMemory) -> Result<ReDBLexicon, Str
     } else {
         eprintln!("Building database {} from {}", database.display(), source);
     }
+    // Build under a temporary name and move it into place only when complete: the load runs
+    // without syncing, so an interrupted one must not be mistaken for a finished database.
+    let building = PathBuf::from(format!("{}.building", database.display()));
     let mut progress = IndicatifProgress::new();
-    ReDBLexicon::create(&database, cache)
-        .map_err(|e| format!("Could not create database {}: {}", database.display(), e))?
+    let wn = ReDBLexicon::create(&building, cache)
+        .map_err(|e| format!("Could not create database {}: {}", building.display(), e))?;
+    wn.set_bulk_load(true).map_err(|e| format!("Could not create database: {}", e))?;
+    let wn = wn
         .load(source, &mut progress)
-        .map_err(|e| format!("Could not load WordNet from {}: {}", source, e))
+        .map_err(|e| format!("Could not load WordNet from {}: {}", source, e))?;
+    wn.set_bulk_load(false).map_err(|e| format!("Could not write database: {}", e))?;
+    std::fs::rename(&building, &database)
+        .map_err(|e| format!("Could not move {} to {}: {}", building.display(), database.display(), e))?;
+    Ok(wn)
 }
 
 /// A scratch database that is deleted when dropped

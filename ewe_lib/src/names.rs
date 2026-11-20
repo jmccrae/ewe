@@ -201,7 +201,7 @@ pub fn restrict_names_into<L: Lexicon, O: Lexicon>(wn: &L, mode: NamesMode, mut 
     write_lemma(&mut out, &mut writer, mode, &pending_lemma, pending)?;
     writer.flush(&mut out)?;
     out.frames_set(wn.frames_get()?.into_owned())?;
-    crate::wordnet::lexicon::finalize_bulk_load(&mut out)?;
+    crate::wordnet::lexicon::finalize_bulk_load_with(&mut out, false)?;
     Ok(out)
 }
 

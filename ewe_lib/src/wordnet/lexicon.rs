@@ -6,7 +6,7 @@ use crate::wordnet::util::{escape_yaml_string, LexiconSaveError};
 use crate::wordnet::section::{entry_key, is_name_file_stem, key_to_name, name_file_stem, name_to_key};
 use crate::wordnet::*;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -484,21 +484,17 @@ pub trait Lexicon: Sized {
 
     /// Get the entry data for a lemma, ignoring case
     fn entry_by_lemma_ignore_case<'a>(&'a self, lemma: &str) -> Result<Vec<Cow<'a, Entry>>> {
-        Ok(self
-            .entries_iter()?
-            .map(|v| match v {
-                Ok((_, Cow::Borrowed(v))) => Ok(v.entry_by_lemma_ignore_case(lemma)?),
-                Ok((_, Cow::Owned(v))) => Ok(v
-                    .entry_by_lemma_ignore_case(lemma)?
-                    .into_iter()
-                    .map(|e| Cow::Owned(e.into_owned()))
-                    .collect()),
-                _ => Ok(Vec::new()),
-            })
-            .collect::<Result<Vec<Vec<Cow<'a, Entry>>>>>()?
-            .into_iter()
-            .flatten()
-            .collect())
+        // Lemmas that differ only in case are filed under the same section (a section is
+        // chosen by the lower-cased first letter), so only that section needs looking at
+        Ok(match self.entries_get(entry_key(lemma))? {
+            Some(Cow::Borrowed(v)) => v.entry_by_lemma_ignore_case(lemma)?,
+            Some(Cow::Owned(v)) => v
+                .entry_by_lemma_ignore_case(lemma)?
+                .into_iter()
+                .map(|e| Cow::Owned(e.into_owned()))
+                .collect(),
+            None => Vec::new(),
+        })
     }
 
     /// Get the entries that list `form` as an alternate form (see `Entry::form`)
@@ -1491,6 +1487,16 @@ fn dedup_preserve_order<T: Eq + std::hash::Hash + Clone>(items: &mut Vec<T>) {
 pub(crate) fn finalize_bulk_load<L: Lexicon>(
     lexicon: &mut L,
 ) -> result::Result<(), WordNetYAMLIOError> {
+    finalize_bulk_load_with(lexicon, true)
+}
+
+/// `backfill` off skips adding entries for synset members that have none. Only for a lexicon
+/// known to have an entry for every member already, as the names restriction writes: finding
+/// that out costs a random read per member, which on a database is hours at full size.
+pub(crate) fn finalize_bulk_load_with<L: Lexicon>(
+    lexicon: &mut L,
+    backfill: bool,
+) -> result::Result<(), WordNetYAMLIOError> {
     // Relations written in their inverse form on a name (the `separate` names layout) go back
     // to the synset or sense they come from, before anything is indexed
     crate::wordnet::names_layout::apply_inverse_relations(lexicon)?;
@@ -1610,7 +1616,7 @@ pub(crate) fn finalize_bulk_load<L: Lexicon>(
                     .push((rel_type, ssid.clone()));
             }
             for member in s.members.iter() {
-                if lexicon.pos_for_entry_synset(member, &ssid)?.is_none() {
+                if backfill && lexicon.pos_for_entry_synset(member, &ssid)?.is_none() {
                     missing_members.push((member.clone(), ssid.clone()));
                 }
             }
@@ -1618,37 +1624,119 @@ pub(crate) fn finalize_bulk_load<L: Lexicon>(
     }
     lexicon.set_links_to(links_to)?;
 
-    // Backfill entries for the members collected above. Re-check each
-    // one fresh (rather than trusting the snapshot taken above) since
-    // backfilling one missing member can change the answer for another
-    // missing member that shares the same lemma (e.g. whether an entry
-    // for that lemma/pos now already exists).
-    for (lemma, synset_id) in missing_members {
-        let synset = match lexicon.synset_by_id(&synset_id)? {
-            Some(s) => s.into_owned(),
-            None => continue,
-        };
-        let existing = lexicon.entry_by_lemma_with_pos(&lemma)?;
-        let already_present = existing
-            .iter()
-            .any(|(_, e)| e.sense.iter().any(|sense| sense.synset == synset_id));
-        if already_present {
-            continue;
+    // Backfill entries for the members collected above, in chunks: each chunk is planned with
+    // reads only and then written with writes only, since on a database every read commits the
+    // pending writes first, which costs far too much when done once per member. A member is
+    // still checked against the ones planned before it (a lemma can be missing from several
+    // synsets, and each new sense key depends on the lex ids already used for that lemma), so
+    // the result is the same as adding them one at a time.
+    // Sorted by lemma (a stable sort, so the members of one lemma keep their order and get the
+    // same lex ids as before): the entries are then read and written in key order, which on a
+    // big database is the difference between sequential and random page access.
+    missing_members.sort_by(|a, b| a.0.cmp(&b.0));
+    const BACKFILL_CHUNK: usize = 100_000;
+    let total = missing_members.len();
+    let mut done = 0usize;
+    for chunk in missing_members.chunks(BACKFILL_CHUNK) {
+        struct Planned {
+            lemma: String,
+            pos_key: PosKey,
+            sense: Sense,
+            entry_exists: bool,
         }
-        // Entries file conventions file satellite adjectives (`s`) under
-        // the same `a` bucket as regular adjectives.
-        let pos_key = if synset.part_of_speech == PartOfSpeech::s {
-            PosKey::new("a".to_string())
-        } else {
-            synset.part_of_speech.to_pos_key()
-        };
-        let sense_id = get_sense_key(lexicon, &lemma, None, &synset, &synset_id)?;
-        let sense = Sense::new(sense_id, synset_id.clone());
-        if existing.iter().any(|(p, _)| *p == pos_key) {
-            lexicon.insert_sense(lemma, pos_key, sense)?;
-        } else {
-            lexicon.insert_entry(lemma.clone(), pos_key.clone(), Entry::new())?;
-            lexicon.insert_sense(lemma, pos_key, sense)?;
+        let mut plan: Vec<Planned> = Vec::new();
+        // lemma -> (pos, synset) of the senses planned for it in this chunk
+        let mut planned: HashMap<String, (HashSet<SynsetId>, HashSet<PosKey>)> = HashMap::new();
+        // lowercase lemma -> highest lex id planned for it in this chunk
+        let mut planned_lex: HashMap<String, i32> = HashMap::new();
+        // What is already stored for a lemma does not change within a chunk, and a lemma can
+        // have thousands of members, so it is looked up once per lemma
+        let mut stored: HashMap<String, (HashSet<SynsetId>, HashSet<PosKey>)> = HashMap::new();
+        let mut stored_lex: HashMap<String, i32> = HashMap::new();
+        for (lemma, synset_id) in chunk {
+            let synset = match lexicon.synset_by_id(synset_id)? {
+                Some(s) => s.into_owned(),
+                None => continue,
+            };
+            if !stored.contains_key(lemma) {
+                let existing = lexicon.entry_by_lemma_with_pos(lemma)?;
+                let synsets = existing
+                    .iter()
+                    .flat_map(|(_, e)| e.sense.iter().map(|sense| sense.synset.clone()))
+                    .collect();
+                let poses = existing.iter().map(|(p, _)| p.clone()).collect();
+                stored.insert(lemma.clone(), (synsets, poses));
+            }
+            let (stored_synsets, stored_poses) = &stored[lemma];
+            let pending = planned.get(lemma);
+            let already_present = stored_synsets.contains(synset_id)
+                || pending.map_or(false, |p| p.0.contains(synset_id));
+            if already_present {
+                continue;
+            }
+            // Entries file conventions file satellite adjectives (`s`) under
+            // the same `a` bucket as regular adjectives.
+            let pos_key = if synset.part_of_speech == PartOfSpeech::s {
+                PosKey::new("a".to_string())
+            } else {
+                synset.part_of_speech.to_pos_key()
+            };
+            let lowercase = lemma.to_lowercase();
+            if !stored_lex.contains_key(&lowercase) {
+                stored_lex.insert(lowercase.clone(), crate::sense_keys::gen_lex_id(lexicon, lemma)?);
+            }
+            let base = stored_lex[&lowercase];
+            let lex_id = match planned_lex.get(&lowercase) {
+                Some(planned_max) => std::cmp::max(base, planned_max + 1),
+                None => base,
+            };
+            let sense_id =
+                crate::sense_keys::get_sense_key_with_lex_id(lexicon, lemma, lex_id, &synset, synset_id)?;
+            planned_lex.insert(lowercase, lex_id);
+            let entry_exists = stored_poses.contains(&pos_key)
+                || pending.map_or(false, |p| p.1.contains(&pos_key));
+            let p = planned.entry(lemma.clone()).or_default();
+            p.0.insert(synset_id.clone());
+            p.1.insert(pos_key.clone());
+            plan.push(Planned {
+                lemma: lemma.clone(),
+                pos_key,
+                sense: Sense::new(sense_id, synset_id.clone()),
+                entry_exists,
+            });
+        }
+        drop(planned);
+        drop(stored);
+        // One write per entry rather than one per sense: rewriting an entry with thousands of
+        // senses for each of them is quadratic
+        let mut groups: Vec<((String, PosKey), bool, Vec<Sense>)> = Vec::new();
+        let mut index: HashMap<(String, PosKey), usize> = HashMap::new();
+        for p in plan {
+            let key = (p.lemma, p.pos_key);
+            match index.get(&key) {
+                Some(&i) => groups[i].2.push(p.sense),
+                None => {
+                    index.insert(key.clone(), groups.len());
+                    groups.push((key, p.entry_exists, vec![p.sense]));
+                }
+            }
+        }
+        for ((lemma, pos_key), entry_exists, senses) in groups {
+            if !entry_exists {
+                lexicon.insert_entry(lemma.clone(), pos_key.clone(), Entry::new())?;
+            }
+            for sense in senses.iter() {
+                add_sense_link_to_sense(lexicon, sense)?;
+                lexicon.sense_id_to_lemma_pos_insert(sense.id.clone(), (lemma.clone(), pos_key.clone()))?;
+            }
+            lexicon.entries_update(entry_key(&lemma), |e| {
+                e.update_entry(&lemma, &pos_key, |entry| entry.sense.extend(senses))
+            })??;
+        }
+        let before = done / 1_000_000;
+        done += chunk.len();
+        if total > 1_000_000 && done / 1_000_000 != before {
+            eprintln!("Added entries for {} of {} synset members without one", done, total);
         }
     }
     Ok(())

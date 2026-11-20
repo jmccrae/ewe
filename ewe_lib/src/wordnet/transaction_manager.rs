@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use redb::{Database, ReadTransaction, WriteTransaction, ReadableDatabase};
+use redb::{Database, Durability, ReadTransaction, WriteTransaction, ReadableDatabase};
 
 use crate::wordnet::Result;
 
@@ -13,6 +13,8 @@ use crate::wordnet::Result;
 pub struct TransactionManager {
     db: Arc<Database>,
     write_txn: Option<WriteTransaction>,
+    /// Durability of new write transactions (see [`TransactionManager::set_bulk_load`])
+    durability: Durability,
 }
 
 impl TransactionManager {
@@ -21,6 +23,7 @@ impl TransactionManager {
         Self {
             db,
             write_txn: None,
+            durability: Durability::Immediate,
         }
     }
 
@@ -42,9 +45,33 @@ impl TransactionManager {
     /// dropped.
     pub fn begin_write(&mut self) -> Result<&mut WriteTransaction> {
         if self.write_txn.is_none() {
-            self.write_txn = Some(self.db.begin_write()?);
+            let mut txn = self.db.begin_write()?;
+            txn.set_durability(self.durability)
+                .map_err(|e| crate::wordnet::LexiconError::GenericError(e.to_string()))?;
+            self.write_txn = Some(txn);
         }
         Ok(self.write_txn.as_mut().unwrap())
+    }
+}
+
+impl TransactionManager {
+    /// While on, commits are not flushed to disk. A bulk load that reads between its writes
+    /// commits (and would otherwise sync) once per read, which is far too slow on a real disk.
+    /// Turning it off again makes everything written so far durable with one synced commit. A
+    /// crash in between can leave the database corrupt, so only use this on a file that is
+    /// rebuilt from scratch if the load does not complete.
+    pub fn set_bulk_load(&mut self, on: bool) -> Result<()> {
+        if let Some(txn) = self.write_txn.take() {
+            txn.commit()?;
+        }
+        if on {
+            self.durability = Durability::None;
+        } else {
+            self.durability = Durability::Immediate;
+            // A commit with `Immediate` durability makes the earlier non-durable ones durable
+            self.db.begin_write()?.commit()?;
+        }
+        Ok(())
     }
 }
 
