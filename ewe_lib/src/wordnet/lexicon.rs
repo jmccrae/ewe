@@ -1,6 +1,5 @@
 use crate::progress::Progress;
 use crate::rels::{SenseRelType, SynsetRelType};
-use crate::sense_keys::get_sense_key;
 use crate::wordnet::entry::BTEntries;
 use crate::wordnet::util::{escape_yaml_string, LexiconSaveError};
 use crate::wordnet::section::{entry_key, is_name_file_stem, key_to_name, name_file_stem, name_to_key};
@@ -191,6 +190,36 @@ pub trait Lexicon: Sized {
         &mut self,
         links_to: HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
     ) -> Result<()>;
+    /// In how many partitions `finalize_bulk_load` builds the reverse indexes (see there). 1
+    /// builds them in one go, in memory; a database backend returns more for a big wordnet.
+    fn bulk_load_passes(&self) -> Result<usize> {
+        Ok(1)
+    }
+    /// Add reverse links for targets that have none yet (unlike `set_sense_links_to`, which
+    /// replaces them all)
+    fn extend_sense_links_to(
+        &mut self,
+        links_to: HashMap<SenseId, Vec<(SenseRelType, SenseId)>>,
+    ) -> Result<()> {
+        for (sense_id, links) in links_to {
+            for (rel, target) in links {
+                self.sense_links_to_push(sense_id.clone(), rel, target)?;
+            }
+        }
+        Ok(())
+    }
+    /// As `extend_sense_links_to`, for synsets
+    fn extend_links_to(
+        &mut self,
+        links_to: HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>,
+    ) -> Result<()> {
+        for (synset_id, links) in links_to {
+            for (rel, target) in links {
+                self.links_to_push(synset_id.clone(), rel, target)?;
+            }
+        }
+        Ok(())
+    }
     fn sense_id_to_lemma_pos_get(&self, sense_id: &SenseId) -> Result<Option<(String, PosKey)>>;
     fn sense_id_to_lemma_pos_remove(&mut self, sense_id: &SenseId) -> Result<()>;
     fn sense_id_to_lemma_pos_insert(
@@ -596,6 +625,19 @@ pub trait Lexicon: Sized {
     }
 
     /// Get the part of speech key for an entry referring to a specific synset
+    /// The entries of `lemma` (one per part of speech) cut down to the senses in `synset_id`,
+    /// leaving out the entries with none. A lemma can have tens of thousands of senses, so a
+    /// lookup that only wants those of one synset should not copy them all.
+    fn entries_for_synset(&self, lemma: &str, synset_id: &SynsetId) -> Result<Vec<(PosKey, Entry)>> {
+        let mut out = Vec::new();
+        for (pos, entry) in self.entry_by_lemma_with_pos(lemma)? {
+            if entry.sense.iter().any(|s| s.synset == *synset_id) {
+                out.push((pos, entry.only_synset(synset_id)));
+            }
+        }
+        Ok(out)
+    }
+
     fn pos_for_entry_synset(&self, lemma: &str, synset_id: &SynsetId) -> Result<Option<PosKey>> {
         for (pos, entry) in self.entry_by_lemma_with_pos(lemma)? {
             for sense in entry.sense.iter() {
@@ -1575,68 +1617,112 @@ pub(crate) fn finalize_bulk_load_with<L: Lexicon>(
         })??;
     }
 
-    // Potentially ineffecient and we should try to reimplement it at some point
-    let mut sense_links_to = HashMap::new();
-    for es in lexicon.entries_iter()? {
-        let (_, es) = es?;
-        for e in es.entries()? {
-            let (_, _, e) = e?;
-            for sense in e.sense.iter() {
-                for (rel_type, target) in sense.sense_links_from() {
-                    // Only sense-sense targets get a backlink entry - there is
-                    // no defined inverse for the sense-synset direction (see
-                    // rels.rs), and a dangling/unresolved target has nothing
-                    // valid to key on (validate() reports it instead).
-                    if let UnresolvedSenseOrSynsetId::Sense(target) = target {
-                        sense_links_to
-                            .entry(target)
-                            .or_insert_with(Vec::new)
-                            .push((rel_type, sense.id.clone()));
+    // The reverse indexes and the entries for members without one are built in `passes`
+    // partitions on a database, where holding them all in RAM is what limits the size of
+    // wordnet that can be handled. A pass keeps the targets (and the lemma sections) that hash
+    // to it, and writes them out before the next pass starts. One pass is the plain
+    // in-memory version.
+    let passes = lexicon.bulk_load_passes()?.max(1);
+    let part_of = |key: &str| -> usize {
+        if passes == 1 {
+            return 0;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut h);
+        (h.finish() as usize) % passes
+    };
+    if passes > 1 {
+        lexicon.set_sense_links_to(HashMap::new())?;
+        lexicon.set_links_to(HashMap::new())?;
+    }
+    let mut added = 0usize;
+    for part in 0..passes {
+        let mut sense_links_to = HashMap::new();
+        for es in lexicon.entries_iter()? {
+            let (_, es) = es?;
+            for e in es.entries()? {
+                let (_, _, e) = e?;
+                for sense in e.sense.iter() {
+                    for (rel_type, target) in sense.sense_links_from() {
+                        // Only sense-sense targets get a backlink entry - there is
+                        // no defined inverse for the sense-synset direction (see
+                        // rels.rs), and a dangling/unresolved target has nothing
+                        // valid to key on (validate() reports it instead).
+                        if let UnresolvedSenseOrSynsetId::Sense(target) = target {
+                            if part_of(target.as_str()) == part {
+                                sense_links_to
+                                    .entry(target)
+                                    .or_insert_with(Vec::new)
+                                    .push((rel_type, sense.id.clone()));
+                            }
+                        }
                     }
                 }
             }
         }
-    }
-    lexicon.set_sense_links_to(sense_links_to)?;
-    let mut links_to = HashMap::new();
-    // NameNet-derived sources don't guarantee every synset member has a
-    // corresponding entries-*.yaml entry, unlike hand-curated WordNet
-    // sources. Collect the ones missing an entry here (while already
-    // scanning every synset for links_to) so they can be backfilled
-    // below once the immutable scan below is done.
-    let mut missing_members = Vec::new();
-    for ss in lexicon.synsets_iter()? {
-        let (_, ss) = ss?;
-        for s in ss.iter()? {
-            let (ssid, s) = s?;
-            for (rel_type, target) in s.links_from() {
-                links_to
-                    .entry(target.clone())
-                    .or_insert_with(Vec::new)
-                    .push((rel_type, ssid.clone()));
-            }
-            for member in s.members.iter() {
-                if backfill && lexicon.pos_for_entry_synset(member, &ssid)?.is_none() {
-                    missing_members.push((member.clone(), ssid.clone()));
+        if passes == 1 {
+            lexicon.set_sense_links_to(sense_links_to)?;
+        } else {
+            lexicon.extend_sense_links_to(sense_links_to)?;
+        }
+        let mut links_to = HashMap::new();
+        // NameNet-derived sources don't guarantee every synset member has a
+        // corresponding entries-*.yaml entry, unlike hand-curated WordNet
+        // sources. Collect the ones missing an entry here (while already
+        // scanning every synset for links_to) so they can be backfilled
+        // below once the immutable scan below is done.
+        let mut missing_members = Vec::new();
+        for ss in lexicon.synsets_iter()? {
+            let (_, ss) = ss?;
+            for s in ss.iter()? {
+                let (ssid, s) = s?;
+                for (rel_type, target) in s.links_from() {
+                    if part_of(target.as_str()) == part {
+                        links_to
+                            .entry(target.clone())
+                            .or_insert_with(Vec::new)
+                            .push((rel_type, ssid.clone()));
+                    }
+                }
+                if backfill {
+                    for member in s.members.iter() {
+                        if (passes == 1 || part_of(&entry_key(member).to_string()) == part)
+                            && lexicon.pos_for_entry_synset(member, &ssid)?.is_none()
+                        {
+                            missing_members.push((member.clone(), ssid.clone()));
+                        }
+                    }
                 }
             }
         }
+        if passes == 1 {
+            lexicon.set_links_to(links_to)?;
+        } else {
+            lexicon.extend_links_to(links_to)?;
+        }
+        backfill_members(lexicon, missing_members, &mut added)?;
     }
-    lexicon.set_links_to(links_to)?;
+    Ok(())
+}
 
-    // Backfill entries for the members collected above, in chunks: each chunk is planned with
-    // reads only and then written with writes only, since on a database every read commits the
-    // pending writes first, which costs far too much when done once per member. A member is
-    // still checked against the ones planned before it (a lemma can be missing from several
-    // synsets, and each new sense key depends on the lex ids already used for that lemma), so
-    // the result is the same as adding them one at a time.
+/// Add an entry (and sense) for each of the given (lemma, synset) members.
+///
+/// Done in chunks: each chunk is planned with reads only and then written with writes only,
+/// since on a database every read commits the pending writes first, which costs far too much
+/// when done once per member. A member is still checked against the ones planned before it (a
+/// lemma can be missing from several synsets, and each new sense key depends on the lex ids
+/// already used for that lemma), so the result is the same as adding them one at a time.
+fn backfill_members<L: Lexicon>(
+    lexicon: &mut L,
+    mut missing_members: Vec<(String, SynsetId)>,
+    added: &mut usize,
+) -> result::Result<(), WordNetYAMLIOError> {
     // Sorted by lemma (a stable sort, so the members of one lemma keep their order and get the
     // same lex ids as before): the entries are then read and written in key order, which on a
     // big database is the difference between sequential and random page access.
     missing_members.sort_by(|a, b| a.0.cmp(&b.0));
     const BACKFILL_CHUNK: usize = 100_000;
-    let total = missing_members.len();
-    let mut done = 0usize;
     for chunk in missing_members.chunks(BACKFILL_CHUNK) {
         struct Planned {
             lemma: String,
@@ -1733,10 +1819,10 @@ pub(crate) fn finalize_bulk_load_with<L: Lexicon>(
                 e.update_entry(&lemma, &pos_key, |entry| entry.sense.extend(senses))
             })??;
         }
-        let before = done / 1_000_000;
-        done += chunk.len();
-        if total > 1_000_000 && done / 1_000_000 != before {
-            eprintln!("Added entries for {} of {} synset members without one", done, total);
+        let before = *added / 1_000_000;
+        *added += chunk.len();
+        if *added / 1_000_000 != before {
+            eprintln!("Added entries for {} synset members without one", *added);
         }
     }
     Ok(())

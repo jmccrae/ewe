@@ -12,7 +12,7 @@ pub mod reader;
 pub mod writer;
 pub use reader::read_lexicon_xml;
 pub use writer::{
-    write_lexicon_xml, write_lexicon_xml_report, write_lexicon_xml_to, write_lexicon_xml_subset,
+    write_lexicon_xml, write_lexicon_xml_report, write_lexicon_xml_to, XmlOrder, write_lexicon_xml_subset,
     write_lexicon_xml_subset_report,
 };
 

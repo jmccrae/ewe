@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use redb::{Database, Durability, ReadTransaction, WriteTransaction, ReadableDatabase};
 
-use crate::wordnet::Result;
+use crate::wordnet::{Entry, PosKey, Result, Synset};
 
 /// Manages a long-lived write transaction for a `redb::Database`.
 ///
@@ -15,6 +16,41 @@ pub struct TransactionManager {
     write_txn: Option<WriteTransaction>,
     /// Durability of new write transactions (see [`TransactionManager::set_bulk_load`])
     durability: Durability,
+    /// Recently read entries, synsets and lexfile names, if enabled (see [`ReadCache`])
+    cache: Option<ReadCache>,
+}
+
+/// A bounded cache of what was read from the database, for a read-only pass over a big one (an
+/// export) where the same hub synsets and heavy lemmas are read again and again by relations.
+/// It is emptied whenever a write transaction starts, so it can never be stale. When it is
+/// full it is emptied too, which keeps it simple and still catches the repeated reads.
+pub struct ReadCache {
+    entries: HashMap<(char, String), Arc<Vec<(PosKey, Entry)>>>,
+    entries_weight: usize,
+    synsets: HashMap<(String, String), Synset>,
+    lexfiles: HashMap<String, String>,
+}
+
+impl ReadCache {
+    const MAX_ENTRIES_WEIGHT: usize = 300_000;
+    const MAX_SYNSETS: usize = 100_000;
+    const MAX_LEXFILES: usize = 500_000;
+
+    fn new() -> Self {
+        ReadCache {
+            entries: HashMap::new(),
+            entries_weight: 0,
+            synsets: HashMap::new(),
+            lexfiles: HashMap::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.entries_weight = 0;
+        self.synsets.clear();
+        self.lexfiles.clear();
+    }
 }
 
 impl TransactionManager {
@@ -24,6 +60,7 @@ impl TransactionManager {
             db,
             write_txn: None,
             durability: Durability::Immediate,
+            cache: None,
         }
     }
 
@@ -45,6 +82,9 @@ impl TransactionManager {
     /// dropped.
     pub fn begin_write(&mut self) -> Result<&mut WriteTransaction> {
         if self.write_txn.is_none() {
+            if let Some(cache) = self.cache.as_mut() {
+                cache.clear();
+            }
             let mut txn = self.db.begin_write()?;
             txn.set_durability(self.durability)
                 .map_err(|e| crate::wordnet::LexiconError::GenericError(e.to_string()))?;
@@ -55,6 +95,50 @@ impl TransactionManager {
 }
 
 impl TransactionManager {
+    /// Turn the read cache on (see [`ReadCache`]). Meant for a pass that only reads.
+    pub fn enable_read_cache(&mut self) {
+        self.cache = Some(ReadCache::new());
+    }
+
+    pub fn cached_entry(&self, key: char, lemma: &str) -> Option<Arc<Vec<(PosKey, Entry)>>> {
+        self.cache.as_ref()?.entries.get(&(key, lemma.to_string())).cloned()
+    }
+
+    pub fn cache_entry(&mut self, key: char, lemma: &str, value: &Arc<Vec<(PosKey, Entry)>>) {
+        let Some(cache) = self.cache.as_mut() else { return };
+        let weight = 1 + value.iter().map(|(_, e)| e.sense.len() + 1).sum::<usize>();
+        if cache.entries_weight + weight > ReadCache::MAX_ENTRIES_WEIGHT {
+            cache.entries.clear();
+            cache.entries_weight = 0;
+        }
+        cache.entries_weight += weight;
+        cache.entries.insert((key, lemma.to_string()), Arc::clone(value));
+    }
+
+    pub fn cached_synset(&self, lexname: &str, id: &str) -> Option<Synset> {
+        self.cache.as_ref()?.synsets.get(&(lexname.to_string(), id.to_string())).cloned()
+    }
+
+    pub fn cache_synset(&mut self, lexname: &str, id: &str, synset: &Synset) {
+        let Some(cache) = self.cache.as_mut() else { return };
+        if cache.synsets.len() >= ReadCache::MAX_SYNSETS {
+            cache.synsets.clear();
+        }
+        cache.synsets.insert((lexname.to_string(), id.to_string()), synset.clone());
+    }
+
+    pub fn cached_lexfile(&self, id: &str) -> Option<String> {
+        self.cache.as_ref()?.lexfiles.get(id).cloned()
+    }
+
+    pub fn cache_lexfile(&mut self, id: &str, lexfile: &str) {
+        let Some(cache) = self.cache.as_mut() else { return };
+        if cache.lexfiles.len() >= ReadCache::MAX_LEXFILES {
+            cache.lexfiles.clear();
+        }
+        cache.lexfiles.insert(id.to_string(), lexfile.to_string());
+    }
+
     /// While on, commits are not flushed to disk. A bulk load that reads between its writes
     /// commits (and would otherwise sync) once per read, which is far too slow on a real disk.
     /// Turning it off again makes everything written so far durable with one synced commit. A

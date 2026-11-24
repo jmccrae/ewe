@@ -3,7 +3,7 @@
 use crate::common::{apply_names, apply_names_disk, locate_wordnet_with, Loaded, LowMemory, NamesArg};
 use clap::Subcommand;
 use ewe_lib::wordnet::rdf::{write_lexicon_rdf, RdfExportOptions, RdfFormat};
-use ewe_lib::wordnet::xml::write_lexicon_xml_to;
+use ewe_lib::wordnet::xml::{write_lexicon_xml_to, XmlOrder};
 use ewe_lib::wordnet::{write_wndb, Lexicon, LexiconMetadata, LmfVersion, PartOfSpeech, WndbExportOptions};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -194,6 +194,8 @@ macro_rules! with_wordnet {
             }
             Loaded::Disk(wn, options) => {
                 let ($wn, _scratch) = apply_names_disk(wn, $names, &options);
+                // An export only reads from here on
+                $wn.enable_read_cache();
                 $body
             }
         }
@@ -238,6 +240,9 @@ pub(crate) fn run_xml(
     wordnet: Option<PathBuf>,
     low_memory: Option<LowMemory>,
 ) {
+    // Sorting the entries and synsets by id needs all of the ids in memory, which a lexicon that
+    // is kept on disk is too big for
+    let order = if low_memory.is_some() { XmlOrder::Storage } else { XmlOrder::ById };
     with_wordnet!(wordnet, low_memory, names, |wordnet_path, wn| {
         if metadata.language.is_empty() {
             metadata.language = ewe_lib::validate::ValidationOptions::language_for_wordnet(Path::new(&wordnet_path))
@@ -251,7 +256,7 @@ pub(crate) fn run_xml(
             eprintln!("Could not write {}: {}", path.display(), e);
             exit(-1);
         });
-        let warnings = write_lexicon_xml_to(&wn, &metadata, std::io::BufWriter::new(file)).unwrap_or_else(|e| {
+        let warnings = write_lexicon_xml_to(&wn, &metadata, std::io::BufWriter::new(file), order).unwrap_or_else(|e| {
             eprintln!("Could not generate XML: {}", e);
             exit(-1);
         });

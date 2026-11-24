@@ -633,4 +633,56 @@ mod tests {
         assert!(!merged.contains("-e\"") && !merged.contains("partOfSpeech=\"e\""));
         assert!(merged.contains("00000010-n"));
     }
+
+    /// The same export from a lexicon kept on disk (what `--low-memory` uses) is the same
+    /// document, whichever mode and order it is written in
+    #[cfg(feature = "redb")]
+    #[test]
+    fn test_on_disk_export_matches_in_memory() {
+        use crate::wordnet::xml::{write_lexicon_xml_to, XmlOrder};
+        use crate::wordnet::{LexiconMetadata, ReDBLexicon};
+        let metadata = LexiconMetadata {
+            lmf_version: crate::wordnet::LmfVersion::V1_5,
+            confidence: None,
+            id_prefix: "test".to_string(),
+            label: "Test".to_string(),
+            language: "en".to_string(),
+            email: None,
+            license: "https://creativecommons.org/licenses/by/4.0".to_string(),
+            version: "1".to_string(),
+            url: None,
+        };
+        let sorted_lines = |wn: &dyn Fn(&mut Vec<u8>)| {
+            let mut out = Vec::new();
+            wn(&mut out);
+            let mut lines: Vec<String> =
+                String::from_utf8(out).unwrap().lines().map(|l| l.to_string()).collect();
+            lines.sort();
+            lines
+        };
+        let dir = std::env::temp_dir().join(format!("ewe_test_disk_export_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (n, mode) in [NamesMode::Include, NamesMode::Exclude, NamesMode::Only, NamesMode::Merged]
+            .into_iter()
+            .enumerate()
+        {
+            let memory = restrict_names(&fixture(), mode).unwrap();
+            let expected = sorted_lines(&|out| {
+                write_lexicon_xml_to(&memory, &metadata, out, XmlOrder::ById).unwrap();
+            });
+            let disk = restrict_names_into(
+                &fixture(),
+                mode,
+                ReDBLexicon::create(dir.join(format!("{n}.redb")), 1024 * 1024).unwrap(),
+            )
+            .unwrap();
+            for order in [XmlOrder::ById, XmlOrder::Storage] {
+                let got = sorted_lines(&|out| {
+                    write_lexicon_xml_to(&disk, &metadata, out, order).unwrap();
+                });
+                assert_eq!(got, expected, "{mode:?} written {order:?}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

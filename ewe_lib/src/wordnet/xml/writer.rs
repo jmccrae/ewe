@@ -57,7 +57,7 @@ impl<L: Lexicon> SenseIdLookup for LexiconSenseLookup<'_, L> {
             Some(ss) if ss.members.iter().any(|m| m == lemma) => {}
             _ => return Ok(None),
         }
-        for (entry_pos, entry) in self.0.entry_by_lemma_with_pos(lemma)? {
+        for (entry_pos, entry) in self.0.entries_for_synset(lemma, synset)? {
             if &entry_pos == pos {
                 return Ok(entry.sense.iter().rev().find(|s| &s.synset == synset).map(|s| s.id.clone()));
             }
@@ -114,56 +114,71 @@ struct EntryAcc<'a> {
 /// nothing proportional to the size of the lexicon is held except the sorted ids of its entries
 /// and synsets: each element is built from the lexicon, written, and dropped. Use this for
 /// lexicons too large for [`write_lexicon_xml_report`].
+/// The order [`write_lexicon_xml_to`] writes the entries and synsets in
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XmlOrder {
+    /// Sorted by `@id`, as [`write_lexicon_xml_report`] does. Holds every id in memory.
+    ById,
+    /// As they are stored (entries by lemma, synsets by lexfile and then id). Holds nothing, so
+    /// it is the one to use for a lexicon too big for memory.
+    Storage,
+}
+
 pub fn write_lexicon_xml_to<L: Lexicon, W: std::io::Write>(
     wn: &L,
     metadata: &LexiconMetadata,
     out: W,
+    order: XmlOrder,
 ) -> Result<Vec<String>> {
     let version = metadata.lmf_version;
     let prefix = metadata.id_prefix.as_str();
     let frames = wn.frames_get()?;
 
-    // Entries and synsets are written sorted by their own `@id` (see the module doc comment)
+    // `ById`: entries and synsets are written sorted by their own `@id` (see the module doc
+    // comment), which needs all of those ids in memory (tens of millions for a big names set).
     let mut entry_keys: Vec<(String, String, PosKey)> = Vec::new();
-    for bucket in wn.entries_iter()? {
-        let (_, bucket) = bucket?;
-        for e in bucket.entries()? {
-            let (lemma, pos, entry) = e?;
-            if !entry.sense.is_empty() {
-                entry_keys.push((ids::entry_xml_id(prefix, &lemma, &pos), lemma, pos));
+    let mut synset_ids: Vec<SynsetId> = Vec::new();
+    if order == XmlOrder::ById {
+        for bucket in wn.entries_iter()? {
+            let (_, bucket) = bucket?;
+            for e in bucket.entries()? {
+                let (lemma, pos, entry) = e?;
+                if !entry.sense.is_empty() {
+                    entry_keys.push((ids::entry_xml_id(prefix, &lemma, &pos), lemma, pos));
+                }
             }
         }
-    }
-    entry_keys.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut synset_ids: Vec<SynsetId> = Vec::new();
-    for lexfile in wn.synsets_iter()? {
-        let (_, syns) = lexfile?;
-        for s in syns.iter()? {
-            synset_ids.push(s?.0);
+        entry_keys.sort_by(|a, b| a.0.cmp(&b.0));
+        for lexfile in wn.synsets_iter()? {
+            let (_, syns) = lexfile?;
+            for s in syns.iter()? {
+                synset_ids.push(s?.0);
+            }
         }
+        synset_ids.sort();
     }
-    synset_ids.sort();
 
     let mut writer = Writer::new_with_indent(out, b' ', 2);
     write_document_start(&mut writer, metadata)?;
 
     let lookup = LexiconSenseLookup(wn);
     let mut n_reconstructed = 0usize;
-    for (_, lemma, pos) in &entry_keys {
-        let entries = wn.entry_by_lemma_with_pos(lemma)?;
-        let Some((_, entry)) = entries.iter().find(|(p, _)| p == pos) else { continue };
+    // Writes one lexical entry; false if it has no sense that belongs to it
+    let mut write_entry = |writer: &mut Writer<W>, lemma: &str, pos: &PosKey, entry: &crate::wordnet::Entry| -> Result<bool> {
         // A sense is part of the entry if its synset lists the lemma as a member
         let mut synsets: Vec<MemberSynset> = Vec::new();
         let mut member_index: Vec<usize> = Vec::new();
         for sense in entry.sense.iter() {
             let Some(synset) = wn.synset_by_id(&sense.synset)? else { continue };
-            let member_synset = MemberSynset::from_synset(&sense.synset, synset.into_owned(), wn)?;
+            let member_synset = MemberSynset::for_sense(
+                &sense.synset, synset.into_owned(), wn, lemma, pos, entry, sense,
+            )?;
             if let Some(i) = member_synset.members.iter().position(|m| m.sense.id == sense.id) {
                 synsets.push(member_synset);
                 member_index.push(i);
             }
         }
-        let Some(first) = synsets.first() else { continue };
+        let Some(first) = synsets.first() else { return Ok(false) };
         let representative = &first.members[member_index[0]];
         if representative.reconstructed {
             n_reconstructed += 1;
@@ -172,17 +187,64 @@ pub fn write_lexicon_xml_to<L: Lexicon, W: std::io::Write>(
             representative,
             senses: synsets.iter().zip(&member_index).map(|(s, i)| (s, &s.members[*i])).collect(),
         };
-        write_lexical_entry(&mut writer, prefix, lemma, pos, &acc, &lookup, version)?;
+        write_lexical_entry(writer, prefix, lemma, pos, &acc, &lookup, version)?;
+        Ok(true)
+    };
+    match order {
+        XmlOrder::ById => {
+            for (_, lemma, pos) in &entry_keys {
+                let entries = wn.entry_by_lemma_with_pos(lemma)?;
+                let Some((_, entry)) = entries.iter().find(|(p, _)| p == pos) else { continue };
+                write_entry(&mut writer, lemma, pos, entry)?;
+            }
+        }
+        XmlOrder::Storage => {
+            // The sections in key order, so the output does not depend on how they are kept
+            let mut keys: Vec<char> = Vec::new();
+            for bucket in wn.entries_iter()? {
+                keys.push(bucket?.0);
+            }
+            keys.sort();
+            for key in keys {
+                let Some(bucket) = wn.entries_get(key)? else { continue };
+                for e in bucket.entries()? {
+                    let (lemma, pos, entry) = e?;
+                    write_entry(&mut writer, &lemma, &pos, &entry)?;
+                }
+            }
+        }
     }
 
     let mut n_new_pos = 0usize;
-    for id in &synset_ids {
-        let Some(synset) = wn.synset_by_id(id)? else { continue };
-        let member_synset = MemberSynset::from_synset(id, synset.into_owned(), wn)?;
+    let mut write_one_synset = |writer: &mut Writer<W>, id: &SynsetId, synset: crate::wordnet::Synset| -> Result<()> {
+        let member_synset = MemberSynset::from_synset(id, synset, wn)?;
         if member_synset.part_of_speech.is_new_in_lmf_1_5() {
             n_new_pos += 1;
         }
-        write_synset(&mut writer, prefix, &member_synset, &metadata.language, version)?;
+        write_synset(writer, prefix, &member_synset, &metadata.language, version)
+    };
+    match order {
+        XmlOrder::ById => {
+            for id in &synset_ids {
+                let Some(synset) = wn.synset_by_id(id)? else { continue };
+                write_one_synset(&mut writer, id, synset.into_owned())?;
+            }
+        }
+        XmlOrder::Storage => {
+            // The lexfiles in name order, so the output does not depend on how they are kept
+            let mut lexfiles: Vec<String> = Vec::new();
+            for lexfile in wn.synsets_iter()? {
+                lexfiles.push(lexfile?.0.clone());
+            }
+            lexfiles.sort();
+            for lexfile in lexfiles {
+                let Some(syns) = wn.synsets_get(&lexfile)? else { continue };
+                for s in syns.iter()? {
+                    let (id, synset) = s?;
+                    write_one_synset(&mut writer, &id, synset.into_owned())?;
+                }
+            }
+        }
     }
     write_document_end(&mut writer, &frames)?;
     writer.into_inner().flush().map_err(quick_xml::Error::from)?;
