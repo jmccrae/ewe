@@ -5,6 +5,7 @@ extern crate serde_yaml;
 
 mod commands;
 mod common;
+mod db;
 mod indicatif_progress;
 
 use clap::{Parser, Subcommand};
@@ -26,6 +27,27 @@ struct EweCli {
     /// Optional path to the WordNet database, available in all modes
     #[arg(long, global = true, value_name = "PATH")]
     wordnet: Option<PathBuf>,
+    /// Keep the wordnet in an on-disk database read through a bounded cache instead of loading
+    /// it into memory. Needed for very large wordnets (e.g. Open English Namenet). Currently
+    /// used by `export`; the database is built from the YAML on first use and reused while it
+    /// is newer than the source.
+    #[arg(long, global = true)]
+    low_memory: bool,
+    /// Where `--low-memory` keeps its database (default: a file in the user cache directory)
+    #[arg(long, global = true, value_name = "PATH", requires = "low_memory")]
+    db: Option<PathBuf>,
+    /// Size of the database page cache in MiB with `--low-memory`
+    #[arg(long, global = true, value_name = "MB", default_value_t = 512, requires = "low_memory")]
+    cache_mb: usize,
+}
+
+impl EweCli {
+    fn low_memory(&self) -> Option<common::LowMemory> {
+        self.low_memory.then(|| common::LowMemory {
+            db: self.db.clone(),
+            cache_mb: self.cache_mb,
+        })
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -136,6 +158,9 @@ enum Command {
 
 fn main() {
     let cli = EweCli::parse();
+    if cli.low_memory && !matches!(cli.command, Some(Command::Export { .. })) {
+        eprintln!("Note: --low-memory currently only applies to `export`; loading the wordnet into memory.");
+    }
     match &cli.command {
         Some(Command::Automaton { ref script }) => {
             commands::automaton::run(script, cli.wordnet);
@@ -178,7 +203,7 @@ fn main() {
                 confidence: *confidence,
                 lmf_version: *lmf_version,
             };
-            commands::export::run_xml(path, metadata, *names, cli.wordnet);
+            commands::export::run_xml(path, metadata, *names, cli.wordnet.clone(), cli.low_memory());
         }
         Some(Command::Export {
             format:
@@ -188,7 +213,7 @@ fn main() {
                     names,
                 },
         }) => {
-            commands::export::run_wndb(path, license_file.clone(), *names, cli.wordnet);
+            commands::export::run_wndb(path, license_file.clone(), *names, cli.wordnet.clone(), cli.low_memory());
         }
         Some(Command::Export {
             format:
@@ -223,7 +248,7 @@ fn main() {
                     lmf_version: Default::default(),
                 },
             };
-            commands::export::run_rdf(path, options, *names, cli.wordnet);
+            commands::export::run_rdf(path, options, *names, cli.wordnet.clone(), cli.low_memory());
         }
         Some(Command::Import {
             format: ImportFormat::Xml { ref path },

@@ -2,7 +2,7 @@
 
 use crate::indicatif_progress::IndicatifProgress;
 use ewe_lib::progress::NullProgress;
-use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, SenseId, Synset, SynsetId};
+use ewe_lib::wordnet::{Lexicon, LexiconHashMapBackend, ReDBLexicon, SenseId, Synset, SynsetId};
 use ewe_lib::validate::{validate_with, ValidationOptions};
 use std::collections::HashMap;
 use std::io;
@@ -118,20 +118,85 @@ fn count_lexfiles(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
-pub(crate) fn locate_wordnet(
-    path: Option<PathBuf>,
-) -> Result<(String, LexiconHashMapBackend), String> {
+/// The wordnet loaded either wholly into memory or, with `--low-memory`, into an on-disk
+/// database whose page cache is bounded (see [`LowMemory`]).
+pub(crate) enum Loaded {
+    Memory(LexiconHashMapBackend),
+    Disk(ReDBLexicon, LowMemory),
+}
+
+/// Settings for the on-disk (`--low-memory`) backend
+#[derive(Clone, Debug)]
+pub(crate) struct LowMemory {
+    /// Where the database is kept; `None` for the default location in the user cache directory
+    pub db: Option<PathBuf>,
+    /// Bound on the database page cache, in MiB
+    pub cache_mb: usize,
+}
+
+/// The directory holding the YAML files for the `--wordnet` option (see
+/// [`resolve_wordnet_dir`]), with a trailing `/`. Prints which folder was chosen.
+pub(crate) fn resolve_wordnet_path(path: Option<PathBuf>) -> Result<String, String> {
     let dir = resolve_wordnet_dir(path.as_deref())?;
     eprintln!("Loading wordnet from {} ({} lexicographer files)", dir.display(), count_lexfiles(&dir));
     let mut path = dir.to_string_lossy().to_string();
     if !path.ends_with('/') {
         path.push('/');
     }
+    Ok(path)
+}
+
+pub(crate) fn locate_wordnet(
+    path: Option<PathBuf>,
+) -> Result<(String, LexiconHashMapBackend), String> {
+    let path = resolve_wordnet_path(path)?;
     let mut progress = NullProgress;
     let wn = LexiconHashMapBackend::new()
         .load(&path, &mut progress)
         .map_err(|e| format!("Could not load WordNet from {}: {}", path, e))?;
     Ok((path, wn))
+}
+
+/// As [`locate_wordnet`], but with `low_memory` the wordnet is read from a database on disk
+/// instead of being loaded into RAM (see [`crate::db`]).
+pub(crate) fn locate_wordnet_with(
+    path: Option<PathBuf>,
+    low_memory: Option<LowMemory>,
+) -> Result<(String, Loaded), String> {
+    match low_memory {
+        None => locate_wordnet(path).map(|(p, wn)| (p, Loaded::Memory(wn))),
+        Some(options) => {
+            let path = resolve_wordnet_path(path)?;
+            let wn = crate::db::open(&path, &options)?;
+            Ok((path, Loaded::Disk(wn, options)))
+        }
+    }
+}
+
+/// Restrict a wordnet to the chosen names. In low-memory mode the restricted copy is written to
+/// a second on-disk database (deleted when the returned guard is dropped) rather than into RAM.
+pub(crate) fn apply_names_disk(
+    wn: ReDBLexicon,
+    names: NamesArg,
+    options: &LowMemory,
+) -> (ReDBLexicon, Option<crate::db::TempDb>) {
+    if names == NamesArg::Include {
+        return (wn, None);
+    }
+    let temp = crate::db::TempDb::new(options).unwrap_or_else(|e| {
+        eprintln!("Could not create a temporary database: {}", e);
+        exit(-1);
+    });
+    let out = ReDBLexicon::create(temp.path(), options.cache_mb * 1024 * 1024).unwrap_or_else(|e| {
+        eprintln!("Could not create a temporary database: {}", e);
+        exit(-1);
+    });
+    let restricted = ewe_lib::names::restrict_names_into(&wn, names.into(), out).unwrap_or_else(|e| {
+        eprintln!("Could not select names: {}", e);
+        exit(-1);
+    });
+    drop(wn);
+    (restricted, Some(temp))
 }
 
 /// The `[validation]` options from the project `settings.toml` for the YAML folder `path` (see

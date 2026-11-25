@@ -319,14 +319,46 @@ pub struct SenseRelation {
 impl MemberSynset {
     pub fn from_synset<L : Lexicon>(synset_id : &SynsetId, 
         synset : Synset, lexicon : &L) -> Result<MemberSynset> {
+        Self::build(synset_id, synset, lexicon, None)
+    }
+
+    /// Only what is needed to write one sense of an entry: the synset with just that sense as
+    /// its member, and just that sense's relations. The entry is given, so nothing is read for
+    /// the synset's other members, and the synset's own incoming links are left out - on a
+    /// database those reads are random, and a hub synset has thousands of them.
+    pub fn for_sense<L : Lexicon>(synset_id : &SynsetId, synset : Synset, lexicon : &L,
+        lemma : &str, poskey : &PosKey, entry : &Entry, sense : &Sense) -> Result<MemberSynset> {
+        Self::build(synset_id, synset, lexicon, Some((lemma, poskey, entry, &sense.id)))
+    }
+
+    fn build<L : Lexicon>(synset_id : &SynsetId, 
+        synset : Synset, lexicon : &L,
+        only : Option<(&str, &PosKey, &Entry, &SenseId)>) -> Result<MemberSynset> {
         let mut members = Vec::new();
         let mut sense_links = HashMap::new();
         let mut inv_sense_links = HashMap::new();
         for m in synset.members.iter() {
-            for (poskey, entry) in lexicon.entry_by_lemma_with_pos(m)? {
+            let entries : Vec<(PosKey, std::borrow::Cow<Entry>)> = match only {
+                Some((lemma, poskey, entry, _)) => {
+                    if m != lemma {
+                        continue;
+                    }
+                    vec![(poskey.clone(), std::borrow::Cow::Borrowed(entry))]
+                }
+                None => lexicon.entries_for_synset(m, synset_id)?
+                    .into_iter()
+                    .map(|(p, e)| (p, std::borrow::Cow::Owned(e)))
+                    .collect(),
+            };
+            for (poskey, entry) in entries {
                 for sense in entry.sense.iter() {
                     if &sense.synset != synset_id {
                         continue;
+                    }
+                    if let Some((_, _, _, sense_id)) = only {
+                        if &sense.id != sense_id {
+                            continue;
+                        }
                     }
                     members.push(Member {
                         lemma: m.clone(),
@@ -442,7 +474,7 @@ impl MemberSynset {
                 }
             }
         }
-        let links_to = lexicon.links_to_get(synset_id)?;
+        let links_to = if only.is_some() { None } else { lexicon.links_to_get(synset_id)? };
         let mut links = HashMap::new();
         if let Some(links_to) = links_to {
             for (rel, target) in links_to.into_owned().into_iter() {
@@ -461,7 +493,7 @@ impl MemberSynset {
         Ok(MemberSynset {
             members,
             id: synset_id.clone(),
-            lexname: lexicon.lex_name_for(synset_id)?.unwrap_or("".to_string()),
+            lexname: if only.is_some() { String::new() } else { lexicon.lex_name_for(synset_id)?.unwrap_or("".to_string()) },
             definition: synset.definition,
             example: synset.example,
             ili: synset.ili,

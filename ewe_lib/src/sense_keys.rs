@@ -97,7 +97,7 @@ lazy_static! {
     static ref SENSE_ID_LEX_ID: Regex = Regex::new("^.*%\\d:\\d\\d:(\\d\\d):.*$").unwrap();
 }
 
-fn gen_lex_id<L: Lexicon>(wn: &L, lemma: &str) -> Result<i32> {
+pub(crate) fn gen_lex_id<L: Lexicon>(wn: &L, lemma: &str) -> Result<i32> {
     let mut max_id = -1;
     for e in wn.entry_by_lemma_ignore_case(lemma)? {
         for s2 in e.sense.iter() {
@@ -233,6 +233,37 @@ pub fn get_sense_key<L: Lexicon>(
         Some(sense_key) => extract_lex_id(sense_key),
         None => gen_lex_id(wn, &lemma)?,
     };
+    sense_key_with_lex_id(wn, lemma, lex_id, ss_type, lex_filenum, synset)
+}
+
+/// The sense key for a given lex id (see [`get_sense_key`], which works that out)
+pub(crate) fn get_sense_key_with_lex_id<L: Lexicon>(
+    wn: &L,
+    lemma: &str,
+    lex_id: i32,
+    synset: &Synset,
+    synset_id: &SynsetId,
+) -> Result<SenseId> {
+    let ss_type = synset
+        .part_of_speech
+        .ss_type()
+        .ok_or_else(|| LexiconError::NoSenseKeyType(synset.part_of_speech.value().to_string()))?;
+    let lex_filenum = wn
+        .lex_name_for(synset_id)?
+        .and_then(|lex_name| LEX_FILENUMS.get(lex_name.as_str()))
+        .map(|x| *x)
+        .unwrap_or(99);
+    sense_key_with_lex_id(wn, lemma, lex_id, ss_type, lex_filenum, synset)
+}
+
+fn sense_key_with_lex_id<L: Lexicon>(
+    wn: &L,
+    lemma: &str,
+    lex_id: i32,
+    ss_type: u32,
+    lex_filenum: usize,
+    synset: &Synset,
+) -> Result<SenseId> {
     // Escape literal underscores first so they can't collide with the "_" used below for spaces.
     let lemma = lemma.replace("_", "-lowbar-").replace(" ", "_").replace("&apos", "'").to_lowercase();
     let (head_word, head_id) = if synset.part_of_speech == PartOfSpeech::s {

@@ -62,6 +62,25 @@ const SCHEMA_VERSION_KEY: &'static str = "version";
 /// which section a lemma is filed under; 4 = `Entry::reconstructed`, `Member::reconstructed` (#54).
 pub const SCHEMA_VERSION: u32 = 4;
 
+/// The entry of a lemma (one per part of speech), from the read cache if it is on
+fn load_entry(manager : &mut TransactionManager, key : char, lemma : &str)
+    -> Result<std::sync::Arc<Vec<(PosKey, Entry)>>> {
+    if let Some(cached) = manager.cached_entry(key, lemma) {
+        return Ok(cached);
+    }
+    let txn = manager.begin_read()?;
+    let table = txn.open_table(ENTRIES_TABLE)?;
+    let found = match table.get((key, lemma.to_string()))? {
+        Some(entry_str) => deserialize_entry(entry_str.value())?.into_iter().collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    drop(table);
+    drop(txn);
+    let found = std::sync::Arc::new(found);
+    manager.cache_entry(key, lemma, &found);
+    Ok(found)
+}
+
 pub struct ReDBLexicon {
     txn_manager: Arc<Mutex<TransactionManager>>,
     entries: HashMap<char, ReDBEntries>,
@@ -73,6 +92,13 @@ impl ReDBLexicon {
     /// Load an existing database from disk. `cache_size_bytes` bounds redb's
     /// in-memory page cache, which otherwise defaults to 1GiB regardless of
     /// how large the database file actually is.
+    /// Cache what is read from the database, for a pass that only reads it (see
+    /// [`crate::wordnet::transaction_manager::ReadCache`]). Writing still works, and empties
+    /// the cache.
+    pub fn enable_read_cache(&self) {
+        self.txn_manager.lock().unwrap().enable_read_cache();
+    }
+
     pub fn open<P: AsRef<Path>>(path : P, cache_size_bytes: usize) -> Result<ReDBLexicon> {
         // create database
         //
@@ -151,6 +177,13 @@ impl ReDBLexicon {
             synsets,
             lemma_index: Default::default(),
         })
+    }
+
+    /// Trade durability for speed while loading a database that is rebuilt from source if the
+    /// load does not complete (see `TransactionManager::set_bulk_load`). `set_bulk_load(false)`
+    /// syncs everything written since.
+    pub fn set_bulk_load(&self, on: bool) -> Result<()> {
+        self.txn_manager.lock().unwrap().set_bulk_load(on)
     }
 
     /// Create a new database, deleting the existing file if necessary.
@@ -300,7 +333,14 @@ impl Lexicon for ReDBLexicon {
         Ok(self.synsets.iter().map(|(k, v)| Ok((k, Cow::Borrowed(v)))))
     }
     fn update_synset(&mut self, synset_id : &SynsetId, f : impl FnOnce(&mut Synset)) -> Result<()> {
-        let lexfile_opt = self.synset_id_to_lexfile_get(synset_id)?.map(|x| x.into_owned());
+        // Look up through the write transaction: a read would commit it, once per update
+        let lexfile_opt = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            let txn = manager.begin_write()?;
+            let table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
+            let x = table.get(synset_id.to_string())?.map(|l| l.value());
+            x
+        };
         let res = if let Some(lexfile) = lexfile_opt {
             if let Some(synsets) = self.synsets.get_mut(&lexfile) {
                 synsets.update(synset_id, f)?;
@@ -354,13 +394,17 @@ impl Lexicon for ReDBLexicon {
 
     fn synset_id_to_lexfile_get<'a>(&'a self, synset_id : &SynsetId) -> Result<Option<Cow<'a, String>>> {
         let mut manager = self.txn_manager.lock().unwrap();
+        if let Some(cached) = manager.cached_lexfile(synset_id.as_str()) {
+            return Ok(Some(Cow::Owned(cached)));
+        }
         let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSET_ID_TO_LEXFILE)?;
-        if let Some(lexfile) = table.get(synset_id.to_string())? {
-            Ok(Some(Cow::Owned(lexfile.value())))
-        } else {
-            Ok(None)
+        let found = table.get(synset_id.to_string())?.map(|l| l.value());
+        drop(table);
+        if let Some(lexfile) = &found {
+            manager.cache_lexfile(synset_id.as_str(), lexfile);
         }
+        Ok(found.map(Cow::Owned))
     }
     fn synset_id_to_lexfile_insert(&mut self, synset_id : SynsetId, lexfile : String) -> Result<()> {
         let mut manager = self.txn_manager.lock().unwrap();
@@ -450,6 +494,57 @@ impl Lexicon for ReDBLexicon {
         table.retain(|_,_| false)?; // Clear all existing entries
         for (sense_id, links) in links_to {
             table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
+        }
+        Ok(())
+    }
+    fn entries_for_synset(&self, lemma : &str, synset_id : &SynsetId) -> Result<Vec<(PosKey, Entry)>> {
+        let found = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            load_entry(&mut manager, crate::wordnet::section::entry_key(lemma), lemma)?
+        };
+        let mut out = Vec::new();
+        for (pos, entry) in found.iter() {
+            if entry.sense.iter().any(|s| &s.synset == synset_id) {
+                out.push((pos.clone(), entry.only_synset(synset_id)));
+            }
+        }
+        Ok(out)
+    }
+    fn get_sense_by_id<'a>(&'a self, sense_id : &SenseId) -> Result<Option<(String, PosKey, Cow<'a, Sense>)>> {
+        let Some((lemma, pos)) = self.sense_id_to_lemma_pos_get(sense_id)? else { return Ok(None) };
+        let found = {
+            let mut manager = self.txn_manager.lock().unwrap();
+            load_entry(&mut manager, crate::wordnet::section::entry_key(&lemma), &lemma)?
+        };
+        for (pos2, entry) in found.iter() {
+            if *pos2 == pos {
+                if let Some(sense) = entry.sense.iter().find(|s| &s.id == sense_id) {
+                    return Ok(Some((lemma, pos, Cow::Owned(sense.clone()))));
+                }
+            }
+        }
+        Ok(None)
+    }
+    fn bulk_load_passes(&self) -> Result<usize> {
+        // The reverse indexes are built a few million synsets at a time
+        const SYNSETS_PER_PASS: usize = 2_500_000;
+        Ok(self.n_synsets()?.div_ceil(SYNSETS_PER_PASS).clamp(1, 32))
+    }
+    fn extend_sense_links_to(&mut self, links_to : HashMap<SenseId, Vec<(SenseRelType, SenseId)>>) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(SENSE_LINKS)?;
+        for (sense_id, links) in links_to {
+            table.insert(sense_id.to_string(), serialize_sense_links(links)?)?;
+        }
+        Ok(())
+    }
+    fn extend_links_to(&mut self, links_to : HashMap<SynsetId, Vec<(SynsetRelType, SynsetId)>>) -> Result<()> {
+        let mut manager = self.txn_manager.lock().unwrap();
+        let txn = manager.begin_write()?;
+        let mut table = txn.open_table(LINKS_TO)?;
+        for (synset_id, links) in links_to {
+            table.insert(synset_id.to_string(), serialize_links(links)?)?;
         }
         Ok(())
     }
@@ -878,14 +973,8 @@ impl Entries for ReDBEntries {
     }
     fn entry_by_lemma_with_pos<'a>(&'a self, lemma : &str) -> Result<Vec<(PosKey, Cow<'a, Entry>)>> {
         let mut manager = self.txn_manager.lock().unwrap();
-        let txn = manager.begin_read()?;
-        let table = txn.open_table(ENTRIES_TABLE)?;
-        if let Some(entry_str) = table.get((self.key, lemma.to_string()))? {
-            let entry_map = deserialize_entry(entry_str.value())?;
-            Ok(entry_map.into_iter().map(|(p,e)| (p, Cow::Owned(e))).collect())
-        } else {
-            Ok(Vec::new())
-        }
+        let found = load_entry(&mut manager, self.key, lemma)?;
+        Ok(found.iter().map(|(p, e)| (p.clone(), Cow::Owned(e.clone()))).collect())
     }
     fn entry_by_lemma_ignore_case<'a>(&'a self, lemma : &str) -> Result<Vec<Cow<'a, Entry>>> {
         let lemmas = {
@@ -1014,12 +1103,14 @@ impl ReDBSynsets {
         // Step 1: read the current synset under the transaction manager lock
         let mut synset = {
             let mut manager = self.txn_manager.lock().unwrap();
-            let txn = manager.begin_read()?;
+            // Read through the write transaction: a read transaction would commit it
+            let txn = manager.begin_write()?;
             let table = txn.open_table(SYNSETS_TABLE)?;
-            if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
-                deserialize_synset(synset_str.value())?
-            } else {
-                return Err(LexiconError::SynsetIdNotFound(id.clone()));
+            let found = table.get((self.lexname.clone(), id.to_string()))?
+                .map(|v| deserialize_synset(v.value()));
+            match found {
+                Some(x) => x?,
+                None => return Err(LexiconError::SynsetIdNotFound(id.clone())),
             }
         };
         let old_ili = synset.ili.as_ref().map(|ili| ili.as_str().to_string()).filter(|i| !i.is_empty());
@@ -1052,14 +1143,20 @@ impl ReDBSynsets {
 impl Synsets for ReDBSynsets {
     fn get<'a>(&'a self, id : &SynsetId) -> Result<Option<Cow<'a, Synset>>> {
         let mut manager = self.txn_manager.lock().unwrap();
+        if let Some(cached) = manager.cached_synset(&self.lexname, id.as_str()) {
+            return Ok(Some(Cow::Owned(cached)));
+        }
         let txn = manager.begin_read()?;
         let table = txn.open_table(SYNSETS_TABLE)?;
-        if let Some(synset_str) = table.get((self.lexname.clone(), id.to_string()))? {
-            let synset = deserialize_synset(synset_str.value())?;
-            Ok(Some(Cow::Owned(synset)))
-        } else {
-            Ok(None)
+        let found = match table.get((self.lexname.clone(), id.to_string()))? {
+            Some(synset_str) => Some(deserialize_synset(synset_str.value())?),
+            None => None,
+        };
+        drop(table);
+        if let Some(synset) = &found {
+            manager.cache_synset(&self.lexname, id.as_str(), synset);
         }
+        Ok(found.map(Cow::Owned))
     }
    fn iter<'a>(&'a self) -> Result<impl Iterator<Item=Result<(SynsetId, Cow<'a, Synset>)>> + 'a> {
         let mut manager = self.txn_manager.lock().unwrap();
