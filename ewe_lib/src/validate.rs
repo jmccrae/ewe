@@ -8,7 +8,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use crate::change_manager;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Which optional checks `validate_with` should skip. The default runs every check.
 ///
@@ -47,6 +47,8 @@ struct SettingsFile {
     validation: ValidationOptions,
     #[serde(default)]
     language: Option<String>,
+    #[serde(default)]
+    wordnet_source: Option<String>,
 }
 
 /// Whether a BCP 47 language code is English (`en`, `en-GB`, ...).
@@ -86,6 +88,20 @@ impl ValidationOptions {
             }
         }
         Ok(None)
+    }
+
+    /// The `wordnet_source` of the `settings.toml` directly in `project_dir`, resolved
+    /// against that folder. `None` if there is no such file or it sets none.
+    pub fn wordnet_source_in(project_dir: &Path) -> std::result::Result<Option<PathBuf>, String> {
+        let candidate = project_dir.join("settings.toml");
+        if !candidate.is_file() {
+            return Ok(None);
+        }
+        let contents = std::fs::read_to_string(&candidate)
+            .map_err(|e| format!("Could not read {}: {}", candidate.display(), e))?;
+        let settings = toml::from_str::<SettingsFile>(&contents)
+            .map_err(|e| format!("Invalid {}: {}", candidate.display(), e))?;
+        Ok(settings.wordnet_source.map(|s| project_dir.join(s)))
     }
 
     /// Reads the `[validation]` table from the `settings.toml` at `path`.

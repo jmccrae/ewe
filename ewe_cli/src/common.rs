@@ -70,27 +70,63 @@ pub(crate) fn apply_names(wn: LexiconHashMapBackend, names: NamesArg) -> Lexicon
     })
 }
 
+/// The YAML folder of the wordnet at `path` (or the current directory), tried in this order:
+///
+/// 1. `path` itself, if it is a YAML folder;
+/// 2. the `wordnet_source` of `path/settings.toml`, relative to that file, which must then be a
+///    YAML folder;
+/// 3. `path/src/yaml`.
+///
+/// With no `path`, the current directory is used in the same way.
+pub(crate) fn resolve_wordnet_dir(path: Option<&Path>) -> Result<PathBuf, String> {
+    let dir = path.unwrap_or(Path::new("."));
+    if looks_like_wordnet_dir(dir) {
+        return Ok(dir.to_path_buf());
+    }
+    if let Some(source) = ValidationOptions::wordnet_source_in(dir)? {
+        return if looks_like_wordnet_dir(&source) {
+            Ok(source)
+        } else {
+            Err(format!(
+                "{} sets wordnet_source to {}, which is not a wordnet YAML folder",
+                dir.join("settings.toml").display(),
+                source.display()
+            ))
+        };
+    }
+    let src_yaml = dir.join("src/yaml");
+    if looks_like_wordnet_dir(&src_yaml) {
+        return Ok(src_yaml);
+    }
+    match path {
+        Some(path) => Err(format!("Could not find WordNet at {}", path.display())),
+        None => Err("Please specify WordNet home".to_owned()),
+    }
+}
+
+/// The number of lexicographer (synset) files in the YAML folder `dir`
+fn count_lexfiles(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|d| {
+            d.flatten()
+                .filter(|f| {
+                    let n = f.file_name().to_string_lossy().to_string();
+                    n.ends_with(".yaml") && !n.starts_with("entries-") && n != "frames.yaml"
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 pub(crate) fn locate_wordnet(
     path: Option<PathBuf>,
 ) -> Result<(String, LexiconHashMapBackend), String> {
-    let path = if let Some(path) = path {
-        if looks_like_wordnet_dir(&path) {
-            path.to_string_lossy().to_string()
-        } else if looks_like_wordnet_dir(&path.join("src/yaml")) {
-            path.join("src/yaml/").to_string_lossy().to_string()
-        } else {
-            return Err(format!(
-                "Could not find WordNet at {}",
-                path.to_string_lossy()
-            ));
-        }
-    } else if looks_like_wordnet_dir(Path::new("./src/yaml")) {
-        "./src/yaml/".to_owned()
-    } else if looks_like_wordnet_dir(Path::new("./")) {
-        "./".to_owned()
-    } else {
-        return Err(format!("Please specify WordNet home"));
-    };
+    let dir = resolve_wordnet_dir(path.as_deref())?;
+    eprintln!("Loading wordnet from {} ({} lexicographer files)", dir.display(), count_lexfiles(&dir));
+    let mut path = dir.to_string_lossy().to_string();
+    if !path.ends_with('/') {
+        path.push('/');
+    }
     let mut progress = NullProgress;
     let wn = LexiconHashMapBackend::new()
         .load(&path, &mut progress)
@@ -238,4 +274,55 @@ pub(crate) fn print_synset(
     }
 
     println!("");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh, empty folder for one test
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ewe-cli-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn make_yaml_dir(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("frames.yaml"), "").unwrap();
+    }
+
+    #[test]
+    fn test_wordnet_source_from_settings_wins_over_src_yaml() {
+        let root = scratch("source-wins");
+        make_yaml_dir(&root.join("src/yaml"));
+        make_yaml_dir(&root.join("src/yaml-full"));
+        std::fs::write(root.join("settings.toml"), "wordnet_source = \"src/yaml-full\"\n").unwrap();
+        assert_eq!(resolve_wordnet_dir(Some(&root)).unwrap(), root.join("src/yaml-full"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_missing_wordnet_source_is_an_error() {
+        let root = scratch("source-missing");
+        make_yaml_dir(&root.join("src/yaml"));
+        std::fs::write(root.join("settings.toml"), "wordnet_source = \"nowhere\"\n").unwrap();
+        let err = resolve_wordnet_dir(Some(&root)).unwrap_err();
+        assert!(err.contains("wordnet_source"), "{}", err);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_falls_back_to_src_yaml_and_accepts_a_yaml_folder() {
+        let root = scratch("fallback");
+        make_yaml_dir(&root.join("src/yaml"));
+        // A settings file without wordnet_source
+        std::fs::write(root.join("settings.toml"), "language = \"en\"\n").unwrap();
+        assert_eq!(resolve_wordnet_dir(Some(&root)).unwrap(), root.join("src/yaml"));
+        let yaml = root.join("src/yaml");
+        assert_eq!(resolve_wordnet_dir(Some(&yaml)).unwrap(), yaml);
+        assert!(resolve_wordnet_dir(Some(&root.join("src"))).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

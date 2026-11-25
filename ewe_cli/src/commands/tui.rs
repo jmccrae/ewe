@@ -1,6 +1,6 @@
 //! The interactive terminal menu shown when `ewe` is run with no subcommand.
 
-use crate::common::{input, load_validation_options, looks_like_wordnet_dir, save};
+use crate::common::{input, load_validation_options, resolve_wordnet_dir, save};
 use crate::indicatif_progress::IndicatifProgress;
 use ewe_lib::change_manager;
 use ewe_lib::change_manager::ChangeList;
@@ -655,25 +655,28 @@ pub(crate) fn run() {
     println!("    II  II                               ");
     println!("");
 
-    let path = if looks_like_wordnet_dir(Path::new("./src/yaml")) {
-        "./src/yaml/".to_owned()
-    } else if looks_like_wordnet_dir(Path::new("./")) {
-        "./".to_owned()
-    } else {
-        let mut s = input("WordNet Home Folder: ");
-        while !looks_like_wordnet_dir(Path::new(&s)) && !looks_like_wordnet_dir(&Path::new(&s).join("src/yaml")) {
-            println!("Could not find WordNet at this path.");
-            s = input("WordNet Home Folder: ");
-        }
-        if looks_like_wordnet_dir(Path::new(&s)) {
-            s
-        } else {
-            Path::new(&s)
-                .join("src/yaml/")
-                .to_string_lossy()
-                .to_string()
+    let dir = match resolve_wordnet_dir(None) {
+        Ok(dir) => dir,
+        Err(e) => {
+            if e.contains("wordnet_source") {
+                println!("{}", e);
+            }
+            let mut s = input("WordNet Home Folder: ");
+            loop {
+                match resolve_wordnet_dir(Some(Path::new(&s))) {
+                    Ok(dir) => break dir,
+                    Err(e) => {
+                        println!("{}", e);
+                        s = input("WordNet Home Folder: ");
+                    }
+                }
+            }
         }
     };
+    let mut path = dir.to_string_lossy().to_string();
+    if !path.ends_with('/') {
+        path.push('/');
+    }
 
     let mut progress = IndicatifProgress::new();
     let mut wn = LexiconHashMapBackend::new()
