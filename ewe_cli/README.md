@@ -44,6 +44,19 @@ EWE can be built with Cargo as follows
 
     cargo build --release
 
+Choosing the wordnet
+--------------------
+
+Commands that take `--wordnet <dir>` (and the interactive editor, which uses the current
+directory) look for the wordnet's YAML folder in this order:
+
+1. `<dir>` itself, if it is a YAML folder (it has `frames.yaml` or an `entries-*.yaml` file);
+2. the `wordnet_source` set in `<dir>/settings.toml`, relative to that file. If it is set but
+   is not a YAML folder, EWE stops with an error instead of using another folder;
+3. `<dir>/src/yaml`.
+
+The chosen folder and its number of lexicographer files are printed when a command starts.
+
 Automating EWE
 --------------
 
