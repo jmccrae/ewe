@@ -197,6 +197,35 @@ direction: saving once rewrites the files. In memory nothing changes, and relati
 inverse form (`feminine`, `masculine`, `other`) stay in the common files with a warning. Loading
 only the common files gives the same wordnet as `--names exclude`.
 
+## Very large wordnets (`--low-memory`)
+
+`ewe export xml` normally loads the whole wordnet into memory, which needs several GB for the
+Open English Wordnet and far more than a workstation has for one with every name in it (Open
+English Namenet: about 23M synsets and 26M entries, over 4 GB of YAML). `--low-memory` keeps it
+in an on-disk database instead and reads it through a bounded page cache:
+
+```
+ewe --wordnet english-namenet --low-memory export xml namenet.xml --names merged --lmf-version 1.5
+```
+
+- The database is built from the YAML on first use (a one-off; about an hour for Namenet) and
+  reused for as long as it is newer than every source file. It lives in the user cache directory,
+  or at `--db PATH`; it is roughly 40 GB for Namenet, so check the disk. `--cache-mb` (default
+  512) bounds its page cache.
+- `--names` works as usual. A restricted copy is made in a temporary database next to the main
+  one and deleted afterwards, so allow room for that too.
+- The XML is written straight to the file in storage order (entries by lemma, synsets by lexfile
+  and then id) rather than sorted by `@id`, so that no list of ids has to be held. It is the same
+  document, in a different order, as an export without `--low-memory`.
+- Only `export` uses it so far (`xml`; `wndb` and `rdf` still collect the result in memory, and
+  `validate`, `stats` and the others load the wordnet as before).
+
+Measured on Open English Namenet (23.5M synsets, 26.3M entries) with `--names merged
+--lmf-version 1.5`, writing a 17.7 GB file: peak memory 6.4 GB, 2.5 hours for the export once the
+database existed (NVMe disk, default cache).
+For a small wordnet `--low-memory` is slower than the in-memory
+path, so only use it when memory is the problem.
+
 ## Non-interactive validation (CI)
 
 `ewe validate` runs validation without any prompting and exits with status `0` if there are no

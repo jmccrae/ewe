@@ -339,6 +339,18 @@ fn is_false(b : &bool) -> bool { !*b }
 impl Entry {
     pub fn new() -> Entry { Entry::default() }
 
+    /// This entry with only the senses in `synset_id`, without copying the others (a lemma can
+    /// have tens of thousands)
+    pub fn only_synset(&self, synset_id : &SynsetId) -> Entry {
+        Entry {
+            sense : self.sense.iter().filter(|s| &s.synset == synset_id).cloned().collect(),
+            form : self.form.clone(),
+            pronunciation : self.pronunciation.clone(),
+            confidence : self.confidence,
+            reconstructed : self.reconstructed,
+        }
+    }
+
     pub(crate) fn save<W : Write>(&self, w : &mut W) -> result::Result<(), LexiconSaveError> {
         if let Some(c) = self.confidence {
             write!(w, "    confidence: {}\n", format_confidence(c))?;
